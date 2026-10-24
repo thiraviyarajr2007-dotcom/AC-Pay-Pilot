@@ -1,0 +1,293 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // ===============================================================
+    // Helper Functions
+    // ===============================================================
+    function isAuthenticated() {
+      return request.auth != null;
+    }
+
+    function isOwner(userId) {
+      return isAuthenticated() && request.auth.uid == userId;
+    }
+
+    function userDocExists() {
+      return isAuthenticated() &&
+        exists(/databases/$(database)/documents/users/$(request.auth.uid));
+    }
+
+    function getUserRole() {
+      return userDocExists()
+        ? get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role
+        : 'customer';
+    }
+
+    function isCustomer() {
+      return isAuthenticated() && getUserRole() == 'customer';
+    }
+
+    function isSeller() {
+      return isAuthenticated() && getUserRole() == 'seller';
+    }
+
+    function isFinance() {
+      return isAuthenticated() && getUserRole() == 'finance';
+    }
+
+    function isBusinessHead() {
+      return isAuthenticated() && getUserRole() == 'business_head';
+    }
+
+    function isValidCurrency(curr) {
+      return curr in ['INR', 'USD'];
+    }
+
+    function isValidRole(r) {
+      return r in ['customer', 'seller', 'finance', 'business_head'];
+    }
+
+    function isBusinessOwner(bizId) {
+      return isAuthenticated() &&
+        exists(/databases/$(database)/documents/businesses/$(bizId)) &&
+        get(/databases/$(database)/documents/businesses/$(bizId)).data.ownerUid == request.auth.uid;
+    }
+
+    // ===============================================================
+    // Multi-Tenant: Businesses, Storefront, Sub-collections & Domains
+    // ===============================================================
+    match /businesses/{bizId} {
+      allow read: if true; // Public for storefront metadata & branding
+      allow create: if isAuthenticated() && request.resource.data.ownerUid == request.auth.uid;
+      allow update: if isAuthenticated() && (resource.data.ownerUid == request.auth.uid || isBusinessHead());
+      allow delete: if isAuthenticated() && resource.data.ownerUid == request.auth.uid;
+
+      match /storefrontConfig/{configId} {
+        allow read: if true; // Public for customer storefront rendering
+        allow create, update, delete: if isAuthenticated() &&
+          get(/databases/$(database)/documents/businesses/$(bizId)).data.ownerUid == request.auth.uid;
+      }
+
+      match /products/{productId} {
+        allow read: if true; // Public for customer catalog browsing
+        allow create, update, delete: if isAuthenticated() &&
+          get(/databases/$(database)/documents/businesses/$(bizId)).data.ownerUid == request.auth.uid;
+      }
+
+      match /orders/{orderId} {
+        // Business owner, finance, or customer by email/auth can read
+        allow read: if (isAuthenticated() && get(/databases/$(database)/documents/businesses/$(bizId)).data.ownerUid == request.auth.uid) ||
+          (isAuthenticated() && resource.data.customerEmail == request.auth.token.email) ||
+          isFinance() || isBusinessHead();
+        // Public checkout creation: any customer can place an order
+        allow create: if request.resource.data.total is int && request.resource.data.total >= 0;
+        // Only business owner, finance, or business head can update escrow/fulfillment status
+        allow update: if (isAuthenticated() && get(/databases/$(database)/documents/businesses/$(bizId)).data.ownerUid == request.auth.uid) ||
+          isFinance() || isBusinessHead();
+        allow delete: if false;
+      }
+    }
+
+    match /domains/{domain} {
+      allow read: if true; // Public for subdomain & custom domain routing
+      allow create, update: if isAuthenticated();
+      allow delete: if isAuthenticated();
+    }
+
+    // ===============================================================
+    // 1. users (role)
+    // ===============================================================
+    match /users/{userId} {
+      allow read: if isOwner(userId) || isFinance() || isBusinessHead();
+      allow create: if isOwner(userId) &&
+        request.resource.data.uid == userId &&
+        request.resource.data.email is string &&
+        request.resource.data.displayName is string &&
+        isValidRole(request.resource.data.role);
+      allow update: if isOwner(userId) &&
+        request.resource.data.uid == resource.data.uid &&
+        isValidRole(request.resource.data.role);
+      allow delete: if false;
+    }
+
+    // ===============================================================
+    // 2. products (sellers edit only their own products)
+    // ===============================================================
+    match /products/{productId} {
+      allow read: if isAuthenticated();
+      allow create: if isSeller() &&
+        request.resource.data.sellerId == request.auth.uid &&
+        request.resource.data.priceMinor is int &&
+        request.resource.data.priceMinor >= 0 &&
+        isValidCurrency(request.resource.data.currency);
+      allow update: if isSeller() &&
+        resource.data.sellerId == request.auth.uid &&
+        request.resource.data.sellerId == resource.data.sellerId &&
+        request.resource.data.priceMinor is int &&
+        request.resource.data.priceMinor >= 0;
+      allow delete: if isSeller() && resource.data.sellerId == request.auth.uid;
+    }
+
+    // ===============================================================
+    // 3. productAssets (sellers edit only their own product assets)
+    // ===============================================================
+    match /productAssets/{assetId} {
+      allow read: if isAuthenticated();
+      allow create: if isSeller() &&
+        request.resource.data.sellerId == request.auth.uid &&
+        request.resource.data.productId is string;
+      allow update: if isSeller() &&
+        resource.data.sellerId == request.auth.uid &&
+        request.resource.data.sellerId == resource.data.sellerId;
+      allow delete: if isSeller() && resource.data.sellerId == request.auth.uid;
+    }
+
+    // ===============================================================
+    // 4. inventory (sellers edit only their own inventory)
+    // ===============================================================
+    match /inventory/{inventoryId} {
+      allow read: if isAuthenticated();
+      allow create: if isSeller() &&
+        request.resource.data.sellerId == request.auth.uid &&
+        request.resource.data.availableQty is int &&
+        request.resource.data.availableQty >= 0;
+      allow update: if isSeller() &&
+        resource.data.sellerId == request.auth.uid &&
+        request.resource.data.sellerId == resource.data.sellerId &&
+        request.resource.data.availableQty is int &&
+        request.resource.data.availableQty >= 0;
+      allow delete: if isSeller() && resource.data.sellerId == request.auth.uid;
+    }
+
+    // ===============================================================
+    // 5. carts (customers read/write only their own carts; business_head reads)
+    // ===============================================================
+    match /carts/{cartId} {
+      allow read: if (isCustomer() && resource.data.customerId == request.auth.uid) || isBusinessHead();
+      allow create: if isCustomer() &&
+        request.resource.data.customerId == request.auth.uid &&
+        request.resource.data.budgetMinor is int &&
+        isValidCurrency(request.resource.data.currency);
+      allow update: if isCustomer() &&
+        resource.data.customerId == request.auth.uid &&
+        request.resource.data.customerId == resource.data.customerId &&
+        request.resource.data.budgetMinor is int;
+      allow delete: if isCustomer() && resource.data.customerId == request.auth.uid;
+    }
+
+    // ===============================================================
+    // 6. orders (customers read only their own orders; sellers see only their own orders; finance & business_head read)
+    // ===============================================================
+    match /orders/{orderId} {
+      allow read: if (isCustomer() && resource.data.customerId == request.auth.uid) ||
+        (isSeller() && resource.data.sellerId == request.auth.uid) ||
+        isFinance() ||
+        isBusinessHead();
+      allow create: if isCustomer() &&
+        request.resource.data.customerId == request.auth.uid &&
+        request.resource.data.totalMinor is int &&
+        request.resource.data.totalMinor >= 0 &&
+        isValidCurrency(request.resource.data.currency);
+      allow update: if (
+          (isCustomer() && resource.data.customerId == request.auth.uid) ||
+          (isSeller() && resource.data.sellerId == request.auth.uid) ||
+          isFinance()
+        ) &&
+        request.resource.data.customerId == resource.data.customerId &&
+        request.resource.data.sellerId == resource.data.sellerId &&
+        request.resource.data.totalMinor == resource.data.totalMinor;
+      allow delete: if false;
+    }
+
+    // ===============================================================
+    // 7. orderItems (same access boundaries as parent order)
+    // ===============================================================
+    match /orderItems/{itemId} {
+      allow read: if (isCustomer() && resource.data.customerId == request.auth.uid) ||
+        (isSeller() && resource.data.sellerId == request.auth.uid) ||
+        isFinance() ||
+        isBusinessHead();
+      allow create: if isCustomer() &&
+        request.resource.data.customerId == request.auth.uid &&
+        request.resource.data.quantity is int &&
+        request.resource.data.quantity > 0 &&
+        request.resource.data.totalMinor is int;
+      allow update, delete: if false;
+    }
+
+    // ===============================================================
+    // 8. payments (finance reads/writes; business_head reads; customer/seller read own)
+    // ===============================================================
+    match /payments/{paymentId} {
+      allow read: if isFinance() ||
+        isBusinessHead() ||
+        (isCustomer() && resource.data.customerId == request.auth.uid) ||
+        (isSeller() && resource.data.sellerId == request.auth.uid);
+      allow create, update: if isFinance() &&
+        request.resource.data.grossMinor is int &&
+        isValidCurrency(request.resource.data.currency);
+      allow delete: if false;
+    }
+
+    // ===============================================================
+    // 9. invoices (finance reads/writes; seller reads/writes own; customer reads own; business_head reads)
+    // ===============================================================
+    match /invoices/{invoiceId} {
+      allow read: if isFinance() ||
+        isBusinessHead() ||
+        (isSeller() && resource.data.sellerId == request.auth.uid) ||
+        (isCustomer() && resource.data.customerId == request.auth.uid);
+      allow create: if (isFinance() || (isSeller() && request.resource.data.sellerId == request.auth.uid)) &&
+        request.resource.data.totalMinor is int &&
+        isValidCurrency(request.resource.data.currency);
+      allow update: if (isFinance() || (isSeller() && resource.data.sellerId == request.auth.uid)) &&
+        request.resource.data.sellerId == resource.data.sellerId &&
+        request.resource.data.totalMinor is int;
+      allow delete: if false;
+    }
+
+    // ===============================================================
+    // 10. invoiceItems (finance reads/writes; seller reads/writes own; business_head reads)
+    // ===============================================================
+    match /invoiceItems/{itemId} {
+      allow read: if isFinance() ||
+        isBusinessHead() ||
+        (isSeller() && resource.data.sellerId == request.auth.uid);
+      allow create: if (isFinance() || (isSeller() && request.resource.data.sellerId == request.auth.uid)) &&
+        request.resource.data.totalMinor is int;
+      allow update: if (isFinance() || (isSeller() && resource.data.sellerId == request.auth.uid)) &&
+        request.resource.data.sellerId == resource.data.sellerId;
+      allow delete: if false;
+    }
+
+    // ===============================================================
+    // 11. refunds (finance reads/writes; seller/customer read own; business_head reads)
+    // ===============================================================
+    match /refunds/{refundId} {
+      allow read: if isFinance() ||
+        isBusinessHead() ||
+        (isCustomer() && resource.data.customerId == request.auth.uid) ||
+        (isSeller() && resource.data.sellerId == request.auth.uid);
+      allow create, update: if isFinance() &&
+        request.resource.data.amountMinor is int &&
+        request.resource.data.amountMinor > 0;
+      allow delete: if false;
+    }
+
+    // ===============================================================
+    // 12. escrowEvents (append-only audit trail; never updated or deleted)
+    // ===============================================================
+    match /escrowEvents/{eventId} {
+      allow read: if isFinance() ||
+        isBusinessHead() ||
+        (isCustomer() && resource.data.customerId == request.auth.uid) ||
+        (isSeller() && resource.data.sellerId == request.auth.uid);
+      allow create: if isAuthenticated() &&
+        request.resource.data.actorId == request.auth.uid &&
+        request.resource.data.reason is string &&
+        request.resource.data.toState in ['created', 'funded', 'in_delivery', 'released', 'disputed', 'refunded'];
+      allow update, delete: if false;
+    }
+  }
+}

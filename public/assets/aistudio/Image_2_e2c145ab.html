@@ -1,0 +1,510 @@
+<!DOCTYPE html>
+
+<html lang="en"><head><meta charset="utf-8"/><meta content="width=device-width, initial-scale=1.0" name="viewport"/><meta content="web_dashboard" name="shell-type"/><link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:opsz,wght,FILL,GRAD@20..48,100..700,0..1,-50..200" rel="stylesheet"/><link href="https://fonts.googleapis.com" rel="preconnect"/><link crossorigin="" href="https://fonts.gstatic.com" rel="preconnect"/><link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&amp;family=Plus+Jakarta+Sans:wght@600;700&amp;display=swap" rel="stylesheet"/>
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet"/><style>@layer base{html,body{margin:0;padding:0;}body{overscroll-behavior:none;}main>:first-child{margin-top:0!important;}main>:last-child{margin-bottom:0!important;}}::-webkit-scrollbar{display:none;}</style><script src="https://cdn.tailwindcss.com"></script><script id="tailwind-config">tailwind.config = { darkMode: "class", theme: { extend: { "colors": { "tertiary": "#3e3fcc", "on-secondary-fixed-variant": "#3f465c", "inverse-primary": "#b4c5ff", "surface-container-low": "#eff4ff", "primary-container": "#2563eb", "on-tertiary-fixed-variant": "#2f2ebe", "on-tertiary-fixed": "#07006c", "surface-container-highest": "#d3e4fe", "surface-container-lowest": "#ffffff", "on-secondary": "#ffffff", "primary-fixed-dim": "#b4c5ff", "surface-tint": "#0053db", "tertiary-fixed-dim": "#c0c1ff", "surface-bright": "#f8f9ff", "secondary-fixed": "#dae2fd", "inverse-on-surface": "#eaf1ff", "error-container": "#ffdad6", "inverse-surface": "#213145", "on-error": "#ffffff", "surface-container-high": "#dce9ff", "surface-container": "#e5eeff", "on-primary-container": "#eeefff", "secondary-fixed-dim": "#bec6e0", "on-surface-variant": "#434655", "on-primary-fixed": "#00174b", "outline-variant": "#c3c6d7", "on-secondary-container": "#5c647a", "on-background": "#0b1c30", "outline": "#737686", "secondary-container": "#dae2fd", "on-primary-fixed-variant": "#003ea8", "on-tertiary-container": "#f1eeff", "on-secondary-fixed": "#131b2e", "primary": "#004ac6", "tertiary-container": "#585be6", "surface": "#f8f9ff", "on-error-container": "#93000a", "error": "#ba1a1a", "on-tertiary": "#ffffff", "on-surface": "#0b1c30", "secondary": "#565e74", "surface-variant": "#d3e4fe", "surface-dim": "#cbdbf5", "background": "#f8f9ff", "primary-fixed": "#dbe1ff", "on-primary": "#ffffff", "tertiary-fixed": "#e1e0ff" }, "borderRadius": { "DEFAULT": "0.25rem", "lg": "0.5rem", "xl": "0.75rem", "full": "9999px" }, "spacing": { "margin": "1.5rem", "gutter": "1.5rem", "margin-desktop": "2.5rem", "margin-mobile": "1rem", "space-sm": "0.5rem", "space-xl": "2rem", "space-lg": "1.5rem", "gutter-sm": "1rem", "gutter-lg": "2rem", "space-md": "1rem", "space-xs": "0.25rem" }, "fontFamily": { "display-lg-mobile": [ "Plus Jakarta Sans" ], "headline-sm": [ "Plus Jakarta Sans" ], "headline-xl": [ "Plus Jakarta Sans" ], "display-lg": [ "Plus Jakarta Sans" ], "headline-xl-mobile": [ "Plus Jakarta Sans" ], "body-md": [ "Inter" ], "body-lg": [ "Inter" ], "label-sm": [ "Inter" ], "label-md": [ "Inter" ], "tabular-nums": [ "Inter" ], "body-sm": [ "Inter" ], "headline-lg": [ "Plus Jakarta Sans" ], "headline-md": [ "Plus Jakarta Sans" ], "label-lg": [ "Inter" ] }, "fontSize": { "display-lg-mobile": [ "36px", { "lineHeight": "44px", "fontWeight": "700" } ], "headline-sm": [ "16px", { "lineHeight": "24px", "fontWeight": "600" } ], "headline-xl": [ "32px", { "lineHeight": "40px", "fontWeight": "700" } ], "display-lg": [ "48px", { "lineHeight": "56px", "fontWeight": "700" } ], "headline-xl-mobile": [ "26px", { "lineHeight": "34px", "fontWeight": "700" } ], "body-md": [ "14px", { "lineHeight": "20px", "fontWeight": "400" } ], "body-lg": [ "16px", { "lineHeight": "24px", "fontWeight": "400" } ], "label-sm": [ "11px", { "lineHeight": "14px", "fontWeight": "600" } ], "label-md": [ "12px", { "lineHeight": "16px", "fontWeight": "500" } ], "tabular-nums": [ "14px", { "lineHeight": "20px", "fontWeight": "500" } ], "body-sm": [ "12px", { "lineHeight": "16px", "fontWeight": "400" } ], "headline-lg": [ "24px", { "lineHeight": "32px", "fontWeight": "600" } ], "headline-md": [ "20px", { "lineHeight": "28px", "fontWeight": "600" } ], "label-lg": [ "14px", { "lineHeight": "20px", "fontWeight": "500" } ] } } } };</script></head><body class="bg-background font-body-md text-on-surface antialiased min-h-screen"><header class="fixed top-0 left-0 right-0 h-16 bg-surface-container-lowest/90 backdrop-blur-md shadow-[0_1px_8px_rgba(0,0,0,0.04)] z-50"><div class="h-16 w-full px-margin-desktop flex items-center justify-between gap-space-md"><div class="flex items-center gap-space-lg"><div class="flex items-center gap-space-sm"><img alt="PayPilot AI Logo" class="h-8 w-auto object-contain" src="https://lh3.googleusercontent.com/aida/AEtjO1X2v3y6puTxf09BpbyzgsfscFlha23F1hGUEIFygnWPWEeSYwniN7mEjD_N68TWwnBbR9FCTjPzJOsD1XjRTwGbePnk5i75y_Nvo8Gsws9OoSh7PIzvNO7iABDlhetVXGaH9vQ03Pr8kwbt0LMRozPzsD6sy98XkdvZY9oGGzzhRSPqmPpe-fN5A8Qgbi78f8TdaBZ1K0-o_AKuDtZvZtjFy-a2ksGNOKD7fT1qPSG9ObqWsjIBh_e6PYb4"/><span class="font-headline-md text-headline-md tracking-tight text-on-surface">PayPilot <span class="text-primary">AI</span></span></div><div class="h-6 w-px bg-surface-container-high hidden sm:block"></div><div class="hidden md:flex items-center bg-surface-container-low p-space-xs rounded-lg"><button class="px-space-md py-1 rounded bg-surface-container-lowest text-on-surface font-label-md text-label-md shadow-[0_1px_2px_rgba(0,0,0,0.05)] transition-all" type="button">Seller</button><button class="px-space-md py-1 rounded text-on-surface-variant hover:text-on-surface font-label-md text-label-md transition-all" type="button">Customer</button></div></div><div class="hidden lg:flex items-center flex-1 max-w-md mx-space-lg"><div class="w-full flex items-center gap-space-sm bg-surface-container-low px-space-md py-2 rounded-lg text-on-surface-variant focus-within:ring-2 focus-within:ring-primary focus-within:bg-surface-container-lowest transition-all"><span class="material-symbols-outlined text-outline">search</span><input class="bg-transparent border-0 outline-none w-full font-body-sm text-body-sm text-on-surface placeholder:text-outline" placeholder="Search transactions, invoices, SKUs, or query AI..." type="text"/></div></div><div class="flex items-center gap-space-md"><button class="flex items-center gap-space-sm bg-tertiary-fixed text-on-tertiary-fixed px-space-md py-1.5 rounded-full hover:bg-tertiary-fixed-dim transition-colors" type="button"><span class="material-symbols-outlined text-tertiary">auto_awesome</span><span class="font-label-md text-label-md">Ask PayPilot AI</span><span class="bg-tertiary text-on-tertiary px-1.5 py-0.5 rounded-full font-label-sm text-label-sm">BETA</span></button><div class="relative"><button aria-label="Notifications" class="p-2 rounded-lg text-on-surface-variant hover:bg-surface-container-low hover:text-on-surface transition-colors flex items-center justify-center" type="button"><span class="material-symbols-outlined">notifications</span><span class="absolute top-1.5 right-1.5 w-2 h-2 rounded-full bg-error"></span></button></div><div class="h-6 w-px bg-surface-container-high hidden sm:block"></div><div class="flex items-center gap-space-sm"><img alt="Profile" class="w-8 h-8 rounded-full object-cover ring-2 ring-primary-fixed" src="https://lh3.googleusercontent.com/aida-public/AB6AXuAmhOkOBYQjb3B4kjWcgCZjebFGX23P-d4ztX0e9lRWFRSnRdtEuxZ4vdArjcoMnvV1LXG134LqqYljH1pCwWqgUxWXWL3qo4T4GUpPAdAIH-elDPnrG9O5cf02aahB6b_MpS5flYY0RurhOgI4pitpCjnzmhUykk90fgiBLGZU_Nhh4nAWu6VQ28x0q9tdFYnq-7ERfJk-Wx22F912fMefPgnaSMUIsOXgP6nxY-B_nuybFGRbpLlB_Q"/><div class="hidden xl:flex flex-col text-left"><span class="font-label-md text-label-md text-on-surface">Morgan Vance</span><span class="font-label-sm text-label-sm text-on-surface-variant">Merchant Admin</span></div></div></div></div></header><aside class="fixed left-0 top-16 bottom-0 w-64 bg-surface-container-lowest shadow-[0_1px_8px_rgba(0,0,0,0.04)] z-40 flex flex-col justify-between overflow-y-auto"><div class="py-space-md px-space-md"><div class="px-space-md py-space-xs mb-space-sm"><span class="font-label-sm text-label-sm text-outline uppercase tracking-wider">Seller Workspace</span></div><nav class="flex flex-col gap-1" data-active-classes="bg-primary-container text-on-primary-container font-headline-sm rounded-lg"><a class="flex items-center gap-space-md px-space-md py-2.5 rounded-lg text-on-surface-variant hover:bg-surface-container-low hover:text-on-surface transition-all" data-path="seller-dashboard" href="#"><span class="material-symbols-outlined">dashboard</span><span class="font-label-lg text-label-lg">Dashboard</span></a><a class="flex items-center gap-space-md px-space-md py-2.5 rounded-lg text-on-surface-variant hover:bg-surface-container-low hover:text-on-surface transition-all" data-path="seller-products" href="#"><span class="material-symbols-outlined">inventory_2</span><span class="font-label-lg text-label-lg">Products</span></a><a class="flex items-center justify-between px-space-md py-2.5 rounded-lg text-on-surface-variant hover:bg-surface-container-low hover:text-on-surface transition-all" data-path="seller-orders" href="#"><div class="flex items-center gap-space-md"><span class="material-symbols-outlined">receipt_long</span><span class="font-label-lg text-label-lg">Orders</span></div><span class="bg-surface-container-high text-on-surface px-1.5 py-0.5 rounded font-label-sm text-label-sm tabular-nums">18</span></a><a aria-current="page" class="flex items-center justify-between px-space-md py-2.5 transition-all bg-primary-container text-on-primary-container font-headline-sm rounded-lg" data-path="seller-invoiceiq" href="#"><div class="flex items-center gap-space-md"><span class="material-symbols-outlined text-primary">psychology</span><span class="font-label-lg text-label-lg">InvoiceIQ AI</span></div><span class="bg-primary-fixed text-on-primary-fixed px-1.5 py-0.5 rounded-full font-label-sm text-label-sm">Auto</span></a><a class="flex items-center gap-space-md px-space-md py-2.5 rounded-lg text-on-surface-variant hover:bg-surface-container-low hover:text-on-surface transition-all" data-path="seller-transactions" href="#"><span class="material-symbols-outlined">account_balance_wallet</span><span class="font-label-lg text-label-lg">Transactions &amp; Fees</span></a><a class="flex items-center gap-space-md px-space-md py-2.5 rounded-lg text-on-surface-variant hover:bg-surface-container-low hover:text-on-surface transition-all" data-path="seller-reports" href="#"><span class="material-symbols-outlined">monitoring</span><span class="font-label-lg text-label-lg">Financial Reports</span></a></nav><div class="px-space-md py-space-xs mt-space-lg mb-space-sm"><span class="font-label-sm text-label-sm text-outline uppercase tracking-wider">Customer Mode Preview</span></div><nav class="flex flex-col gap-1" data-active-classes="bg-primary-container text-on-primary-container font-headline-sm rounded-lg"><a class="flex items-center gap-space-md px-space-md py-2.5 rounded-lg text-on-surface-variant hover:bg-surface-container-low hover:text-on-surface transition-all" data-path="customer-discover" href="#"><span class="material-symbols-outlined">storefront</span><span class="font-label-lg text-label-lg">Discover Products</span></a><a class="flex items-center justify-between px-space-md py-2.5 rounded-lg text-on-surface-variant hover:bg-surface-container-low hover:text-on-surface transition-all" data-path="customer-cart" href="#"><div class="flex items-center gap-space-md"><span class="material-symbols-outlined">shopping_bag</span><span class="font-label-lg text-label-lg">Smart Cart</span></div><span class="bg-secondary-fixed text-on-secondary-fixed px-1.5 py-0.5 rounded-full font-label-sm text-label-sm">AI Active</span></a><a class="flex items-center gap-space-md px-space-md py-2.5 rounded-lg text-on-surface-variant hover:bg-surface-container-low hover:text-on-surface transition-all" data-path="customer-orders" href="#"><span class="material-symbols-outlined">local_shipping</span><span class="font-label-lg text-label-lg">Orders &amp; PayPal</span></a><a class="flex items-center gap-space-md px-space-md py-2.5 rounded-lg text-on-surface-variant hover:bg-surface-container-low hover:text-on-surface transition-all" data-path="customer-assistant" href="#"><span class="material-symbols-outlined">smart_toy</span><span class="font-label-lg text-label-lg">Assistant</span></a></nav></div><div class="p-space-md bg-surface-container-lowest"><nav class="flex flex-col gap-1" data-active-classes="bg-primary-container text-on-primary-container font-headline-sm rounded-lg"><a class="flex items-center gap-space-md px-space-md py-2.5 rounded-lg text-on-surface-variant hover:bg-surface-container-low hover:text-on-surface transition-all" data-path="platform-settings" href="#"><span class="material-symbols-outlined">settings</span><span class="font-label-lg text-label-lg">Settings</span></a></nav><div class="mt-space-sm p-space-sm rounded-lg bg-surface-container-low flex items-center justify-between"><div class="flex flex-col"><span class="font-label-sm text-label-sm text-on-surface font-semibold">PayPal Escrow</span><span class="font-label-sm text-label-sm text-on-surface-variant">Active • Sync 99.9%</span></div><span class="w-2 h-2 rounded-full bg-primary"></span></div></div></aside><div class="pl-64"><main class="w-full pt-16 bg-background min-h-screen"><div class="flex flex-col w-full px-margin-desktop py-space-lg gap-space-lg">
+<!-- Header Section with Predictive Status & Actions -->
+<div class="flex flex-col xl:flex-row xl:items-center justify-between gap-space-md">
+<div class="flex flex-col gap-space-xs">
+<div class="flex items-center gap-space-sm">
+<span class="font-headline-xl text-headline-xl text-on-surface tracking-tight">InvoiceIQ AI</span>
+<div class="flex items-center gap-1.5 px-3 py-1 rounded-full bg-primary-fixed text-on-primary-fixed shadow-sm">
+<span class="w-2 h-2 rounded-full bg-primary animate-pulse"></span>
+<span class="font-label-sm text-label-sm">Automated Matching Active</span>
+</div>
+<span class="px-2 py-0.5 rounded text-on-surface-variant bg-surface-container-high font-label-sm text-label-sm uppercase tracking-wider">v2.4-Neural</span>
+</div>
+<p class="font-body-md text-body-md text-on-surface-variant">Real-time ledger reconciliation, intelligent GST tax calculations, and autonomous auto-chasing engine.</p>
+</div>
+<!-- Action Group -->
+<div class="flex items-center flex-wrap gap-space-sm">
+<button class="flex items-center gap-2 px-space-md py-2.5 rounded-lg bg-surface-container-lowest text-on-surface hover:bg-surface-container-low transition-all shadow-sm" type="button">
+<span class="material-symbols-outlined text-outline text-lg">filter_alt</span>
+<span class="font-label-lg text-label-lg">Filter Status</span>
+</button>
+<button class="flex items-center gap-2 px-space-md py-2.5 rounded-lg bg-surface-container-lowest text-on-surface hover:bg-surface-container-low transition-all shadow-sm" type="button">
+<span class="material-symbols-outlined text-secondary text-lg">file_download</span>
+<span class="font-label-lg text-label-lg">Export GSTR-1 CSV</span>
+</button>
+<button class="flex items-center gap-2 px-space-lg py-2.5 rounded-lg bg-primary text-on-primary hover:bg-primary-container transition-all shadow-md active:scale-95" type="button">
+<span class="material-symbols-outlined text-lg">add_circle</span>
+<span class="font-label-lg text-label-lg">+ Create Smart Invoice</span>
+</button>
+</div>
+</div>
+<!-- Summary Metrics Ribbon -->
+<div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-gutter">
+<!-- Total Outstanding -->
+<div class="relative overflow-hidden rounded-xl bg-surface-container-lowest p-space-md shadow-sm transition-all hover:shadow-md">
+<div class="flex items-center justify-between mb-space-xs">
+<span class="font-label-md text-label-md text-on-surface-variant uppercase tracking-wider">Total Outstanding</span>
+<span class="p-1.5 rounded-lg bg-secondary-fixed text-on-secondary-fixed">
+<span class="material-symbols-outlined text-lg">hourglass_top</span>
+</span>
+</div>
+<div class="flex items-baseline gap-2">
+<span class="font-headline-xl text-headline-xl text-on-surface font-tabular-nums">₹1,42,800</span>
+<span class="font-label-sm text-label-sm text-outline">8 invoices</span>
+</div>
+<div class="mt-space-sm flex items-center gap-1.5 text-secondary">
+<span class="material-symbols-outlined text-sm">trending_up</span>
+<span class="font-label-sm text-label-sm">4.2% lower vs last billing cycle</span>
+</div>
+<div class="absolute -right-4 -bottom-4 w-16 h-16 bg-surface-container-low rounded-full pointer-events-none opacity-50"></div>
+</div>
+<!-- Paid This Month -->
+<div class="relative overflow-hidden rounded-xl bg-surface-container-lowest p-space-md shadow-sm transition-all hover:shadow-md">
+<div class="flex items-center justify-between mb-space-xs">
+<span class="font-label-md text-label-md text-on-surface-variant uppercase tracking-wider">Paid This Month</span>
+<span class="p-1.5 rounded-lg bg-surface-container-high text-primary">
+<span class="material-symbols-outlined text-lg">verified</span>
+</span>
+</div>
+<div class="flex items-baseline gap-2">
+<span class="font-headline-xl text-headline-xl text-on-surface font-tabular-nums">₹3,85,000</span>
+<span class="font-label-sm text-label-sm text-outline">24 invoices</span>
+</div>
+<div class="mt-space-sm flex items-center gap-1.5 text-primary">
+<span class="material-symbols-outlined text-sm">auto_graph</span>
+<span class="font-label-sm text-label-sm">100% reconciled via PayPal AutoSync</span>
+</div>
+<div class="absolute -right-4 -bottom-4 w-16 h-16 bg-surface-container-high rounded-full pointer-events-none opacity-40"></div>
+</div>
+<!-- Overdue -->
+<div class="relative overflow-hidden rounded-xl bg-surface-container-lowest p-space-md shadow-sm transition-all hover:shadow-md">
+<div class="flex items-center justify-between mb-space-xs">
+<span class="font-label-md text-label-md text-on-surface-variant uppercase tracking-wider">Overdue</span>
+<span class="p-1.5 rounded-lg bg-error-container text-on-error-container">
+<span class="material-symbols-outlined text-lg">crisis_alert</span>
+</span>
+</div>
+<div class="flex items-baseline gap-2">
+<span class="font-headline-xl text-headline-xl text-error font-tabular-nums">₹28,400</span>
+<span class="font-label-sm text-label-sm text-error">2 invoices</span>
+</div>
+<div class="mt-space-sm flex items-center gap-1.5 px-2 py-1 rounded bg-error-container text-on-error-container w-fit">
+<span class="material-symbols-outlined text-sm animate-spin">sync</span>
+<span class="font-label-sm text-label-sm font-semibold">AI Auto-chase armed</span>
+</div>
+</div>
+<!-- Drafts -->
+<div class="relative overflow-hidden rounded-xl bg-surface-container-lowest p-space-md shadow-sm transition-all hover:shadow-md">
+<div class="flex items-center justify-between mb-space-xs">
+<span class="font-label-md text-label-md text-on-surface-variant uppercase tracking-wider">Drafts</span>
+<span class="p-1.5 rounded-lg bg-surface-container-low text-on-surface-variant">
+<span class="material-symbols-outlined text-lg">edit_note</span>
+</span>
+</div>
+<div class="flex items-baseline gap-2">
+<span class="font-headline-xl text-headline-xl text-on-surface font-tabular-nums">₹45,000</span>
+<span class="font-label-sm text-label-sm text-outline">3 invoices</span>
+</div>
+<div class="mt-space-sm flex items-center gap-1.5 text-on-surface-variant">
+<span class="material-symbols-outlined text-sm">schedule</span>
+<span class="font-label-sm text-label-sm">Awaiting client GST verification</span>
+</div>
+</div>
+</div>
+<!-- Main Split Workbench -->
+<div class="grid grid-cols-1 xl:grid-cols-12 gap-gutter items-start">
+<!-- LEFT PANE (Invoice Ledger & Queue - 45% = 5 cols or 5.4 cols) -->
+<div class="xl:col-span-5 flex flex-col gap-space-md">
+<!-- Ledger Card -->
+<div class="bg-surface-container-lowest rounded-xl shadow-sm overflow-hidden flex flex-col">
+<!-- Workbench Controls & Tabs -->
+<div class="p-space-md bg-surface-container-low flex flex-col gap-space-sm">
+<div class="flex items-center justify-between">
+<span class="font-headline-sm text-headline-sm text-on-surface">Invoice Ledger</span>
+<div class="flex items-center gap-1 bg-surface-container-lowest px-2 py-1 rounded-md text-on-surface-variant">
+<span class="material-symbols-outlined text-sm">sort</span>
+<span class="font-label-sm text-label-sm">Sort: Latest First</span>
+</div>
+</div>
+<!-- Tabs -->
+<div class="flex items-center gap-1 overflow-x-auto pb-1">
+<button class="px-3 py-1.5 rounded-lg font-label-md text-label-md text-on-surface-variant hover:text-on-surface hover:bg-surface-container-lowest transition-all">All <span class="text-outline tabular-nums">37</span></button>
+<button class="px-3 py-1.5 rounded-lg font-label-md text-label-md text-on-surface-variant hover:text-on-surface hover:bg-surface-container-lowest transition-all">Paid <span class="text-outline tabular-nums">24</span></button>
+<button class="px-3 py-1.5 rounded-lg font-label-md text-label-md text-on-surface-variant hover:text-on-surface hover:bg-surface-container-lowest transition-all">Unpaid <span class="text-outline tabular-nums">8</span></button>
+<button class="px-3 py-1.5 rounded-lg bg-surface-container-lowest text-on-surface font-label-md text-label-md font-semibold shadow-sm transition-all flex items-center gap-1.5">
+<span>Overdue</span>
+<span class="bg-error-container text-on-error-container px-1.5 py-0.2 rounded-full font-label-sm text-label-sm tabular-nums">2</span>
+</button>
+<button class="px-3 py-1.5 rounded-lg font-label-md text-label-md text-on-surface-variant hover:text-on-surface hover:bg-surface-container-lowest transition-all">Drafts <span class="text-outline tabular-nums">3</span></button>
+</div>
+</div>
+<!-- Ledger List -->
+<div class="flex flex-col divide-y-0">
+<!-- SELECTED ROW: Apex Cloud Labs Pvt Ltd (#INV-2024-089) -->
+<div class="relative p-space-md bg-surface-container transition-all cursor-pointer">
+<!-- Left active indicator strip -->
+<div class="absolute left-0 top-0 bottom-0 w-1.5 bg-primary"></div>
+<div class="flex items-start justify-between gap-space-sm pl-2">
+<div class="flex flex-col gap-0.5">
+<div class="flex items-center gap-2">
+<span class="font-headline-sm text-headline-sm text-on-surface">#INV-2024-089</span>
+<span class="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-error-container text-on-error-container font-label-sm text-label-sm">
+<span class="w-1.5 h-1.5 rounded-full bg-error"></span>
+                    Overdue by 4 days
+                  </span>
+</div>
+<span class="font-label-lg text-label-lg font-semibold text-on-surface">Apex Cloud Labs Pvt Ltd</span>
+<span class="font-body-sm text-body-sm text-on-surface-variant">Due Oct 26, 2024 • B2B Bangalore</span>
+</div>
+<div class="flex flex-col items-end gap-1">
+<span class="font-headline-sm text-headline-sm text-on-surface font-tabular-nums font-bold">₹54,280</span>
+<span class="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-tertiary-fixed text-on-tertiary-fixed font-label-sm text-label-sm">
+<span class="material-symbols-outlined text-xs">auto_awesome</span>
+                  Low Risk (0.12)
+                </span>
+</div>
+</div>
+<!-- Contextual Metadata Pills -->
+<div class="mt-space-sm pl-2 flex items-center justify-between pt-space-xs bg-surface-container-lowest/80 p-2 rounded-lg">
+<div class="flex items-center gap-1.5">
+<span class="material-symbols-outlined text-xs text-primary">credit_card</span>
+<span class="font-label-sm text-label-sm text-on-surface font-mono">PP-TX-98402-SB</span>
+</div>
+<span class="font-label-sm text-label-sm text-on-surface-variant">Auto-chase Email 1 Delivered</span>
+</div>
+</div>
+<!-- Other Row 2 (Unpaid / Under Grace) -->
+<div class="p-space-md bg-surface-container-lowest hover:bg-surface-container-low transition-all cursor-pointer">
+<div class="flex items-start justify-between gap-space-sm">
+<div class="flex flex-col gap-0.5">
+<div class="flex items-center gap-2">
+<span class="font-headline-sm text-headline-sm text-on-surface">#INV-2024-088</span>
+<span class="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-surface-container-high text-on-surface-variant font-label-sm text-label-sm">
+<span class="w-1.5 h-1.5 rounded-full bg-secondary"></span>
+                    Due in 6 days
+                  </span>
+</div>
+<span class="font-label-lg text-label-lg font-medium text-on-surface">Kore Dynamic Tech LLP</span>
+<span class="font-body-sm text-body-sm text-on-surface-variant">Due Nov 02, 2024 • B2B Hyderabad</span>
+</div>
+<div class="flex flex-col items-end gap-1">
+<span class="font-headline-sm text-headline-sm text-on-surface font-tabular-nums">₹88,520</span>
+<span class="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-surface-container-low text-on-surface-variant font-label-sm text-label-sm">
+<span class="material-symbols-outlined text-xs">analytics</span>
+                  Med Risk (0.38)
+                </span>
+</div>
+</div>
+</div>
+<!-- Other Row 3 (Overdue 2) -->
+<div class="p-space-md bg-surface-container-lowest hover:bg-surface-container-low transition-all cursor-pointer">
+<div class="flex items-start justify-between gap-space-sm">
+<div class="flex flex-col gap-0.5">
+<div class="flex items-center gap-2">
+<span class="font-headline-sm text-headline-sm text-on-surface">#INV-2024-087</span>
+<span class="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-error-container text-on-error-container font-label-sm text-label-sm">
+<span class="w-1.5 h-1.5 rounded-full bg-error"></span>
+                    Overdue by 9 days
+                  </span>
+</div>
+<span class="font-label-lg text-label-lg font-medium text-on-surface">Veloce Commerce Inc</span>
+<span class="font-body-sm text-body-sm text-on-surface-variant">Due Oct 21, 2024 • Cross-border USD</span>
+</div>
+<div class="flex flex-col items-end gap-1">
+<span class="font-headline-sm text-headline-sm text-on-surface font-tabular-nums">₹28,400</span>
+<span class="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-surface-container-low text-on-surface-variant font-label-sm text-label-sm">
+<span class="material-symbols-outlined text-xs">auto_awesome</span>
+                  Auto-dial Dispatched
+                </span>
+</div>
+</div>
+</div>
+<!-- Other Row 4 (Paid) -->
+<div class="p-space-md bg-surface-container-lowest hover:bg-surface-container-low transition-all cursor-pointer">
+<div class="flex items-start justify-between gap-space-sm">
+<div class="flex flex-col gap-0.5">
+<div class="flex items-center gap-2">
+<span class="font-headline-sm text-headline-sm text-on-surface">#INV-2024-086</span>
+<span class="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-surface-container-high text-primary font-label-sm text-label-sm">
+<span class="w-1.5 h-1.5 rounded-full bg-primary"></span>
+                    Paid Oct 18
+                  </span>
+</div>
+<span class="font-label-lg text-label-lg font-medium text-on-surface">HyperScale Systems</span>
+<span class="font-body-sm text-body-sm text-on-surface-variant">Settled via PayPal Escrow #TX-10924</span>
+</div>
+<div class="flex flex-col items-end gap-1">
+<span class="font-headline-sm text-headline-sm text-on-surface font-tabular-nums">₹1,12,000</span>
+<span class="inline-flex items-center gap-1 text-primary font-label-sm text-label-sm">
+<span class="material-symbols-outlined text-xs">task_alt</span>
+                  Reconciled
+                </span>
+</div>
+</div>
+</div>
+</div>
+<!-- Ledger Footer Pagination / Mini Sparkline -->
+<div class="p-space-sm bg-surface-container-low flex items-center justify-between">
+<span class="font-label-sm text-label-sm text-on-surface-variant">Showing 4 of 37 entries</span>
+<div class="flex items-center gap-1">
+<button class="p-1 rounded hover:bg-surface-container text-on-surface"><span class="material-symbols-outlined text-base">chevron_left</span></button>
+<span class="px-2 py-0.5 rounded bg-surface-container-lowest text-on-surface font-label-sm text-label-sm">1</span>
+<span class="px-2 py-0.5 rounded text-on-surface-variant font-label-sm text-label-sm">2</span>
+<span class="px-2 py-0.5 rounded text-on-surface-variant font-label-sm text-label-sm">3</span>
+<button class="p-1 rounded hover:bg-surface-container text-on-surface"><span class="material-symbols-outlined text-base">chevron_right</span></button>
+</div>
+</div>
+</div>
+<!-- Autonomous Agent Micro-Panel -->
+<div class="bg-surface-container-lowest p-space-md rounded-xl shadow-sm flex flex-col gap-space-sm">
+<div class="flex items-center justify-between">
+<div class="flex items-center gap-2">
+<span class="material-symbols-outlined text-tertiary">psychology</span>
+<span class="font-label-lg text-label-lg font-bold text-on-surface">InvoiceIQ Autonomous Chaser</span>
+</div>
+<span class="px-2 py-0.5 rounded bg-tertiary-fixed text-on-tertiary-fixed font-label-sm text-label-sm">Smart Cadence</span>
+</div>
+<p class="font-body-sm text-body-sm text-on-surface-variant">
+          Predictive algorithm detected client apexcloud.io pays consistently within 5 days of overdue notice. Next sequence scheduled with soft dynamic discount incentive.
+        </p>
+<div class="flex items-center justify-between pt-space-xs text-on-surface-variant">
+<span class="font-label-sm text-label-sm">Estimated Recovery Date: <strong class="text-on-surface">Oct 31, 2024</strong></span>
+<span class="font-label-sm text-label-sm text-primary font-semibold">92.4% Probability</span>
+</div>
+</div>
+</div>
+<!-- RIGHT PANE (Interactive Real-time Invoice Paper Preview - 55% = 7 cols) -->
+<div class="xl:col-span-7 flex flex-col gap-space-md">
+<!-- Action Floating Bar -->
+<div class="bg-surface-container-lowest/90 backdrop-blur-md p-space-sm rounded-xl shadow-sm flex flex-wrap items-center justify-between gap-space-sm">
+<div class="flex items-center gap-2 pl-space-xs">
+<span class="material-symbols-outlined text-primary">visibility</span>
+<span class="font-label-md text-label-md text-on-surface font-semibold">Live PDF Paper View</span>
+<span class="px-2 py-0.5 rounded bg-surface-container text-on-surface font-label-sm text-label-sm">Tax Invoice (India GST)</span>
+</div>
+<div class="flex items-center gap-space-xs">
+<button class="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-surface-container-low hover:bg-surface-container text-on-surface font-label-md text-label-md transition-all" type="button">
+<span class="material-symbols-outlined text-sm">edit</span>
+            Edit Line Items
+          </button>
+<button class="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-surface-container-low hover:bg-surface-container text-on-surface font-label-md text-label-md transition-all" type="button">
+<span class="material-symbols-outlined text-sm">download</span>
+            Download PDF
+          </button>
+<button class="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-tertiary text-on-tertiary hover:bg-tertiary-container font-label-md text-label-md transition-all shadow-sm" type="button">
+<span class="material-symbols-outlined text-sm">forward_to_inbox</span>
+            Send Reminder Now
+          </button>
+</div>
+</div>
+<!-- Real-Time Invoice Paper Document -->
+<div class="bg-surface-container-lowest rounded-2xl shadow-lg p-space-xl flex flex-col gap-space-lg relative overflow-hidden">
+<!-- Document Watermark/Status Indicator -->
+<div class="absolute top-6 right-6 flex flex-col items-end">
+<div class="px-3 py-1 rounded bg-error-container text-on-error-container font-label-sm text-label-sm font-bold uppercase tracking-widest shadow-sm">
+            Payment Overdue
+          </div>
+<span class="font-label-sm text-label-sm text-error mt-1">4 Days Past Grace Period</span>
+</div>
+<!-- Invoice Top Header -->
+<div class="flex flex-col sm:flex-row sm:items-start justify-between gap-space-md pb-space-md bg-surface-container-lowest">
+<div class="flex flex-col gap-space-xs">
+<div class="flex items-center gap-space-sm">
+<img alt="PayPilot AI Logo" class="h-9 w-auto object-contain" src="https://lh3.googleusercontent.com/aida/AEtjO1X2v3y6puTxf09BpbyzgsfscFlha23F1hGUEIFygnWPWEeSYwniN7mEjD_N68TWwnBbR9FCTjPzJOsD1XjRTwGbePnk5i75y_Nvo8Gsws9OoSh7PIzvNO7iABDlhetVXGaH9vQ03Pr8kwbt0LMRozPzsD6sy98XkdvZY9oGGzzhRSPqmPpe-fN5A8Qgbi78f8TdaBZ1K0-o_AKuDtZvZtjFy-a2ksGNOKD7fT1qPSG9ObqWsjIBh_e6PYb4"/>
+<span class="font-headline-md text-headline-md tracking-tight text-on-surface">PayPilot <span class="text-primary">InvoiceIQ</span></span>
+</div>
+<p class="font-body-sm text-body-sm text-on-surface-variant max-w-xs">
+              CloudTech Global Merchant Infrastructure Pvt Ltd<br/>
+              GSTIN: 29AABCC1234D1Z9 • Tech Park Koramangala<br/>
+              Bangalore, Karnataka, 560095, India
+            </p>
+</div>
+<div class="flex flex-col items-start sm:items-end gap-1 mt-6 sm:mt-0">
+<span class="font-label-sm text-label-sm uppercase tracking-widest text-outline">TAX INVOICE NUMBER</span>
+<span class="font-headline-lg text-headline-lg font-bold text-on-surface font-tabular-nums">#INV-2024-089</span>
+<div class="flex flex-col items-start sm:items-end gap-0.5 mt-2">
+<span class="font-body-sm text-body-sm text-on-surface-variant">Issue Date: <strong class="text-on-surface">Oct 12, 2024</strong></span>
+<span class="font-body-sm text-body-sm text-on-surface-variant">Due Date: <strong class="text-error">Oct 26, 2024</strong></span>
+<span class="font-body-sm text-body-sm text-on-surface-variant">Place of Supply: <strong class="text-on-surface">Karnataka (29)</strong></span>
+</div>
+</div>
+</div>
+<!-- Billed To / Shipping Details Two-Column Grid -->
+<div class="grid grid-cols-1 md:grid-cols-2 gap-space-md p-space-md rounded-xl bg-surface-container-low">
+<div class="flex flex-col gap-1">
+<span class="font-label-sm text-label-sm text-outline uppercase tracking-wider">BILLED TO (CLIENT)</span>
+<span class="font-headline-sm text-headline-sm text-on-surface font-bold">Apex Cloud Labs Pvt Ltd</span>
+<span class="font-body-sm text-body-sm text-on-surface-variant">
+              GSTIN: <span class="font-semibold text-on-surface">29AAAAA0000A1Z5</span><br/>
+              Plot 45, Indiranagar 100ft Road, Stage 2<br/>
+              Bangalore, Karnataka, 560038, India
+            </span>
+<span class="font-label-sm text-label-sm text-on-surface-variant mt-1">Contact: finance@apexcloud.io</span>
+</div>
+<div class="flex flex-col justify-between gap-2">
+<div class="flex flex-col gap-1">
+<span class="font-label-sm text-label-sm text-outline uppercase tracking-wider">PAYMENT DISPOSITION</span>
+<div class="flex items-center gap-2">
+<span class="font-label-md text-label-md text-on-surface font-semibold">Escrow Mode:</span>
+<span class="px-2 py-0.5 rounded bg-surface-container text-on-surface font-label-sm text-label-sm">PayPal Sandbox Direct API</span>
+</div>
+<span class="font-body-sm text-body-sm text-on-surface-variant font-mono">Tx Ref: PP-TX-98402-SB</span>
+</div>
+<div class="flex items-center gap-2 p-2 rounded bg-surface-container-lowest">
+<span class="material-symbols-outlined text-primary text-base">verified_user</span>
+<span class="font-label-sm text-label-sm text-on-surface">Verified GST Compliance • IRN Ready</span>
+</div>
+</div>
+</div>
+<!-- Itemized Line Items Table -->
+<div class="overflow-x-auto">
+<table class="w-full text-left">
+<thead>
+<tr class="bg-surface-container-low text-outline font-label-sm text-label-sm uppercase tracking-wider">
+<th class="py-2.5 px-space-md rounded-l-lg">Item Description &amp; SKU</th>
+<th class="py-2.5 px-space-md text-center">Qty</th>
+<th class="py-2.5 px-space-md text-right">Unit Rate</th>
+<th class="py-2.5 px-space-md text-right">GST Rate</th>
+<th class="py-2.5 px-space-md rounded-r-lg text-right">Net Amount</th>
+</tr>
+</thead>
+<tbody class="divide-y-0 font-body-sm text-body-sm">
+<!-- Item 1 -->
+<tr class="hover:bg-surface-container-low/50 transition-colors">
+<td class="py- space-sm py-3 px-space-md">
+<div class="flex flex-col">
+<span class="font-label-lg text-label-lg font-semibold text-on-surface">Developer Workstation Pro Bundle</span>
+<span class="font-body-sm text-body-sm text-outline">SKU: WRK-PRO-M3-64G • HSN 8471</span>
+</div>
+</td>
+<td class="py-3 px-space-md text-center text-on-surface font-tabular-nums">1</td>
+<td class="py-3 px-space-md text-right text-on-surface font-tabular-nums">₹38,000.00</td>
+<td class="py-3 px-space-md text-right font-tabular-nums text-on-surface">
+<span>18%</span>
+<span class="block font-label-sm text-label-sm text-outline">(₹6,840)</span>
+</td>
+<td class="py-3 px-space-md text-right font-headline-sm text-headline-sm text-on-surface font-tabular-nums">₹38,000.00</td>
+</tr>
+<!-- Item 2 -->
+<tr class="hover:bg-surface-container-low/50 transition-colors">
+<td class="py- space-sm py-3 px-space-md">
+<div class="flex flex-col">
+<span class="font-label-lg text-label-lg font-semibold text-on-surface">4K UltraWide Ergonomic Display</span>
+<span class="font-body-sm text-body-sm text-outline">SKU: MON-4K-UW-34 • HSN 8528</span>
+</div>
+</td>
+<td class="py-3 px-space-md text-center text-on-surface font-tabular-nums">1</td>
+<td class="py-3 px-space-md text-right text-on-surface font-tabular-nums">₹8,000.00</td>
+<td class="py-3 px-space-md text-right font-tabular-nums text-on-surface">
+<span>18%</span>
+<span class="block font-label-sm text-label-sm text-outline">(₹1,440)</span>
+</td>
+<td class="py-3 px-space-md text-right font-headline-sm text-headline-sm text-on-surface font-tabular-nums">₹8,000.00</td>
+</tr>
+</tbody>
+</table>
+</div>
+<!-- Tax & Subtotal Breakdown Calculation Area -->
+<div class="flex flex-col sm:flex-row justify-between items-start gap-space-lg pt-space-md">
+<!-- Terms & AI Verification stamp -->
+<div class="flex flex-col gap-space-sm max-w-sm">
+<div class="p-space-sm rounded-lg bg-surface-container-low flex flex-col gap-1">
+<span class="font-label-sm text-label-sm text-outline uppercase tracking-wider">Payment Instructions</span>
+<span class="font-body-sm text-body-sm text-on-surface">Direct Net Banking, UPI Autopay, or PayPal Escrow Checkout. Wire transfers must quote Ref #INV-2024-089.</span>
+</div>
+<div class="flex items-center gap-2 text-on-surface-variant font-label-sm text-label-sm">
+<span class="material-symbols-outlined text-primary text-base">verified</span>
+<span>Invoice electronically generated and sealed by PayPilot AI.</span>
+</div>
+</div>
+<!-- Totals Panel -->
+<div class="w-full sm:w-72 bg-surface-container-low p-space-md rounded-xl flex flex-col gap-2">
+<div class="flex justify-between items-center text-on-surface-variant">
+<span class="font-body-sm text-body-sm">Subtotal:</span>
+<span class="font-label-lg text-label-lg font-tabular-nums text-on-surface">₹46,000.00</span>
+</div>
+<div class="flex justify-between items-center text-on-surface-variant">
+<span class="font-body-sm text-body-sm">Integrated GST (IGST 18%):</span>
+<span class="font-label-lg text-label-lg font-tabular-nums text-on-surface">₹8,280.00</span>
+</div>
+<div class="flex justify-between items-center text-on-surface-variant">
+<span class="font-body-sm text-body-sm">Round Off:</span>
+<span class="font-label-lg text-label-lg font-tabular-nums text-on-surface">₹0.00</span>
+</div>
+<div class="h-px bg-surface-container-high my-1"></div>
+<div class="flex justify-between items-baseline">
+<span class="font-headline-sm text-headline-sm font-bold text-on-surface">Total Payable:</span>
+<span class="font-headline-xl text-headline-xl font-bold text-primary font-tabular-nums">₹54,280.00</span>
+</div>
+</div>
+</div>
+<!-- Payment Settlement Tracker & Live PayPal Gateway -->
+<div class="rounded-xl bg-surface-container-low p-space-md flex flex-col gap-space-md">
+<div class="flex items-center justify-between">
+<div class="flex items-center gap-2">
+<span class="material-symbols-outlined text-primary">currency_exchange</span>
+<span class="font-headline-sm text-headline-sm text-on-surface">Payment Settlement Gateway</span>
+</div>
+<span class="font-label-sm text-label-sm bg-surface-container-lowest px-2 py-1 rounded text-on-surface">Sandbox Environment</span>
+</div>
+<!-- PayPal Checkout Interactive Button Card -->
+<div class="flex flex-col sm:flex-row items-center justify-between gap-space-md p-space-md bg-surface-container-lowest rounded-xl shadow-sm">
+<div class="flex items-center gap-space-md">
+<div class="w-12 h-12 rounded-xl bg-primary-fixed flex items-center justify-center text-primary">
+<span class="material-symbols-outlined text-2xl">account_balance_wallet</span>
+</div>
+<div class="flex flex-col">
+<span class="font-label-lg text-label-lg font-bold text-on-surface">PayPal Instant Checkout Link</span>
+<span class="font-body-sm text-body-sm text-on-surface-variant">Unique secure token link active for customer portal payment</span>
+</div>
+</div>
+<button class="w-full sm:w-auto px-space-lg py-2.5 rounded-lg bg-primary text-on-primary hover:bg-primary-container font-label-lg text-label-lg flex items-center justify-center gap-2 transition-all shadow-md active:scale-95" type="button">
+<span>Pay via PayPal Sandbox</span>
+<span class="material-symbols-outlined text-sm">open_in_new</span>
+</button>
+</div>
+<!-- AI Status Note -->
+<div class="flex items-start gap-space-sm p-space-sm rounded-lg bg-surface-container-lowest">
+<span class="material-symbols-outlined text-tertiary text-lg mt-0.5">smart_toy</span>
+<div class="flex flex-col gap-0.5">
+<span class="font-label-md text-label-md font-semibold text-on-surface">Autonomous Dispatch Log</span>
+<span class="font-body-sm text-body-sm text-on-surface-variant">
+                Payment reminder sent automatically on Day 2 overdue. Next reminder scheduled in 48 hours with escalation to client accounts payable supervisor.
+              </span>
+</div>
+</div>
+<!-- Secondary Bottom Action Controls -->
+<div class="flex flex-wrap items-center justify-between gap-space-sm pt-space-xs">
+<div class="flex items-center gap-2">
+<button class="flex items-center gap-1.5 px-3 py-2 rounded-lg bg-surface-container-lowest hover:bg-surface-container text-on-surface font-label-md text-label-md transition-all shadow-sm" type="button">
+<span class="material-symbols-outlined text-sm text-secondary">payments</span>
+                Record Offline Payment
+              </button>
+<button class="flex items-center gap-1.5 px-3 py-2 rounded-lg bg-surface-container-lowest hover:bg-surface-container text-on-surface font-label-md text-label-md transition-all shadow-sm" type="button">
+<span class="material-symbols-outlined text-sm text-outline">cancel</span>
+                Void Invoice
+              </button>
+</div>
+<div class="flex items-center gap-2">
+<button class="px-space-md py-2 rounded-lg bg-primary-fixed text-on-primary-fixed hover:bg-primary-fixed-dim font-label-md text-label-md transition-all font-semibold" type="button">
+                Generate Payment Link QR
+              </button>
+</div>
+</div>
+</div>
+</div>
+</div>
+</div>
+<!-- Real-Time Automated Intelligence Ledger Telemetry (Footer Section) -->
+<div class="bg-surface-container-lowest rounded-xl p-space-md shadow-sm flex flex-col md:flex-row items-center justify-between gap-space-md">
+<div class="flex items-center gap-space-md">
+<div class="p-2.5 rounded-lg bg-tertiary-fixed text-on-tertiary-fixed">
+<span class="material-symbols-outlined text-xl">insights</span>
+</div>
+<div class="flex flex-col">
+<span class="font-label-lg text-label-lg font-bold text-on-surface">InvoiceIQ Autonomous Rules Engine</span>
+<span class="font-body-sm text-body-sm text-on-surface-variant">3 automated actions performed today: 1 matching reconciled, 1 reminder dispatched, 1 GSTR-1 tax credit verified.</span>
+</div>
+</div>
+<div class="flex items-center gap-space-md w-full md:w-auto justify-end">
+<span class="font-label-sm text-label-sm text-outline tabular-nums">Sync Latency: 142ms</span>
+<div class="flex items-center gap-1.5">
+<span class="w-2 h-2 rounded-full bg-primary"></span>
+<span class="font-label-sm text-label-sm font-semibold text-primary">Ledger Steady</span>
+</div>
+</div>
+</div>
+</div></main></div></body></html>

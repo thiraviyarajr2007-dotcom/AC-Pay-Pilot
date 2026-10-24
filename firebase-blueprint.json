@@ -1,0 +1,407 @@
+{
+  "entities": {
+    "User": {
+      "title": "User Profile",
+      "description": "Authenticated user account and assigned workspace role.",
+      "type": "object",
+      "properties": {
+        "uid": { "type": "string" },
+        "email": { "type": "string", "format": "email" },
+        "displayName": { "type": "string" },
+        "role": {
+          "type": "string",
+          "enum": ["customer", "seller", "finance", "business_head"]
+        },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["uid", "email", "displayName", "role", "createdAt"]
+    },
+    "Product": {
+      "title": "Catalog Product",
+      "description": "Seller-managed product with integer minor-unit pricing.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "sku": { "type": "string" },
+        "name": { "type": "string" },
+        "category": { "type": "string" },
+        "priceMinor": { "type": "integer" },
+        "currency": { "type": "string", "enum": ["INR", "USD"] },
+        "sellerId": { "type": "string" },
+        "stock": { "type": "integer" },
+        "status": { "type": "string" },
+        "image": { "type": "string" },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["id", "sku", "name", "priceMinor", "currency", "sellerId", "stock", "createdAt"]
+    },
+    "ProductAsset": {
+      "title": "Product 3D/AR Asset",
+      "description": "3D GLB/USDZ and 2D studio image assets linked to a product.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "productId": { "type": "string" },
+        "sku": { "type": "string" },
+        "sellerId": { "type": "string" },
+        "assetType": { "type": "string", "enum": ["glb", "usdz", "image"] },
+        "url": { "type": "string" },
+        "arReady": { "type": "boolean" }
+      },
+      "required": ["id", "productId", "sku", "sellerId", "assetType", "url"]
+    },
+    "Inventory": {
+      "title": "Inventory Stock Record",
+      "description": "Available and reserved unit counts per SKU.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "productId": { "type": "string" },
+        "sku": { "type": "string" },
+        "sellerId": { "type": "string" },
+        "availableQty": { "type": "integer" },
+        "reservedQty": { "type": "integer" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["id", "productId", "sku", "sellerId", "availableQty", "reservedQty", "updatedAt"]
+    },
+    "Cart": {
+      "title": "Customer SmartCart",
+      "description": "Customer cart with budget ceiling in integer minor units.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "customerId": { "type": "string" },
+        "currency": { "type": "string", "enum": ["INR", "USD"] },
+        "budgetMinor": { "type": "integer" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["id", "customerId", "currency", "budgetMinor", "updatedAt"]
+    },
+    "Order": {
+      "title": "Commercial Order",
+      "description": "Order record with server-computed minor-unit totals and application-level escrow state.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "orderNumber": { "type": "string" },
+        "customerId": { "type": "string" },
+        "sellerId": { "type": "string" },
+        "buyerName": { "type": "string" },
+        "buyerEmail": { "type": "string" },
+        "currency": { "type": "string", "enum": ["INR", "USD"] },
+        "subtotalMinor": { "type": "integer" },
+        "taxMinor": { "type": "integer" },
+        "totalMinor": { "type": "integer" },
+        "paymentStatus": {
+          "type": "string",
+          "enum": ["Pending", "Authorized", "Captured", "Failed", "Cancelled", "Refunded"]
+        },
+        "escrowState": {
+          "type": "string",
+          "enum": ["created", "funded", "in_delivery", "released", "disputed", "refunded"]
+        },
+        "paypalOrderId": { "type": "string" },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": [
+        "id",
+        "orderNumber",
+        "customerId",
+        "sellerId",
+        "currency",
+        "subtotalMinor",
+        "taxMinor",
+        "totalMinor",
+        "paymentStatus",
+        "escrowState",
+        "createdAt"
+      ]
+    },
+    "OrderItem": {
+      "title": "Order Line Item",
+      "description": "Individual SKU line item within an order.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "orderId": { "type": "string" },
+        "customerId": { "type": "string" },
+        "sellerId": { "type": "string" },
+        "sku": { "type": "string" },
+        "name": { "type": "string" },
+        "quantity": { "type": "integer" },
+        "unitPriceMinor": { "type": "integer" },
+        "totalMinor": { "type": "integer" }
+      },
+      "required": ["id", "orderId", "customerId", "sellerId", "sku", "quantity", "unitPriceMinor", "totalMinor"]
+    },
+    "Payment": {
+      "title": "PayPal Payment Settlement Record",
+      "description": "Server-verified PayPal Sandbox Orders v2 capture/authorization record.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "orderId": { "type": "string" },
+        "customerId": { "type": "string" },
+        "sellerId": { "type": "string" },
+        "paypalOrderId": { "type": "string" },
+        "paypalCaptureId": { "type": "string" },
+        "intent": { "type": "string", "enum": ["CAPTURE", "AUTHORIZE"] },
+        "status": {
+          "type": "string",
+          "enum": ["Pending", "Authorized", "Captured", "Failed", "Cancelled", "Refunded"]
+        },
+        "currency": { "type": "string", "enum": ["INR", "USD"] },
+        "grossMinor": { "type": "integer" },
+        "paypalFeeMinor": { "type": "integer" },
+        "netMinor": { "type": "integer" },
+        "feesFromProvider": { "type": "boolean" },
+        "verifiedByServer": { "type": "boolean" },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": [
+        "id",
+        "orderId",
+        "customerId",
+        "sellerId",
+        "paypalOrderId",
+        "intent",
+        "status",
+        "currency",
+        "grossMinor",
+        "feesFromProvider",
+        "verifiedByServer",
+        "createdAt"
+      ]
+    },
+    "Invoice": {
+      "title": "GST Commercial Invoice",
+      "description": "Tax invoice with invoiceStatus tracked independently from paymentStatus.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "invoiceNumber": { "type": "string" },
+        "sellerId": { "type": "string" },
+        "customerId": { "type": "string" },
+        "clientName": { "type": "string" },
+        "clientGstin": { "type": "string" },
+        "currency": { "type": "string", "enum": ["INR", "USD"] },
+        "subtotalMinor": { "type": "integer" },
+        "taxMinor": { "type": "integer" },
+        "totalMinor": { "type": "integer" },
+        "invoiceStatus": { "type": "string", "enum": ["draft", "issued", "overdue", "paid", "void"] },
+        "paymentStatus": {
+          "type": "string",
+          "enum": ["Pending", "Authorized", "Captured", "Failed", "Cancelled", "Refunded"]
+        },
+        "issuedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": [
+        "id",
+        "invoiceNumber",
+        "sellerId",
+        "clientName",
+        "currency",
+        "subtotalMinor",
+        "taxMinor",
+        "totalMinor",
+        "invoiceStatus",
+        "paymentStatus",
+        "issuedAt"
+      ]
+    },
+    "InvoiceItem": {
+      "title": "Invoice Line Item",
+      "description": "Line item belonging to a GST invoice.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "invoiceId": { "type": "string" },
+        "sellerId": { "type": "string" },
+        "sku": { "type": "string" },
+        "hsn": { "type": "string" },
+        "name": { "type": "string" },
+        "quantity": { "type": "integer" },
+        "unitRateMinor": { "type": "integer" },
+        "gstRatePercent": { "type": "number" },
+        "totalMinor": { "type": "integer" }
+      },
+      "required": ["id", "invoiceId", "sellerId", "sku", "name", "quantity", "unitRateMinor", "gstRatePercent", "totalMinor"]
+    },
+    "Refund": {
+      "title": "Refund Record",
+      "description": "Buyer refund linked to a payment and order.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "orderId": { "type": "string" },
+        "paymentId": { "type": "string" },
+        "customerId": { "type": "string" },
+        "sellerId": { "type": "string" },
+        "amountMinor": { "type": "integer" },
+        "currency": { "type": "string", "enum": ["INR", "USD"] },
+        "reason": { "type": "string" },
+        "status": { "type": "string", "enum": ["Pending", "Completed", "Failed"] },
+        "actorId": { "type": "string" },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["id", "orderId", "paymentId", "customerId", "sellerId", "amountMinor", "currency", "reason", "status", "actorId", "createdAt"]
+    },
+    "EscrowEvent": {
+      "title": "Escrow State Transition Audit Event",
+      "description": "Immutable append-only audit entry recording every escrow state transition.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "orderId": { "type": "string" },
+        "customerId": { "type": "string" },
+        "sellerId": { "type": "string" },
+        "fromState": { "type": "string" },
+        "toState": {
+          "type": "string",
+          "enum": ["created", "funded", "in_delivery", "released", "disputed", "refunded"]
+        },
+        "actorId": { "type": "string" },
+        "actorRole": { "type": "string" },
+        "reason": { "type": "string" },
+        "timestamp": { "type": "string", "format": "date-time" }
+      },
+      "required": ["id", "orderId", "toState", "actorId", "actorRole", "reason", "timestamp"]
+    },
+    "Business": {
+      "title": "Business Entity",
+      "description": "Multi-tenant merchant workspace and company identity.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "ownerUid": { "type": "string" },
+        "name": { "type": "string" },
+        "slug": { "type": "string" },
+        "category": { "type": "string" },
+        "tagline": { "type": "string" },
+        "logoUrl": { "type": "string" },
+        "currency": { "type": "string", "enum": ["INR", "USD", "EUR", "GBP"] },
+        "taxGstNumber": { "type": "string" },
+        "paypalConnected": { "type": "boolean" },
+        "paypalEmail": { "type": "string" },
+        "shippingPolicy": { "type": "string" },
+        "returnPolicy": { "type": "string" },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["id", "ownerUid", "name", "slug", "category", "currency", "createdAt"]
+    },
+    "StorefrontConfig": {
+      "title": "Storefront Configuration",
+      "description": "Visual theme, layout, template, and presentation settings for public storefront.",
+      "type": "object",
+      "properties": {
+        "bizId": { "type": "string" },
+        "templateId": { "type": "string", "enum": ["minimal", "boutique", "electronics", "grocery", "fashion", "bold_dark"] },
+        "isPublished": { "type": "boolean" },
+        "version": { "type": "integer" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["bizId", "templateId", "isPublished"]
+    },
+    "StorefrontOrder": {
+      "title": "Storefront Customer Order",
+      "description": "Public customer order placed on storefront with escrow protection.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "bizId": { "type": "string" },
+        "orderNumber": { "type": "string" },
+        "customerName": { "type": "string" },
+        "customerEmail": { "type": "string" },
+        "total": { "type": "integer" },
+        "escrowStatus": { "type": "string", "enum": ["Escrow Locked", "In Transit", "Delivered — Escrow Released", "Disputed"] },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["id", "bizId", "orderNumber", "customerName", "customerEmail", "total", "escrowStatus", "createdAt"]
+    },
+    "DomainRecord": {
+      "title": "Custom Domain Record",
+      "description": "Mapping from custom domain or store subdomain to bizId.",
+      "type": "object",
+      "properties": {
+        "domain": { "type": "string" },
+        "bizId": { "type": "string" },
+        "slug": { "type": "string" },
+        "status": { "type": "string", "enum": ["pending", "verified", "ssl_issued"] },
+        "verifiedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["domain", "bizId", "slug", "status"]
+    }
+  },
+  "firestore": {
+    "/businesses/{bizId}": {
+      "schema": { "$ref": "#/entities/Business" },
+      "description": "Business profile and merchant settings"
+    },
+    "/businesses/{bizId}/storefrontConfig/{configId}": {
+      "schema": { "$ref": "#/entities/StorefrontConfig" },
+      "description": "Visual theme and storefront configuration"
+    },
+    "/businesses/{bizId}/products/{productId}": {
+      "schema": { "$ref": "#/entities/Product" },
+      "description": "Products published by this merchant"
+    },
+    "/businesses/{bizId}/orders/{orderId}": {
+      "schema": { "$ref": "#/entities/StorefrontOrder" },
+      "description": "Orders received by this merchant from public storefront"
+    },
+    "/domains/{domain}": {
+      "schema": { "$ref": "#/entities/DomainRecord" },
+      "description": "Subdomain and custom domain DNS mapping"
+    },
+    "/users/{userId}": {
+      "schema": { "$ref": "#/entities/User" },
+      "description": "User accounts and role assignments"
+    },
+    "/products/{productId}": {
+      "schema": { "$ref": "#/entities/Product" },
+      "description": "Seller product catalog"
+    },
+    "/productAssets/{assetId}": {
+      "schema": { "$ref": "#/entities/ProductAsset" },
+      "description": "3D/AR and studio image assets for products"
+    },
+    "/inventory/{inventoryId}": {
+      "schema": { "$ref": "#/entities/Inventory" },
+      "description": "SKU stock levels"
+    },
+    "/carts/{cartId}": {
+      "schema": { "$ref": "#/entities/Cart" },
+      "description": "Customer SmartCarts"
+    },
+    "/orders/{orderId}": {
+      "schema": { "$ref": "#/entities/Order" },
+      "description": "Orders and escrow states"
+    },
+    "/orderItems/{itemId}": {
+      "schema": { "$ref": "#/entities/OrderItem" },
+      "description": "Order line items"
+    },
+    "/payments/{paymentId}": {
+      "schema": { "$ref": "#/entities/Payment" },
+      "description": "PayPal settlement records"
+    },
+    "/invoices/{invoiceId}": {
+      "schema": { "$ref": "#/entities/Invoice" },
+      "description": "GST commercial invoices"
+    },
+    "/invoiceItems/{itemId}": {
+      "schema": { "$ref": "#/entities/InvoiceItem" },
+      "description": "Invoice line items"
+    },
+    "/refunds/{refundId}": {
+      "schema": { "$ref": "#/entities/Refund" },
+      "description": "Refund records"
+    },
+    "/escrowEvents/{eventId}": {
+      "schema": { "$ref": "#/entities/EscrowEvent" },
+      "description": "Immutable escrow transition audit log"
+    }
+  }
+}

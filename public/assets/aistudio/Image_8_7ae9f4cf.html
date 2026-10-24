@@ -1,0 +1,717 @@
+<!DOCTYPE html>
+
+<html lang="en"><head><meta charset="utf-8"/><meta content="width=device-width, initial-scale=1.0" name="viewport"/><meta content="web_dashboard" name="shell-type"/><link href="https://fonts.googleapis.com" rel="preconnect"/><link crossorigin="" href="https://fonts.gstatic.com" rel="preconnect"/><link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&amp;family=Plus+Jakarta+Sans:wght@600;700&amp;display=swap" rel="stylesheet"/><link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:opsz,wght,FILL,GRAD@20..48,100..700,0..1,-50..200" rel="stylesheet"/>
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet"/><style>@layer base{html,body{margin:0;padding:0;}body{overscroll-behavior:none;}main>:first-child{margin-top:0!important;}main>:last-child{margin-bottom:0!important;}}::-webkit-scrollbar{display:none;}</style><script src="https://cdn.tailwindcss.com"></script><script id="tailwind-config">tailwind.config={"darkMode":"class","theme":{"extend":{"colors":{"on-primary":"#ffffff","on-tertiary-fixed":"#07006c","surface-dim":"#cbdbf5","surface-tint":"#0053db","primary-container":"#2563eb","on-secondary-container":"#5c647a","surface-container":"#e5eeff","on-primary-fixed":"#00174b","inverse-primary":"#b4c5ff","surface-variant":"#d3e4fe","primary-fixed-dim":"#b4c5ff","error-container":"#ffdad6","on-secondary":"#ffffff","surface":"#f8f9ff","on-surface":"#0b1c30","tertiary-fixed":"#e1e0ff","tertiary-container":"#585be6","on-error":"#ffffff","secondary-fixed-dim":"#bec6e0","surface-bright":"#f8f9ff","inverse-on-surface":"#eaf1ff","on-tertiary":"#ffffff","outline-variant":"#c3c6d7","primary-fixed":"#dbe1ff","surface-container-high":"#dce9ff","secondary-fixed":"#dae2fd","on-surface-variant":"#434655","on-background":"#0b1c30","surface-container-low":"#eff4ff","tertiary-fixed-dim":"#c0c1ff","on-primary-fixed-variant":"#003ea8","on-error-container":"#93000a","primary":"#004ac6","inverse-surface":"#213145","on-tertiary-container":"#f1eeff","surface-container-lowest":"#ffffff","secondary-container":"#dae2fd","outline":"#737686","on-secondary-fixed-variant":"#3f465c","error":"#ba1a1a","background":"#f8f9ff","on-secondary-fixed":"#131b2e","secondary":"#565e74","surface-container-highest":"#d3e4fe","tertiary":"#3e3fcc","on-tertiary-fixed-variant":"#2f2ebe","on-primary-container":"#eeefff"},"borderRadius":{"DEFAULT":"0.25rem","lg":"0.5rem","xl":"0.75rem","full":"9999px"},"spacing":{"gutter-sm":"1rem","margin-mobile":"1rem","margin-desktop":"2.5rem","space-lg":"1.5rem","space-md":"1rem","space-xs":"0.25rem","gutter-lg":"2rem","gutter":"1.5rem","space-sm":"0.5rem","margin":"1.5rem","space-xl":"2rem"},"fontFamily":{"label-sm":["Inter"],"headline-md":["Plus Jakarta Sans"],"display-lg-mobile":["Plus Jakarta Sans"],"body-sm":["Inter"],"label-md":["Inter"],"headline-lg":["Plus Jakarta Sans"],"tabular-nums":["Inter"],"display-lg":["Plus Jakarta Sans"],"headline-xl":["Plus Jakarta Sans"],"body-md":["Inter"],"headline-sm":["Plus Jakarta Sans"],"headline-xl-mobile":["Plus Jakarta Sans"],"body-lg":["Inter"],"label-lg":["Inter"]},"fontSize":{"label-sm":["11px",{"lineHeight":"14px","fontWeight":"600"}],"headline-md":["20px",{"lineHeight":"28px","fontWeight":"600"}],"display-lg-mobile":["36px",{"lineHeight":"44px","fontWeight":"700"}],"body-sm":["12px",{"lineHeight":"16px","fontWeight":"400"}],"label-md":["12px",{"lineHeight":"16px","fontWeight":"500"}],"headline-lg":["24px",{"lineHeight":"32px","fontWeight":"600"}],"tabular-nums":["14px",{"lineHeight":"20px","fontWeight":"500"}],"display-lg":["48px",{"lineHeight":"56px","fontWeight":"700"}],"headline-xl":["32px",{"lineHeight":"40px","fontWeight":"700"}],"body-md":["14px",{"lineHeight":"20px","fontWeight":"400"}],"headline-sm":["16px",{"lineHeight":"24px","fontWeight":"600"}],"headline-xl-mobile":["26px",{"lineHeight":"34px","fontWeight":"700"}],"body-lg":["16px",{"lineHeight":"24px","fontWeight":"400"}],"label-lg":["14px",{"lineHeight":"20px","fontWeight":"500"}]}}}}</script></head><body class="bg-surface text-on-surface antialiased"><header class="fixed top-0 left-0 right-0 h-16 z-50 bg-surface/85 backdrop-blur-xl shadow-[0_1px_8px_rgba(0,0,0,0.04)] flex items-center justify-between px-6"><div class="flex items-center gap-6"><div class="flex items-center gap-3"><div class="w-9 h-9 rounded-xl bg-primary-container flex items-center justify-center text-on-primary shadow-sm"><span class="material-symbols-outlined text-[20px]">bolt</span></div><div class="flex flex-col"><span class="font-headline-sm text-headline-sm tracking-tight text-on-surface flex items-center gap-1.5">ACPayPalet <span class="font-label-sm text-label-sm px-1.5 py-0.5 rounded bg-surface-container-high text-primary font-bold uppercase tracking-wider">AI</span></span></div></div><div class="hidden xl:flex items-center bg-surface-container-low p-1 rounded-lg"><nav class="flex items-center gap-1" data-active-classes="bg-surface-container-lowest text-on-surface shadow-sm font-semibold rounded-md"><a aria-current="page" class="px-3 py-1.5 transition-all bg-surface-container-lowest text-on-surface shadow-sm font-semibold rounded-md" data-path="discovery" href="#">Customer</a><a class="px-3 py-1.5 text-on-surface-variant font-label-md text-label-md hover:text-on-surface transition-all" data-path="seller-operations" href="#">Seller Operations</a><a class="px-3 py-1.5 text-on-surface-variant font-label-md text-label-md hover:text-on-surface transition-all" data-path="finance-ledger" href="#">Finance</a><a class="px-3 py-1.5 text-on-surface-variant font-label-md text-label-md hover:text-on-surface transition-all" data-path="executive-insights" href="#">Executive / Head</a></nav></div></div><div class="flex items-center gap-3.5"><div class="relative hidden md:flex items-center"><span class="material-symbols-outlined absolute left-3 text-secondary text-[18px]">search</span><input class="w-64 lg:w-72 h-9 pl-9 pr-4 rounded-lg bg-surface-container-lowest text-on-surface font-body-sm text-body-sm shadow-[0_1px_3px_rgba(0,0,0,0.05)] focus:outline-none placeholder:text-outline-variant" placeholder="Search transactions, SKU, ledger..." type="text"/></div><button class="flex items-center gap-2 px-3.5 h-9 rounded-lg bg-primary-container text-on-primary font-label-md text-label-md shadow-sm hover:opacity-95 transition-opacity"><span class="material-symbols-outlined text-[18px]">smart_toy</span><span>Ask ACPayPalet AI</span></button><button class="relative w-9 h-9 rounded-lg bg-surface-container-lowest flex items-center justify-center text-on-surface-variant hover:text-on-surface transition-colors shadow-[0_1px_3px_rgba(0,0,0,0.05)]"><span class="material-symbols-outlined text-[20px]">notifications</span><span class="absolute top-2 right-2 w-2 h-2 rounded-full bg-error ring-2 ring-surface-container-lowest"></span></button><div class="flex items-center gap-2.5 pl-2"><div class="w-8 h-8 rounded-full bg-primary flex items-center justify-center"><span class="material-symbols-outlined text-on-primary text-[18px]">person</span></div><div class="hidden lg:flex flex-col text-left"><span class="font-label-md text-label-md text-on-surface leading-tight">Morgan Vance</span><span class="font-body-sm text-body-sm text-secondary leading-tight">Global VP</span></div></div></div></header><aside class="fixed left-0 top-16 bottom-0 w-64 bg-surface-container-lowest z-40 flex flex-col justify-between overflow-y-auto shadow-[1px_0_8px_rgba(0,0,0,0.02)]"><div class="p-4 flex flex-col gap-6"><div class="flex flex-col gap-1.5"><span class="px-3 font-label-sm text-label-sm text-secondary uppercase tracking-wider font-semibold">Customer Experience</span><nav class="flex flex-col gap-1" data-active-classes="bg-primary-container text-on-primary font-semibold rounded-lg shadow-sm"><a aria-current="page" class="flex items-center gap-3 px-3 py-2 transition-colors bg-primary-container text-on-primary font-semibold rounded-lg shadow-sm" data-path="discovery" href="#"><span class="material-symbols-outlined text-[20px]">explore</span>Discovery</a><a class="flex items-center gap-3 px-3 py-2 rounded-lg text-on-surface-variant font-label-md text-label-md hover:bg-surface-container-low hover:text-on-surface transition-colors" data-path="smartcart-ai" href="#"><span class="material-symbols-outlined text-[20px]">shopping_bag</span>SmartCart AI</a><a class="flex items-center gap-3 px-3 py-2 rounded-lg text-on-surface-variant font-label-md text-label-md hover:bg-surface-container-low hover:text-on-surface transition-colors" data-path="3d-ar-experience" href="#"><span class="material-symbols-outlined text-[20px]">view_in_ar</span>3D / AR Experience</a><a class="flex items-center gap-3 px-3 py-2 rounded-lg text-on-surface-variant font-label-md text-label-md hover:bg-surface-container-low hover:text-on-surface transition-colors" data-path="orders" href="#"><span class="material-symbols-outlined text-[20px]">receipt_long</span>Orders</a></nav></div><div class="flex flex-col gap-1.5"><span class="px-3 font-label-sm text-label-sm text-secondary uppercase tracking-wider font-semibold">Merchant &amp; Finance</span><nav class="flex flex-col gap-1" data-active-classes="bg-primary-container text-on-primary font-semibold rounded-lg shadow-sm"><a class="flex items-center gap-3 px-3 py-2 rounded-lg text-on-surface-variant font-label-md text-label-md hover:bg-surface-container-low hover:text-on-surface transition-colors" data-path="seller-operations" href="#"><span class="material-symbols-outlined text-[20px]">storefront</span>Seller Workspace</a><a class="flex items-center gap-3 px-3 py-2 rounded-lg text-on-surface-variant font-label-md text-label-md hover:bg-surface-container-low hover:text-on-surface transition-colors" data-path="finance-ledger" href="#"><span class="material-symbols-outlined text-[20px]">account_balance_wallet</span>Finance Ledger</a><a class="flex items-center gap-3 px-3 py-2 rounded-lg text-on-surface-variant font-label-md text-label-md hover:bg-surface-container-low hover:text-on-surface transition-colors" data-path="executive-insights" href="#"><span class="material-symbols-outlined text-[20px]">insights</span>Executive Insights</a></nav></div></div><div class="p-4 mx-3 mb-4 rounded-xl bg-surface-container-low shadow-[0_1px_3px_rgba(0,0,0,0.03)] flex flex-col gap-2.5"><div class="flex items-center justify-between"><span class="font-label-sm text-label-sm uppercase tracking-wider text-secondary font-semibold">Escrow Pipeline</span><span class="flex items-center gap-1.5 font-label-sm text-label-sm text-primary font-semibold"><span class="w-2 h-2 rounded-full bg-primary animate-pulse"></span>Live</span></div><div class="flex items-center justify-between text-on-surface font-label-md text-label-md"><span class="text-secondary">Sandbox Mode</span><span class="font-semibold text-primary font-tabular-nums text-tabular-nums">v2.4 Ready</span></div><div class="h-1.5 w-full bg-surface-container-high rounded-full overflow-hidden"><div class="h-full bg-primary rounded-full w-4/5"></div></div><span class="font-body-sm text-body-sm text-secondary text-[11px]">PayPal Escrow Active · 99.98% sync</span></div></aside><div class="pl-64"><main class="w-full pt-16 bg-surface min-h-screen"><div class="flex flex-col w-full">
+<!-- Interactive Prompt & Discovery Banner -->
+<section class="p-6 md:p-8 bg-surface-container-low relative overflow-hidden">
+<div class="max-w-7xl mx-auto flex flex-col gap-6 relative z-10">
+<!-- Micro Utility Breadcrumb & Meta -->
+<div class="flex flex-wrap items-center justify-between gap-4">
+<div class="flex items-center gap-2">
+<span class="font-label-sm text-label-sm uppercase tracking-wider text-primary font-bold bg-surface-container px-2.5 py-1 rounded">ACPayPalet Discovery Core</span>
+<span class="text-secondary text-xs">•</span>
+<span class="font-body-sm text-body-sm text-secondary">Neural Context Model v4.2 • Autonomous Escrow Verified</span>
+</div>
+<div class="flex items-center gap-2 bg-surface-container-lowest px-3 py-1.5 rounded-full shadow-sm">
+<span class="w-2 h-2 rounded-full bg-primary animate-pulse"></span>
+<span class="font-label-sm text-label-sm text-on-surface font-semibold">Dynamic Semantic Parsing</span>
+<span class="font-tabular-nums text-tabular-nums text-primary text-xs font-bold">142ms latency</span>
+</div>
+</div>
+<!-- Natural Language AI Prompt Capsule -->
+<div class="bg-surface-container-lowest rounded-2xl p-5 md:p-6 shadow-sm flex flex-col lg:flex-row items-stretch lg:items-center justify-between gap-6">
+<div class="flex items-start gap-4 flex-1">
+<div class="w-12 h-12 rounded-xl bg-primary-container text-on-primary flex items-center justify-center shrink-0 shadow-sm mt-0.5">
+<span class="material-symbols-outlined text-[26px]">neurology</span>
+</div>
+<div class="flex flex-col gap-1.5">
+<div class="flex items-center gap-2 flex-wrap">
+<span class="font-label-sm text-label-sm text-secondary uppercase tracking-wider">Active Natural Language Query</span>
+<span class="font-label-sm text-label-sm px-2 py-0.5 rounded-full bg-emerald-50 text-emerald-700 font-semibold flex items-center gap-1">
+<span class="w-1.5 h-1.5 rounded-full bg-emerald-500"></span> AI Match Confidence: 98%
+              </span>
+<span class="font-label-sm text-label-sm px-2 py-0.5 rounded-full bg-surface-container-high text-primary font-semibold">
+                PayPal Pay in 4 Available
+              </span>
+</div>
+<p class="font-headline-md text-headline-md text-on-surface leading-snug tracking-tight">
+              “I need a whisper-quiet ceiling fan for a 200 sq ft bedroom with smart home and BLDC motor under ₹12,000”
+            </p>
+</div>
+</div>
+<div class="flex items-center gap-3 shrink-0 self-end lg:self-center">
+<button class="flex items-center gap-2 px-4 h-11 rounded-lg bg-surface-container text-primary hover:bg-surface-container-high font-label-lg text-label-lg transition-colors" id="refineQueryBtn">
+<span class="material-symbols-outlined text-[20px]">tune</span>
+<span>Refine Prompt</span>
+</button>
+<button class="flex items-center gap-2 px-5 h-11 rounded-lg bg-primary-container text-on-primary hover:opacity-95 font-label-lg text-label-lg shadow-sm transition-all">
+<span class="material-symbols-outlined text-[20px]">refresh</span>
+<span>Synthesize New Match</span>
+</button>
+</div>
+</div>
+<!-- Quick AI Parsed Facets Chips -->
+<div class="flex flex-wrap items-center gap-2 pt-1">
+<span class="font-label-sm text-label-sm text-secondary font-medium mr-2">Parsed Intent Tags:</span>
+<span class="inline-flex items-center gap-1.5 bg-surface-container-lowest text-on-surface font-label-md text-label-md px-3 py-1 rounded-lg shadow-sm">
+<span class="material-symbols-outlined text-[16px] text-primary">volume_off</span> Whisper-Quiet &lt;30dB
+        </span>
+<span class="inline-flex items-center gap-1.5 bg-surface-container-lowest text-on-surface font-label-md text-label-md px-3 py-1 rounded-lg shadow-sm">
+<span class="material-symbols-outlined text-[16px] text-primary">square_foot</span> 200 sq. ft. Profile
+        </span>
+<span class="inline-flex items-center gap-1.5 bg-surface-container-lowest text-on-surface font-label-md text-label-md px-3 py-1 rounded-lg shadow-sm">
+<span class="material-symbols-outlined text-[16px] text-primary">bolt</span> BLDC Energy Inverter
+        </span>
+<span class="inline-flex items-center gap-1.5 bg-surface-container-lowest text-on-surface font-label-md text-label-md px-3 py-1 rounded-lg shadow-sm">
+<span class="material-symbols-outlined text-[16px] text-primary">payments</span> Max ₹12,000
+        </span>
+<span class="inline-flex items-center gap-1.5 bg-surface-container-lowest text-on-surface font-label-md text-label-md px-3 py-1 rounded-lg shadow-sm">
+<span class="material-symbols-outlined text-[16px] text-primary">hub</span> Matter &amp; Alexa Smart
+        </span>
+</div>
+</div>
+</section>
+<!-- Category Nav Strip -->
+<section class="bg-surface-container-lowest px-6 md:px-8 shadow-sm">
+<div class="max-w-7xl mx-auto flex items-center justify-between overflow-x-auto py-3 gap-3">
+<div class="flex items-center gap-2 shrink-0">
+<button class="px-4 py-2 rounded-lg font-label-md text-label-md bg-surface-container text-secondary hover:text-on-surface transition-all">
+          All Categories
+        </button>
+<button class="px-4 py-2 rounded-lg font-label-md text-label-md bg-primary-container text-on-primary font-semibold shadow-sm flex items-center gap-2">
+<span class="material-symbols-outlined text-[18px]">mode_fan</span>
+          Smart Ceiling Fans (Featured)
+        </button>
+<button class="px-4 py-2 rounded-lg font-label-md text-label-md bg-surface-container-low text-secondary hover:text-on-surface transition-all flex items-center gap-2">
+<span class="material-symbols-outlined text-[18px]">sports_tennis</span>
+          Badminton &amp; Sports Gear
+        </button>
+<button class="px-4 py-2 rounded-lg font-label-md text-label-md bg-surface-container-low text-secondary hover:text-on-surface transition-all flex items-center gap-2">
+<span class="material-symbols-outlined text-[18px]">chair</span>
+          Ergonomic Workstations
+        </button>
+<button class="px-4 py-2 rounded-lg font-label-md text-label-md bg-surface-container-low text-secondary hover:text-on-surface transition-all flex items-center gap-2">
+<span class="material-symbols-outlined text-[18px]">graphic_eq</span>
+          Audio &amp; Acoustics
+        </button>
+<button class="px-4 py-2 rounded-lg font-label-md text-label-md bg-surface-container-low text-secondary hover:text-on-surface transition-all flex items-center gap-2">
+<span class="material-symbols-outlined text-[18px]">palette</span>
+          Furniture &amp; Decor
+        </button>
+</div>
+<div class="hidden lg:flex items-center gap-2 shrink-0 pl-4">
+<div class="h-4 w-px bg-surface-container-high"></div>
+<span class="font-label-sm text-label-sm text-secondary">Verified Seller Escrow:</span>
+<span class="flex items-center gap-1 font-label-sm text-label-sm font-bold text-primary">
+<span class="material-symbols-outlined text-[16px]">verified_user</span> 100% Protected
+        </span>
+</div>
+</div>
+</section>
+<!-- Main Exploration Grid with Filtering Drawer -->
+<section class="max-w-7xl mx-auto w-full px-6 md:px-8 py-8 flex flex-col lg:flex-row gap-8">
+<!-- Filter Sidebar -->
+<aside class="w-full lg:w-72 shrink-0 flex flex-col gap-6">
+<!-- Filter Head -->
+<div class="flex items-center justify-between pb-2">
+<div class="flex items-center gap-2">
+<span class="material-symbols-outlined text-primary text-[20px]">filter_alt</span>
+<span class="font-headline-sm text-headline-sm text-on-surface">Precision Filters</span>
+</div>
+<button class="font-label-sm text-label-sm text-primary hover:underline">Reset All</button>
+</div>
+<!-- AR / 3D Spatial Toggle Filter -->
+<div class="p-4 rounded-xl bg-surface-container-low flex flex-col gap-3">
+<div class="flex items-center justify-between">
+<div class="flex items-center gap-2">
+<span class="material-symbols-outlined text-primary text-[22px]">view_in_ar</span>
+<div class="flex flex-col">
+<span class="font-label-md text-label-md text-on-surface font-semibold">AR / 3D Preview</span>
+<span class="font-body-sm text-body-sm text-secondary text-[11px]">True-scale real world test</span>
+</div>
+</div>
+<label class="relative inline-flex items-center cursor-pointer">
+<input checked="" class="sr-only peer" id="arToggle" type="checkbox"/>
+<div class="w-11 h-6 bg-surface-container-highest peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-primary-container"></div>
+</label>
+</div>
+<div class="flex items-center justify-between text-xs bg-surface-container-lowest px-3 py-1.5 rounded-lg text-secondary">
+<span>Camera WebXR ready</span>
+<span class="text-primary font-bold font-tabular-nums text-tabular-nums">3 matches</span>
+</div>
+</div>
+<!-- Room Size Suitability -->
+<div class="bg-surface-container-lowest p-4 rounded-xl shadow-sm flex flex-col gap-3">
+<div class="flex items-center justify-between">
+<span class="font-label-md text-label-md font-semibold text-on-surface">Room Size Rating</span>
+<span class="font-label-sm text-label-sm text-primary font-bold">Bedroom (~200 sq ft)</span>
+</div>
+<div class="grid grid-cols-3 gap-2">
+<button class="py-2 text-center rounded-lg bg-surface-container-low text-secondary font-label-sm text-label-sm hover:text-on-surface">Compact (&lt;120)</button>
+<button class="py-2 text-center rounded-lg bg-primary-container text-on-primary font-label-sm text-label-sm font-semibold shadow-sm">Medium (200)</button>
+<button class="py-2 text-center rounded-lg bg-surface-container-low text-secondary font-label-sm text-label-sm hover:text-on-surface">Grand (&gt;300)</button>
+</div>
+</div>
+<!-- Price Slider Container -->
+<div class="bg-surface-container-lowest p-4 rounded-xl shadow-sm flex flex-col gap-3">
+<div class="flex items-center justify-between">
+<span class="font-label-md text-label-md font-semibold text-on-surface">Budget Constraint</span>
+<span class="font-tabular-nums text-tabular-nums text-primary font-bold">Up to ₹12,000</span>
+</div>
+<input class="w-full accent-primary h-2 bg-surface-container rounded-lg cursor-pointer" max="25000" min="4000" step="500" type="range" value="12000"/>
+<div class="flex justify-between items-center text-secondary font-tabular-nums text-tabular-nums text-xs">
+<span>₹4,000</span>
+<span>₹12,000 (Target)</span>
+<span>₹25,000+</span>
+</div>
+</div>
+<!-- Motor & Mechanism Type -->
+<div class="bg-surface-container-lowest p-4 rounded-xl shadow-sm flex flex-col gap-2.5">
+<span class="font-label-md text-label-md font-semibold text-on-surface">Motor Efficiency</span>
+<label class="flex items-center justify-between cursor-pointer py-1">
+<div class="flex items-center gap-2">
+<input checked="" class="w-4 h-4 rounded text-primary accent-primary" type="checkbox"/>
+<span class="font-body-md text-body-md text-on-surface">BLDC Ultra Silent Inverter</span>
+</div>
+<span class="font-label-sm text-label-sm text-secondary font-tabular-nums text-tabular-nums">14</span>
+</label>
+<label class="flex items-center justify-between cursor-pointer py-1">
+<div class="flex items-center gap-2">
+<input class="w-4 h-4 rounded text-primary accent-primary" type="checkbox"/>
+<span class="font-body-md text-body-md text-secondary">Standard Induction Motor</span>
+</div>
+<span class="font-label-sm text-label-sm text-secondary font-tabular-nums text-tabular-nums">6</span>
+</label>
+<label class="flex items-center justify-between cursor-pointer py-1">
+<div class="flex items-center gap-2">
+<input checked="" class="w-4 h-4 rounded text-primary accent-primary" type="checkbox"/>
+<span class="font-body-md text-body-md text-on-surface">IoT WiFi / Matter Enabled</span>
+</div>
+<span class="font-label-sm text-label-sm text-secondary font-tabular-nums text-tabular-nums">8</span>
+</label>
+</div>
+<!-- PayPal Escrow & Financing Guardrail -->
+<div class="bg-surface-container-lowest p-4 rounded-xl shadow-sm flex flex-col gap-2.5">
+<span class="font-label-md text-label-md font-semibold text-on-surface">Financing &amp; Settlement</span>
+<label class="flex items-center justify-between cursor-pointer py-1">
+<div class="flex items-center gap-2">
+<input checked="" class="w-4 h-4 rounded text-primary accent-primary" type="checkbox"/>
+<span class="font-body-md text-body-md text-on-surface">PayPal Pay in 4 (0% APR)</span>
+</div>
+<span class="font-label-sm text-label-sm text-primary font-bold">Enabled</span>
+</label>
+<label class="flex items-center justify-between cursor-pointer py-1">
+<div class="flex items-center gap-2">
+<input checked="" class="w-4 h-4 rounded text-primary accent-primary" type="checkbox"/>
+<span class="font-body-md text-body-md text-on-surface">Smart Escrow Release on Delivery</span>
+</div>
+<span class="material-symbols-outlined text-[16px] text-emerald-600">verified</span>
+</label>
+</div>
+<!-- AI Recommendation Diagnostics Callout -->
+<div class="p-4 rounded-xl bg-surface-container flex flex-col gap-2">
+<div class="flex items-center gap-2 text-primary font-label-md text-label-md font-semibold">
+<span class="material-symbols-outlined text-[18px]">lightbulb</span>
+          AI Dimension Assessment
+        </div>
+<p class="font-body-sm text-body-sm text-secondary leading-relaxed">
+          For a 200 sq ft room with 9.5 ft ceiling, a <strong>1200mm (48″) blade sweep</strong> delivers optimal 240 CMM airflow without peripheral air drag.
+        </p>
+</div>
+</aside>
+<!-- Product Discovery Main Canvas -->
+<div class="flex-1 flex flex-col gap-6 min-w-0">
+<!-- Grid Topbar / Quick Sorting -->
+<div class="flex flex-col sm:flex-row sm:items-center justify-between gap-4 pb-2">
+<div class="flex items-center gap-2">
+<span class="font-headline-sm text-headline-sm text-on-surface">Synthesized Matches</span>
+<span class="font-label-sm text-label-sm px-2 py-0.5 rounded-full bg-surface-container-high text-primary font-bold">4 Products Curated</span>
+</div>
+<div class="flex items-center gap-3">
+<span class="font-body-sm text-body-sm text-secondary">Sort by:</span>
+<div class="relative">
+<select class="h-9 pl-3 pr-8 rounded-lg bg-surface-container-lowest text-on-surface font-label-md text-label-md shadow-sm appearance-none focus:outline-none cursor-pointer">
+<option>AI Semantic Relevance (Highest)</option>
+<option>Price: Low to High</option>
+<option>Acoustic Rating (Quiet First)</option>
+<option>Customer Score</option>
+</select>
+<span class="material-symbols-outlined absolute right-2.5 top-2.5 text-secondary text-[18px] pointer-events-none">expand_more</span>
+</div>
+</div>
+</div>
+<!-- Products Grid -->
+<div class="grid grid-cols-1 md:grid-cols-2 gap-6">
+<!-- Product Card 1: AeroBreeze Stealth 1200mm Smart BLDC (Top Match) -->
+<div class="bg-surface-container-lowest rounded-2xl shadow-sm hover:shadow-md transition-all flex flex-col overflow-hidden relative group">
+<!-- Top Flag Strip -->
+<div class="absolute top-4 left-4 z-20 flex flex-wrap gap-1.5">
+<span class="bg-primary text-on-primary font-label-sm text-label-sm px-2.5 py-1 rounded-full shadow flex items-center gap-1 font-bold">
+<span class="material-symbols-outlined text-[14px]">auto_awesome</span> AI Top Pick (98% Match)
+            </span>
+<span class="bg-emerald-600 text-on-primary font-label-sm text-label-sm px-2.5 py-1 rounded-full shadow flex items-center gap-1">
+<span class="material-symbols-outlined text-[14px]">view_in_ar</span> AR Preview Ready
+            </span>
+</div>
+<button class="absolute top-4 right-4 z-20 w-9 h-9 rounded-full bg-surface-container-lowest/90 backdrop-blur text-secondary hover:text-error flex items-center justify-center shadow transition-colors">
+<span class="material-symbols-outlined text-[20px]">favorite</span>
+</button>
+<!-- Visual Showcase Area -->
+<div class="relative w-full h-64 bg-surface-container-low flex items-center justify-center overflow-hidden">
+<img class="w-full h-full object-cover group-hover:scale-105 transition-transform duration-500" data-alt="A minimalist architectural photograph of the AeroBreeze Stealth 1200mm matte black smart BLDC ceiling fan mounted on a clean white ceiling in a contemporary Nordic master bedroom, morning natural light, deep blue accents, crisp studio quality photography." src="https://lh3.googleusercontent.com/aida-public/AB6AXuAdZqURIDL_NaUXiAifTbLg4cem9jV1GV8iZOZph4aZvIM_kBIBsVSYaq0LFoeWQ1Xe11jOuDpYR0RHnVhSurjQprJuCqeXfR6luOW8JojolfW3AL3RlJG5cFe-YmAZaYz7-lll8h5sqcs83z5WRWhCSmB_-pIxVPGanujJtlcWqHaGPRDckKJmoCqqWoVmhA4SIWYCZ53ylY77gEHOrpObunEt2PyFUzIVJzYoOpMS9aQvgYTluWmbLg"/>
+<div class="absolute bottom-3 left-3 bg-surface-container-lowest/90 backdrop-blur px-2.5 py-1 rounded-md shadow-sm flex items-center gap-2">
+<span class="material-symbols-outlined text-primary text-[16px]">air</span>
+<span class="font-label-sm text-label-sm text-on-surface font-semibold">28dB Ultra-Quiet BLDC</span>
+</div>
+<div class="absolute bottom-3 right-3 bg-surface-container-lowest/90 backdrop-blur px-2 py-1 rounded-md shadow-sm font-label-sm text-label-sm text-secondary font-tabular-nums text-tabular-nums">
+              1200mm Sweep
+            </div>
+</div>
+<!-- Product Details Body -->
+<div class="p-5 flex flex-col flex-1 justify-between gap-4">
+<div class="flex flex-col gap-2">
+<div class="flex items-center justify-between">
+<span class="font-label-sm text-label-sm text-primary uppercase font-bold tracking-wider">AeroBreeze Labs</span>
+<div class="flex items-center gap-1 text-amber-500 font-label-sm text-label-sm font-semibold">
+<span class="material-symbols-outlined text-[16px]" style="font-variation-settings: 'FILL' 1;">star</span>
+<span>4.8</span>
+<span class="text-secondary font-normal">(342 reviews)</span>
+</div>
+</div>
+<h3 class="font-headline-sm text-headline-sm text-on-surface font-semibold group-hover:text-primary transition-colors">
+                AeroBreeze Stealth 1200mm Smart BLDC Ceiling Fan
+              </h3>
+<p class="font-body-sm text-body-sm text-secondary line-clamp-2">
+                Engineered for master bedrooms up to 220 sq ft. 6-speed brushless motor, Alexa/HomeKit enabled, 5-Star BEE energy certified saving 65% power.
+              </p>
+<!-- Tags / Spec Matrix -->
+<div class="flex flex-wrap gap-1.5 pt-1">
+<span class="font-label-sm text-label-sm px-2 py-0.5 rounded bg-surface-container text-secondary">Matter Protocol</span>
+<span class="font-label-sm text-label-sm px-2 py-0.5 rounded bg-surface-container text-secondary">Reversible Winter Mode</span>
+<span class="font-label-sm text-label-sm px-2 py-0.5 rounded bg-surface-container text-secondary">LED Ambience Kit</span>
+</div>
+</div>
+<!-- Pricing & Action Bar -->
+<div class="pt-3 flex flex-col gap-3">
+<div class="flex items-baseline justify-between">
+<div class="flex items-baseline gap-2">
+<span class="font-headline-lg text-headline-lg text-on-surface font-bold font-tabular-nums text-tabular-nums">₹8,499</span>
+<span class="font-body-sm text-body-sm text-secondary line-through font-tabular-nums text-tabular-nums">₹12,999</span>
+<span class="font-label-sm text-label-sm text-emerald-700 font-bold bg-emerald-50 px-1.5 py-0.5 rounded">35% OFF</span>
+</div>
+<span class="font-label-sm text-label-sm text-secondary">or 4x ₹2,125 with PayPal</span>
+</div>
+<div class="grid grid-cols-2 gap-2">
+<button class="flex items-center justify-center gap-1.5 h-10 rounded-lg bg-surface-container text-primary hover:bg-surface-container-high font-label-md text-label-md font-semibold transition-colors" onclick="launchARModal('AeroBreeze Stealth 1200mm', '8499')">
+<span class="material-symbols-outlined text-[18px]">view_in_ar</span>
+<span>3D / AR View</span>
+</button>
+<button class="flex items-center justify-center gap-1.5 h-10 rounded-lg bg-primary-container text-on-primary hover:opacity-95 font-label-md text-label-md font-semibold shadow-sm transition-opacity">
+<span class="material-symbols-outlined text-[18px]">shopping_cart_checkout</span>
+<span>Quick Add</span>
+</button>
+</div>
+</div>
+</div>
+</div>
+<!-- Product Card 2: Voltix AeroStream Pro 1400mm -->
+<div class="bg-surface-container-lowest rounded-2xl shadow-sm hover:shadow-md transition-all flex flex-col overflow-hidden relative group">
+<div class="absolute top-4 left-4 z-20 flex flex-wrap gap-1.5">
+<span class="bg-surface-container-highest text-primary font-label-sm text-label-sm px-2.5 py-1 rounded-full shadow flex items-center gap-1 font-semibold">
+<span class="material-symbols-outlined text-[14px]">smart_toy</span> 94% Semantic Match
+            </span>
+<span class="bg-emerald-600 text-on-primary font-label-sm text-label-sm px-2.5 py-1 rounded-full shadow flex items-center gap-1">
+<span class="material-symbols-outlined text-[14px]">view_in_ar</span> 3D Ready
+            </span>
+</div>
+<button class="absolute top-4 right-4 z-20 w-9 h-9 rounded-full bg-surface-container-lowest/90 backdrop-blur text-secondary hover:text-error flex items-center justify-center shadow transition-colors">
+<span class="material-symbols-outlined text-[20px]">favorite</span>
+</button>
+<div class="relative w-full h-64 bg-surface-container-low flex items-center justify-center overflow-hidden">
+<img class="w-full h-full object-cover group-hover:scale-105 transition-transform duration-500" data-alt="Product photograph of Voltix AeroStream Pro 1400mm ceiling fan in brushed titanium finish with aerodynamic curved wooden blades, photographed in a high-end luxury bedroom setting with diffused ambient illumination." src="https://lh3.googleusercontent.com/aida-public/AB6AXuDMF2Yd1buhQJkaRl71URnEss4-3I4evTVOKg3tDUXLozPAJIkg1Gvkr5fY66aMzi9Qqtt56yiSE5arjPJRKqaWtqFDvMJXjR-HfOhBUnFpEszFOLUEnIYPpHJTGEBgf84kE-V25S0Sv5JwfgwCiC9Tjt6xbfItkafzaIHzlayELG5KFf5sbVCTuE4J_mL51stM_W8LItj1TkymuSFSGdTVZpGA3YqlczWD_R54B5jSz2trA7dRbTqcGQ"/>
+<div class="absolute bottom-3 left-3 bg-surface-container-lowest/90 backdrop-blur px-2.5 py-1 rounded-md shadow-sm flex items-center gap-2">
+<span class="material-symbols-outlined text-primary text-[16px]">graphic_eq</span>
+<span class="font-label-sm text-label-sm text-on-surface font-semibold">WhisperQuiet 28dB</span>
+</div>
+<div class="absolute bottom-3 right-3 bg-surface-container-lowest/90 backdrop-blur px-2 py-1 rounded-md shadow-sm font-label-sm text-label-sm text-secondary font-tabular-nums text-tabular-nums">
+              1400mm Sweep
+            </div>
+</div>
+<div class="p-5 flex flex-col flex-1 justify-between gap-4">
+<div class="flex flex-col gap-2">
+<div class="flex items-center justify-between">
+<span class="font-label-sm text-label-sm text-primary uppercase font-bold tracking-wider">Voltix Dynamics</span>
+<div class="flex items-center gap-1 text-amber-500 font-label-sm text-label-sm font-semibold">
+<span class="material-symbols-outlined text-[16px]" style="font-variation-settings: 'FILL' 1;">star</span>
+<span>4.7</span>
+<span class="text-secondary font-normal">(180 reviews)</span>
+</div>
+</div>
+<h3 class="font-headline-sm text-headline-sm text-on-surface font-semibold group-hover:text-primary transition-colors">
+                Voltix AeroStream Pro 1400mm Ceiling Fan
+              </h3>
+<p class="font-body-sm text-body-sm text-secondary line-clamp-2">
+                High-capacity airflow for large master suites. Features adaptive speed sensing based on ambient room humidity and temperature.
+              </p>
+<div class="flex flex-wrap gap-1.5 pt-1">
+<span class="font-label-sm text-label-sm px-2 py-0.5 rounded bg-surface-container text-secondary">Humidity Auto-Control</span>
+<span class="font-label-sm text-label-sm px-2 py-0.5 rounded bg-surface-container text-secondary">Aerodynamic Carbon Wing</span>
+</div>
+</div>
+<div class="pt-3 flex flex-col gap-3">
+<div class="flex items-baseline justify-between">
+<div class="flex items-baseline gap-2">
+<span class="font-headline-lg text-headline-lg text-on-surface font-bold font-tabular-nums text-tabular-nums">₹11,200</span>
+<span class="font-body-sm text-body-sm text-secondary line-through font-tabular-nums text-tabular-nums">₹15,400</span>
+<span class="font-label-sm text-label-sm text-emerald-700 font-bold bg-emerald-50 px-1.5 py-0.5 rounded">27% OFF</span>
+</div>
+<span class="font-label-sm text-label-sm text-secondary">Pay in 4: ₹2,800/mo</span>
+</div>
+<div class="grid grid-cols-2 gap-2">
+<button class="flex items-center justify-center gap-1.5 h-10 rounded-lg bg-surface-container text-primary hover:bg-surface-container-high font-label-md text-label-md font-semibold transition-colors" onclick="launchARModal('Voltix AeroStream Pro 1400mm', '11200')">
+<span class="material-symbols-outlined text-[18px]">view_in_ar</span>
+<span>3D / AR View</span>
+</button>
+<button class="flex items-center justify-center gap-1.5 h-10 rounded-lg bg-primary-container text-on-primary hover:opacity-95 font-label-md text-label-md font-semibold shadow-sm transition-opacity">
+<span class="material-symbols-outlined text-[18px]">shopping_cart_checkout</span>
+<span>Quick Add</span>
+</button>
+</div>
+</div>
+</div>
+</div>
+<!-- Product Card 3: Yonex Astrox 99 Pro Badminton Racket (Cross-Category Curiosity) -->
+<div class="bg-surface-container-lowest rounded-2xl shadow-sm hover:shadow-md transition-all flex flex-col overflow-hidden relative group">
+<div class="absolute top-4 left-4 z-20 flex flex-wrap gap-1.5">
+<span class="bg-surface-container-high text-secondary font-label-sm text-label-sm px-2.5 py-1 rounded-full shadow flex items-center gap-1 font-semibold">
+<span class="material-symbols-outlined text-[14px]">sports_tennis</span> Sports Gear Discovery
+            </span>
+<span class="bg-tertiary text-on-tertiary font-label-sm text-label-sm px-2.5 py-1 rounded-full shadow flex items-center gap-1">
+<span class="material-symbols-outlined text-[14px]">view_in_ar</span> AR Grip Simulator
+            </span>
+</div>
+<button class="absolute top-4 right-4 z-20 w-9 h-9 rounded-full bg-surface-container-lowest/90 backdrop-blur text-secondary hover:text-error flex items-center justify-center shadow transition-colors">
+<span class="material-symbols-outlined text-[20px]">favorite</span>
+</button>
+<div class="relative w-full h-64 bg-surface-container-low flex items-center justify-center overflow-hidden">
+<img class="w-full h-full object-cover group-hover:scale-105 transition-transform duration-500" data-alt="Commercial dynamic sports photography of a Yonex Astrox 99 Pro Carbon badminton racket resting diagonally on an arena court floor with neon blue rim light, showcasing the Namd graphite texture and red-black finish." src="https://lh3.googleusercontent.com/aida-public/AB6AXuDURq8df1AvNhd6BXPOnLSDepBVFAZQQdhN7XCJzqUwmcV79SqYGalleVqm5XyenVa4nFesHY7jCNLROrqBHlgtE92aPFjCmcNoiYuJEPzJjul5AYdnnHkeKQevXmwyO8xozEtp1qExjA6sfd8tRUMhTAaE5rLBnqslJx9r-5JgtL82V5kmTgx9bt5QmOiAjh1sa5vjPP7EB5WSaeKeMK9zuVgCH8RJFezfeBmyvYUJuYqroAVrKuYT6A"/>
+<div class="absolute bottom-3 left-3 bg-surface-container-lowest/90 backdrop-blur px-2.5 py-1 rounded-md shadow-sm flex items-center gap-2">
+<span class="material-symbols-outlined text-primary text-[16px]">fitness_center</span>
+<span class="font-label-sm text-label-sm text-on-surface font-semibold">4U (83g) • Head Heavy</span>
+</div>
+<div class="absolute bottom-3 right-3 bg-surface-container-lowest/90 backdrop-blur px-2 py-1 rounded-md shadow-sm font-label-sm text-label-sm text-secondary">
+              Graphite Matrix
+            </div>
+</div>
+<div class="p-5 flex flex-col flex-1 justify-between gap-4">
+<div class="flex flex-col gap-2">
+<div class="flex items-center justify-between">
+<span class="font-label-sm text-label-sm text-primary uppercase font-bold tracking-wider">Yonex Pro Sports</span>
+<div class="flex items-center gap-1 text-amber-500 font-label-sm text-label-sm font-semibold">
+<span class="material-symbols-outlined text-[16px]" style="font-variation-settings: 'FILL' 1;">star</span>
+<span>4.9</span>
+<span class="text-secondary font-normal">(512 reviews)</span>
+</div>
+</div>
+<h3 class="font-headline-sm text-headline-sm text-on-surface font-semibold group-hover:text-primary transition-colors">
+                Yonex Astrox 99 Pro Carbon Badminton Racket
+              </h3>
+<p class="font-body-sm text-body-sm text-secondary line-clamp-2">
+                Tour-level rotational generator system with full Namd graphite shaft for steep steep smash angles and lightning swing speed.
+              </p>
+<div class="flex flex-wrap gap-1.5 pt-1">
+<span class="font-label-sm text-label-sm px-2 py-0.5 rounded bg-surface-container text-secondary">Pre-Strung BG80</span>
+<span class="font-label-sm text-label-sm px-2 py-0.5 rounded bg-surface-container text-secondary">Full Carbon Cap</span>
+</div>
+</div>
+<div class="pt-3 flex flex-col gap-3">
+<div class="flex items-baseline justify-between">
+<div class="flex items-baseline gap-2">
+<span class="font-headline-lg text-headline-lg text-on-surface font-bold font-tabular-nums text-tabular-nums">₹14,990</span>
+<span class="font-body-sm text-body-sm text-secondary line-through font-tabular-nums text-tabular-nums">₹19,900</span>
+<span class="font-label-sm text-label-sm text-emerald-700 font-bold bg-emerald-50 px-1.5 py-0.5 rounded">24% OFF</span>
+</div>
+<span class="font-label-sm text-label-sm text-secondary">PayPal Escrow Protected</span>
+</div>
+<div class="grid grid-cols-2 gap-2">
+<button class="flex items-center justify-center gap-1.5 h-10 rounded-lg bg-surface-container text-primary hover:bg-surface-container-high font-label-md text-label-md font-semibold transition-colors" onclick="launchARModal('Yonex Astrox 99 Pro Racket', '14990')">
+<span class="material-symbols-outlined text-[18px]">view_in_ar</span>
+<span>Grip AR View</span>
+</button>
+<button class="flex items-center justify-center gap-1.5 h-10 rounded-lg bg-primary-container text-on-primary hover:opacity-95 font-label-md text-label-md font-semibold shadow-sm transition-opacity">
+<span class="material-symbols-outlined text-[18px]">shopping_cart_checkout</span>
+<span>Quick Add</span>
+</button>
+</div>
+</div>
+</div>
+</div>
+<!-- Product Card 4: Apex Ergonomic Mesh Executive Chair -->
+<div class="bg-surface-container-lowest rounded-2xl shadow-sm hover:shadow-md transition-all flex flex-col overflow-hidden relative group">
+<div class="absolute top-4 left-4 z-20 flex flex-wrap gap-1.5">
+<span class="bg-surface-container-high text-secondary font-label-sm text-label-sm px-2.5 py-1 rounded-full shadow flex items-center gap-1 font-semibold">
+<span class="material-symbols-outlined text-[14px]">chair</span> Workspace Gear
+            </span>
+<span class="bg-emerald-600 text-on-primary font-label-sm text-label-sm px-2.5 py-1 rounded-full shadow flex items-center gap-1">
+<span class="material-symbols-outlined text-[14px]">view_in_ar</span> AR True-Scale Space Test
+            </span>
+</div>
+<button class="absolute top-4 right-4 z-20 w-9 h-9 rounded-full bg-surface-container-lowest/90 backdrop-blur text-secondary hover:text-error flex items-center justify-center shadow transition-colors">
+<span class="material-symbols-outlined text-[20px]">favorite</span>
+</button>
+<div class="relative w-full h-64 bg-surface-container-low flex items-center justify-center overflow-hidden">
+<img class="w-full h-full object-cover group-hover:scale-105 transition-transform duration-500" data-alt="High-end industrial design product render of the Apex Ergonomic Executive Chair in obsidian black mesh and polished aluminum chassis, shot in a bright modern home office studio with warm wood flooring." src="https://lh3.googleusercontent.com/aida-public/AB6AXuAdqnPrEPPOTwxgDJhjR1yicOyEnn0zzmj5Kt1sG_IyMIV5iQP7ZMGwWf4cz2vFS1WDjKwbEpYlu8seY0oixRKetEChQwJ0S9YrIN8gWO5edyh9maRTIH6WGZgahNu2XAl1N9Y6A8kzeGu91GKQlahKDsZt85mX5saWaR_rZg9DS3MGOasTEDNenM23s8lwIXAi8eC2XeDEK88WwQb6d6UpFuuQsVsM9JFVbb-X6P7vRDdkZPGo4jdinw"/>
+<div class="absolute bottom-3 left-3 bg-surface-container-lowest/90 backdrop-blur px-2.5 py-1 rounded-md shadow-sm flex items-center gap-2">
+<span class="material-symbols-outlined text-primary text-[16px]">accessibility_new</span>
+<span class="font-label-sm text-label-sm text-on-surface font-semibold">Dynamic Lumbar 4D</span>
+</div>
+<div class="absolute bottom-3 right-3 bg-surface-container-lowest/90 backdrop-blur px-2 py-1 rounded-md shadow-sm font-label-sm text-label-sm text-secondary">
+              Korean Kore-Mesh
+            </div>
+</div>
+<div class="p-5 flex flex-col flex-1 justify-between gap-4">
+<div class="flex flex-col gap-2">
+<div class="flex items-center justify-between">
+<span class="font-label-sm text-label-sm text-primary uppercase font-bold tracking-wider">Apex Ergonomics</span>
+<div class="flex items-center gap-1 text-amber-500 font-label-sm text-label-sm font-semibold">
+<span class="material-symbols-outlined text-[16px]" style="font-variation-settings: 'FILL' 1;">star</span>
+<span>4.6</span>
+<span class="text-secondary font-normal">(230 reviews)</span>
+</div>
+</div>
+<h3 class="font-headline-sm text-headline-sm text-on-surface font-semibold group-hover:text-primary transition-colors">
+                Apex Ergonomic Mesh Executive Chair
+              </h3>
+<p class="font-body-sm text-body-sm text-secondary line-clamp-2">
+                Engineered for 12+ hour focus shifts. Multi-angle synchro-tilt mechanism, 4D armrests, and self-adjusting lumbar curve.
+              </p>
+<div class="flex flex-wrap gap-1.5 pt-1">
+<span class="font-label-sm text-label-sm px-2 py-0.5 rounded bg-surface-container text-secondary">135° Recline Lock</span>
+<span class="font-label-sm text-label-sm px-2 py-0.5 rounded bg-surface-container text-secondary">BIFMA Certified</span>
+</div>
+</div>
+<div class="pt-3 flex flex-col gap-3">
+<div class="flex items-baseline justify-between">
+<div class="flex items-baseline gap-2">
+<span class="font-headline-lg text-headline-lg text-on-surface font-bold font-tabular-nums text-tabular-nums">₹18,500</span>
+<span class="font-body-sm text-body-sm text-secondary line-through font-tabular-nums text-tabular-nums">₹26,000</span>
+<span class="font-label-sm text-label-sm text-emerald-700 font-bold bg-emerald-50 px-1.5 py-0.5 rounded">29% OFF</span>
+</div>
+<span class="font-label-sm text-label-sm text-secondary">4x ₹4,625 / mo</span>
+</div>
+<div class="grid grid-cols-2 gap-2">
+<button class="flex items-center justify-center gap-1.5 h-10 rounded-lg bg-surface-container text-primary hover:bg-surface-container-high font-label-md text-label-md font-semibold transition-colors" onclick="launchARModal('Apex Ergonomic Executive Chair', '18500')">
+<span class="material-symbols-outlined text-[18px]">view_in_ar</span>
+<span>Space AR Test</span>
+</button>
+<button class="flex items-center justify-center gap-1.5 h-10 rounded-lg bg-primary-container text-on-primary hover:opacity-95 font-label-md text-label-md font-semibold shadow-sm transition-opacity">
+<span class="material-symbols-outlined text-[18px]">shopping_cart_checkout</span>
+<span>Quick Add</span>
+</button>
+</div>
+</div>
+</div>
+</div>
+</div>
+<!-- Comparison Matrix Ribbon for Ceiling Fans -->
+<div class="bg-surface-container-lowest rounded-2xl p-6 shadow-sm flex flex-col gap-4 mt-2">
+<div class="flex items-center justify-between">
+<div class="flex items-center gap-2">
+<span class="material-symbols-outlined text-primary text-[22px]">compare</span>
+<span class="font-headline-sm text-headline-sm text-on-surface">Algorithmic Spec Comparison</span>
+</div>
+<span class="font-label-sm text-label-sm text-secondary">Matched against your 200 sq ft bedroom criteria</span>
+</div>
+<div class="overflow-x-auto">
+<table class="w-full text-left font-body-sm text-body-sm">
+<thead>
+<tr class="bg-surface-container-low text-secondary font-label-sm text-label-sm uppercase">
+<th class="p-3 rounded-l-lg">Feature Metric</th>
+<th class="p-3">AeroBreeze Stealth 1200mm</th>
+<th class="p-3">Voltix AeroStream Pro</th>
+<th class="p-3 rounded-r-lg">Target Fit Score</th>
+</tr>
+</thead>
+<tbody class="divide-y divide-surface-container-low text-on-surface">
+<tr>
+<td class="p-3 font-semibold text-secondary">Noise Level (dB)</td>
+<td class="p-3 font-tabular-nums text-tabular-nums text-emerald-700 font-bold">28 dB (Whisper Silent)</td>
+<td class="p-3 font-tabular-nums text-tabular-nums text-emerald-700">30 dB</td>
+<td class="p-3 font-semibold text-primary">100% compliant</td>
+</tr>
+<tr>
+<td class="p-3 font-semibold text-secondary">Power Consumption</td>
+<td class="p-3 font-tabular-nums text-tabular-nums">28W @ Speed 6 (BLDC)</td>
+<td class="p-3 font-tabular-nums text-tabular-nums">34W @ Speed 6</td>
+<td class="p-3 font-semibold text-emerald-700">Saves ~₹1,850/yr</td>
+</tr>
+<tr>
+<td class="p-3 font-semibold text-secondary">Ceiling Clearance Rec.</td>
+<td class="p-3">8.5 ft – 10.5 ft (Short downrod)</td>
+<td class="p-3">9.5 ft – 12 ft (Requires 10″ rod)</td>
+<td class="p-3 font-semibold text-primary">AeroBreeze fits 9ft floor</td>
+</tr>
+<tr>
+<td class="p-3 font-semibold text-secondary">Checkout Financed (PayPal)</td>
+<td class="p-3 font-tabular-nums text-tabular-nums font-bold">4 x ₹2,125</td>
+<td class="p-3 font-tabular-nums text-tabular-nums">4 x ₹2,800</td>
+<td class="p-3"><span class="px-2 py-0.5 rounded bg-emerald-50 text-emerald-700 text-xs font-bold">Zero Interest</span></td>
+</tr>
+</tbody>
+</table>
+</div>
+</div>
+</div>
+</section>
+<!-- Floating Contextual AI Shopping Copilot Dock -->
+<aside class="fixed bottom-6 right-6 z-50 max-w-lg w-[calc(100vw-3rem)]">
+<div class="bg-surface-container-lowest/95 backdrop-blur-xl rounded-2xl shadow-xl p-4 flex flex-col gap-3 transition-all duration-300">
+<!-- Dock Header -->
+<div class="flex items-center justify-between">
+<div class="flex items-center gap-2.5">
+<div class="w-7 h-7 rounded-lg bg-primary-container text-on-primary flex items-center justify-center shadow-sm">
+<span class="material-symbols-outlined text-[16px]">smart_toy</span>
+</div>
+<div class="flex items-center gap-1.5">
+<span class="font-label-md text-label-md font-semibold text-on-surface">ACPayPalet Copilot</span>
+<span class="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-ping"></span>
+</div>
+</div>
+<div class="flex items-center gap-1">
+<button class="text-secondary hover:text-on-surface p-1 rounded transition-colors" id="minimizeCopilot">
+<span class="material-symbols-outlined text-[18px]">keyboard_arrow_down</span>
+</button>
+</div>
+</div>
+<!-- Simulated Dynamic AI Advice Chip -->
+<div class="bg-surface-container-low rounded-xl p-3 flex flex-col gap-2" id="aiResponseCard">
+<div class="flex items-center justify-between">
+<span class="font-label-sm text-label-sm uppercase tracking-wider text-primary font-bold">Live AI Answer</span>
+<span class="font-tabular-nums text-tabular-nums text-secondary text-xs">Simulated for 9ft Ceiling</span>
+</div>
+<p class="font-body-sm text-body-sm text-on-surface leading-snug">
+<strong>Yes, absolutely.</strong> AeroBreeze Stealth includes a flush-mount 5-inch downrod giving <strong>8.2 ft blade-to-floor clearance</strong>, fully adhering to standard IS safety codes while maintaining ideal air recirculation.
+        </p>
+</div>
+<!-- Quick Ask Prompt Input -->
+<div class="relative flex items-center">
+<input class="w-full h-10 pl-3.5 pr-20 rounded-lg bg-surface-container text-on-surface font-body-sm text-body-sm focus:outline-none placeholder:text-outline-variant" id="copilotInput" placeholder="Ask copilot about dimensions, escrow, noise..." type="text" value="Will AeroBreeze fit a low 9ft ceiling?"/>
+<button class="absolute right-1.5 px-3 h-7 rounded bg-primary-container text-on-primary font-label-sm text-label-sm font-semibold hover:opacity-95 shadow-sm" id="sendCopilotBtn">
+          Ask AI
+        </button>
+</div>
+</div>
+</aside>
+<!-- Interactive 3D / AR Preview Modal (Hidden by default) -->
+<div class="fixed inset-0 z-50 bg-on-surface/40 backdrop-blur-sm hidden items-center justify-center p-4" id="arModal">
+<div class="bg-surface-container-lowest rounded-2xl shadow-2xl max-w-2xl w-full p-6 flex flex-col gap-5 relative">
+<div class="flex items-center justify-between pb-3">
+<div class="flex items-center gap-2">
+<span class="material-symbols-outlined text-primary text-[24px]">view_in_ar</span>
+<h2 class="font-headline-sm text-headline-sm text-on-surface font-bold" id="arModalTitle">AR True-Scale Space Simulator</h2>
+</div>
+<button class="w-8 h-8 rounded-full bg-surface-container-low text-secondary hover:text-on-surface flex items-center justify-center" onclick="closeARModal()">
+<span class="material-symbols-outlined text-[20px]">close</span>
+</button>
+</div>
+<!-- Simulated 3D Interactive Canvas -->
+<div class="relative w-full h-72 rounded-xl bg-surface-container-low flex flex-col items-center justify-center overflow-hidden">
+<div class="absolute inset-0 bg-radial from-transparent to-surface-container/60 pointer-events-none"></div>
+<div class="w-32 h-32 rounded-full border-4 border-dashed border-primary/40 animate-spin flex items-center justify-center" style="animation-duration: 12s;">
+<span class="material-symbols-outlined text-primary text-[52px]">mode_fan</span>
+</div>
+<div class="mt-4 flex flex-col items-center gap-1 z-10">
+<span class="font-headline-sm text-headline-sm text-on-surface font-bold">Spatial 3D Model Loaded</span>
+<span class="font-body-sm text-body-sm text-secondary">Point mobile camera or drag to rotate 360°</span>
+</div>
+<div class="absolute bottom-3 left-3 bg-surface-container-lowest/90 px-3 py-1.5 rounded-lg shadow-sm flex items-center gap-2 text-xs">
+<span class="w-2 h-2 rounded-full bg-emerald-500"></span>
+<span class="font-tabular-nums text-tabular-nums">1:1 Millimeter True Precision</span>
+</div>
+<div class="absolute bottom-3 right-3 flex items-center gap-2">
+<button class="bg-surface-container-lowest/90 px-3 py-1.5 rounded-lg shadow-sm text-xs font-semibold text-primary hover:bg-surface-container">
+            Reset View
+          </button>
+</div>
+</div>
+<!-- AR Modal Actions & PayPal Express Check -->
+<div class="flex flex-col sm:flex-row items-center justify-between gap-4 pt-2">
+<div class="flex flex-col">
+<span class="font-label-sm text-label-sm text-secondary">Escrow Guaranteed Price</span>
+<span class="font-headline-md text-headline-md text-on-surface font-bold font-tabular-nums text-tabular-nums" id="arModalPrice">₹8,499</span>
+</div>
+<div class="flex items-center gap-2 w-full sm:w-auto">
+<button class="flex-1 sm:flex-none px-4 h-11 rounded-lg bg-surface-container text-secondary font-label-lg text-label-lg" onclick="closeARModal()">
+            Back to Grid
+          </button>
+<button class="flex-1 sm:flex-none px-6 h-11 rounded-lg bg-primary-container text-on-primary font-label-lg text-label-lg font-semibold shadow-sm flex items-center gap-2">
+<span class="material-symbols-outlined text-[20px]">shopping_bag</span>
+<span>Reserve via PayPal Escrow</span>
+</button>
+</div>
+</div>
+</div>
+</div>
+<!-- Inline Script for Interactive Handlers -->
+<script>
+    function launchARModal(name, price) {
+      const modal = document.getElementById('arModal');
+      const title = document.getElementById('arModalTitle');
+      const priceDisplay = document.getElementById('arModalPrice');
+      if (modal && title && priceDisplay) {
+        title.innerText = 'AR Simulator: ' + name;
+        priceDisplay.innerText = '₹' + Number(price).toLocaleString('en-IN');
+        modal.classList.remove('hidden');
+        modal.classList.add('flex');
+      }
+    }
+
+    function closeARModal() {
+      const modal = document.getElementById('arModal');
+      if (modal) {
+        modal.classList.add('hidden');
+        modal.classList.remove('flex');
+      }
+    }
+
+    // Interactive Copilot Query Handler
+    const copilotInput = document.getElementById('copilotInput');
+    const sendCopilotBtn = document.getElementById('sendCopilotBtn');
+    const aiResponseCard = document.getElementById('aiResponseCard');
+
+    if (sendCopilotBtn && copilotInput && aiResponseCard) {
+      sendCopilotBtn.addEventListener('click', () => {
+        const query = copilotInput.value.trim();
+        if (query) {
+          aiResponseCard.innerHTML = `
+            <div class="flex items-center justify-between">
+              <span class="font-label-sm text-label-sm uppercase tracking-wider text-primary font-bold">Synthesizing Fact Check...</span>
+              <span class="w-3 h-3 rounded-full border-2 border-primary border-t-transparent animate-spin"></span>
+            </div>
+            <p class="font-body-sm text-body-sm text-secondary">Evaluating CAD schematics for "${query}"...</p>
+          `;
+          setTimeout(() => {
+            aiResponseCard.innerHTML = `
+              <div class="flex items-center justify-between">
+                <span class="font-label-sm text-label-sm uppercase tracking-wider text-emerald-700 font-bold">Verified Recommendation</span>
+                <span class="font-tabular-nums text-tabular-nums text-secondary text-xs">Confidence 99%</span>
+              </div>
+              <p class="font-body-sm text-body-sm text-on-surface leading-snug">
+                For <strong>"${query}"</strong>: All 1200mm AeroBreeze variants feature dual-sealed Japanese ball bearings rated for &lt;28dB acoustic load, ideal for sensitive sleep environments.
+              </p>
+            `;
+          }, 800);
+        }
+      });
+    }
+
+    // Refine Query Interaction
+    const refineQueryBtn = document.getElementById('refineQueryBtn');
+    if (refineQueryBtn) {
+      refineQueryBtn.addEventListener('click', () => {
+        copilotInput.focus();
+        copilotInput.value = 'Compare BLDC energy consumption vs standard induction for 12hr daily run';
+      });
+    }
+  </script>
+</div></main></div></body></html>
