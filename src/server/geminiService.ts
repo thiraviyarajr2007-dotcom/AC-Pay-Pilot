@@ -1271,13 +1271,24 @@ export async function generateExecutiveInsightsWithGemini(rawInput: unknown) {
             isForecast: boolean;
           }>;
         };
+        const forecastInfo = {
+          label: 'Forecast' as const,
+          horizon: 'Next 7 Days',
+          projectedGmvInr: formatMinorUnits(kpiReport.heldInEscrowMinor, kpiReport.currency),
+          basis: 'Projected release of funded/in-delivery escrow upon delivery verification',
+          disclaimer: 'Forecast based on scheduled delivery milestones. Final release requires buyer POD confirmation.',
+        };
+
         return {
           ok: true,
           source: 'live' as const,
           kpiReport,
           whyThis: parsed.whyThis,
+          forecast: forecastInfo,
           insights: parsed.insights.map((ins) => ({
             ...ins,
+            supportingMetric: ins.metricLink || 'GMV',
+            citedRecords: ins.supportingRecords || [],
             badge: ins.isForecast ? ('Forecast' as const) : ('Verified Metric' as const),
           })),
         };
@@ -1287,13 +1298,26 @@ export async function generateExecutiveInsightsWithGemini(rawInput: unknown) {
     }
   }
 
+  const forecastInfo = {
+    label: 'Forecast' as const,
+    horizon: 'Next 7 Days',
+    projectedGmvInr: formatMinorUnits(kpiReport.heldInEscrowMinor, kpiReport.currency),
+    basis: 'Projected release of funded/in-delivery escrow upon delivery verification',
+    disclaimer: 'Forecast based on scheduled delivery milestones. Final release requires buyer POD confirmation.',
+  };
+
   return {
     ok: true,
     source: 'fallback' as const,
     kpiReport,
     whyThis:
       'Computed directly from stored minor-unit order records via computeExecutiveKpisForDateRange in src/utils/finance.ts. Forecasts are explicitly labelled "Forecast".',
-    insights: defaultInsights,
+    forecast: forecastInfo,
+    insights: defaultInsights.map((ins) => ({
+      ...ins,
+      supportingMetric: ins.metricLink || 'GMV',
+      citedRecords: ins.supportingRecords || [],
+    })),
   };
 }
 

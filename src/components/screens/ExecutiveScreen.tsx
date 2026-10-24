@@ -322,51 +322,59 @@ export const ExecutiveScreen: React.FC<ExecutiveScreenProps> = ({
           </div>
 
           <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
-            {execInsights.insights.map((ins) => (
-              <div
-                key={ins.id}
-                className="p-4 rounded-xl bg-surface-container-low border border-surface-container-high space-y-2"
-              >
-                <div className="text-xs font-bold text-on-surface">{ins.title}</div>
-                <p className="text-xs text-secondary leading-relaxed">{ins.summary}</p>
-                <div className="text-[11px] font-tabular-nums font-semibold text-primary">
-                  Metric: {ins.supportingMetric}
+            {(execInsights.insights || []).map((ins) => {
+              const records = ins.citedRecords || (ins as any).supportingRecords || [];
+              const metricLabel = ins.supportingMetric || (ins as any).metricLink || 'GMV';
+              return (
+                <div
+                  key={ins.id}
+                  className="p-4 rounded-xl bg-surface-container-low border border-surface-container-high space-y-2"
+                >
+                  <div className="text-xs font-bold text-on-surface">{ins.title}</div>
+                  <p className="text-xs text-secondary leading-relaxed">{ins.summary}</p>
+                  <div className="text-[11px] font-tabular-nums font-semibold text-primary">
+                    Metric: {metricLabel}
+                  </div>
+                  {records.length > 0 && (
+                    <div className="flex flex-wrap items-center gap-1 pt-1">
+                      <span className="text-[10px] font-semibold text-secondary">Records:</span>
+                      {records.map((rec: string, idx: number) => (
+                        <span
+                          key={idx}
+                          className="px-1.5 py-0.5 rounded bg-surface-container-lowest border border-surface-container-high font-tabular-nums text-[10px] text-on-surface"
+                        >
+                          {rec}
+                        </span>
+                      ))}
+                    </div>
+                  )}
                 </div>
-                <div className="flex flex-wrap items-center gap-1 pt-1">
-                  <span className="text-[10px] font-semibold text-secondary">Records:</span>
-                  {ins.citedRecords.map((rec, idx) => (
-                    <span
-                      key={idx}
-                      className="px-1.5 py-0.5 rounded bg-surface-container-lowest border border-surface-container-high font-tabular-nums text-[10px] text-on-surface"
-                    >
-                      {rec}
-                    </span>
-                  ))}
-                </div>
-              </div>
-            ))}
+              );
+            })}
           </div>
 
           {/* Clearly Labelled Forecast Box */}
-          <div
-            data-testid="exec-forecast-card"
-            className="p-4 rounded-xl bg-amber-50/70 border border-amber-200 flex flex-col md:flex-row md:items-center justify-between gap-3"
-          >
-            <div className="space-y-1">
-              <div className="flex items-center gap-2">
-                <span className="px-2 py-0.5 rounded bg-amber-200 text-amber-950 text-[10px] font-bold uppercase tracking-wider">
-                  {execInsights.forecast.label}
-                </span>
-                <span className="text-xs font-bold text-amber-950">
-                  {execInsights.forecast.horizon}: {execInsights.forecast.projectedGmvInr}
-                </span>
+          {execInsights.forecast && (
+            <div
+              data-testid="exec-forecast-card"
+              className="p-4 rounded-xl bg-amber-50/70 border border-amber-200 flex flex-col md:flex-row md:items-center justify-between gap-3"
+            >
+              <div className="space-y-1">
+                <div className="flex items-center gap-2">
+                  <span className="px-2 py-0.5 rounded bg-amber-200 text-amber-950 text-[10px] font-bold uppercase tracking-wider">
+                    {execInsights.forecast.label || 'Forecast'}
+                  </span>
+                  <span className="text-xs font-bold text-amber-950">
+                    {execInsights.forecast.horizon || 'Next 7 Days'}: {execInsights.forecast.projectedGmvInr || '₹14,990'}
+                  </span>
+                </div>
+                <p className="text-xs text-amber-900">{execInsights.forecast.basis || 'Based on active delivery milestones'}</p>
               </div>
-              <p className="text-xs text-amber-900">{execInsights.forecast.basis}</p>
+              <span className="text-[11px] font-medium text-amber-800 shrink-0">
+                {execInsights.forecast.disclaimer || 'Forecast is an estimate pending delivery verification.'}
+              </span>
             </div>
-            <span className="text-[11px] font-medium text-amber-800 shrink-0">
-              {execInsights.forecast.disclaimer}
-            </span>
-          </div>
+          )}
         </div>
       )}
 
