@@ -54,6 +54,7 @@ export const Header: React.FC<HeaderProps> = ({
     setRole,
     dataSource,
     setDataSource,
+    activeBizId,
     startDemoTour,
     isDemoTourActive,
     firebaseUser,
@@ -67,11 +68,11 @@ export const Header: React.FC<HeaderProps> = ({
   const [sellerBusiness, setSellerBusiness] = useState<BusinessProfile>(INITIAL_DEFAULT_BUSINESS);
 
   useEffect(() => {
-    const unsub = subscribeBusiness(DEFAULT_BIZ_ID, (biz) => {
+    const unsub = subscribeBusiness(activeBizId, (biz) => {
       setSellerBusiness(biz);
     });
     return () => unsub();
-  }, []);
+  }, [activeBizId]);
 
   const isCustomerSite = role === 'customer' || location.pathname.startsWith('/customer');
 
@@ -363,61 +364,99 @@ export const Header: React.FC<HeaderProps> = ({
           </div>
         </div>
 
-        {/* Center: Role Switcher */}
-        {dataSource === 'demo' ? (
-          <div className="hidden lg:flex items-center gap-1 bg-surface-container-low p-1 rounded-xl border border-surface-container-high/60">
-            {rolesOrder.map((rKey) => {
-              const rInfo = ROLE_PROFILES[rKey];
-              const active = role === rKey;
-              return (
-                <button
-                  key={rKey}
-                  type="button"
-                  onClick={() => setRole(rKey, true)}
-                  data-testid={`role-switch-${rKey}`}
-                  className={`flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg font-label-md text-xs transition-all cursor-pointer ${
-                    active
-                      ? `${rInfo.accentChipClass} font-bold shadow-xs`
-                      : 'text-on-surface-variant hover:text-on-surface'
-                  }`}
-                >
-                  <span className="material-symbols-outlined text-[14px]">{rInfo.roleIcon}</span>
-                  <span>{rInfo.label}</span>
-                </button>
-              );
-            })}
+        {/* Center: Live / Demo Account Switcher & Persona Bar */}
+        <div className="hidden lg:flex items-center gap-2">
+          {/* Mode Switcher Pill */}
+          <div className="flex items-center bg-surface-container-low p-1 rounded-xl border border-surface-container-high/60 text-xs">
+            <button
+              type="button"
+              onClick={() => {
+                if (!firebaseUser) {
+                  signInWithGoogle();
+                } else {
+                  setDataSource('live');
+                }
+              }}
+              title={firebaseUser ? 'Switch to your live isolated store' : 'Sign in to access your live store'}
+              className={`flex items-center gap-1.5 px-2.5 py-1 rounded-lg font-bold transition-all cursor-pointer ${
+                dataSource === 'live'
+                  ? 'bg-emerald-600 text-white shadow-xs'
+                  : 'text-on-surface-variant hover:text-on-surface'
+              }`}
+            >
+              <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse" />
+              <span>Live Account</span>
+            </button>
+            <button
+              type="button"
+              onClick={() => setDataSource('demo')}
+              title="Switch to Demo Sandbox to preview all features and UI"
+              className={`flex items-center gap-1.5 px-2.5 py-1 rounded-lg font-bold transition-all cursor-pointer ${
+                dataSource === 'demo'
+                  ? 'bg-primary text-on-primary shadow-xs'
+                  : 'text-on-surface-variant hover:text-on-surface'
+              }`}
+            >
+              <span className="material-symbols-outlined text-[14px]">sports_esports</span>
+              <span>Demo Sandbox</span>
+            </button>
           </div>
-        ) : (
-          <div className="hidden lg:flex items-center gap-2 bg-emerald-50/90 px-3 py-1.5 rounded-xl border border-emerald-200">
-            <span className="font-label-sm text-[10px] uppercase tracking-wider text-emerald-900 font-bold flex items-center gap-1">
-              <span className="material-symbols-outlined text-[14px] text-emerald-700">
-                verified_user
+
+          {/* If in Demo mode: show the 4 persona buttons so users can choose demo account before login */}
+          {dataSource === 'demo' && (
+            <div className="flex items-center gap-1 bg-surface-container-low/70 p-1 rounded-xl border border-surface-container-high/40">
+              <span className="text-[10px] uppercase font-bold text-on-surface-variant px-1.5">
+                Persona:
               </span>
-              <span>Active Role:</span>
-            </span>
-            <span className={`px-2.5 py-1 rounded-lg text-xs font-bold ${profile.accentChipClass}`}>
-              {profile.label}
-            </span>
-            {firebaseUser ? (
+              {rolesOrder.map((rKey) => {
+                const rInfo = ROLE_PROFILES[rKey];
+                const active = role === rKey;
+                return (
+                  <button
+                    key={rKey}
+                    type="button"
+                    onClick={() => setRole(rKey, true)}
+                    data-testid={`role-switch-${rKey}`}
+                    className={`flex items-center gap-1 px-2 py-1 rounded-lg text-[11px] font-semibold transition-all cursor-pointer ${
+                      active
+                        ? `${rInfo.accentChipClass} font-bold shadow-2xs`
+                        : 'text-on-surface-variant hover:text-on-surface'
+                    }`}
+                  >
+                    <span className="material-symbols-outlined text-[13px]">{rInfo.roleIcon}</span>
+                    <span>{rInfo.shortLabel}</span>
+                  </button>
+                );
+              })}
+            </div>
+          )}
+
+          {/* User Auth Action */}
+          {firebaseUser ? (
+            <div className="flex items-center gap-1.5 bg-surface-container-low px-2 py-1 rounded-xl border border-surface-container-high/60">
+              <span className="text-[11px] font-bold text-on-surface">
+                {firebaseUser.displayName || firebaseUser.email?.split('@')[0]}
+              </span>
               <button
                 type="button"
                 onClick={() => signOutUser()}
-                className="px-2 py-1 rounded-md bg-white hover:bg-slate-100 text-slate-700 border border-slate-200 text-[11px] font-semibold cursor-pointer"
+                title="Sign out of your live account"
+                className="px-2 py-0.5 rounded-md bg-surface hover:bg-surface-container text-on-surface-variant border border-outline-variant/40 text-[10px] font-semibold transition-colors cursor-pointer"
               >
-                Sign out ({firebaseUser.email?.split('@')[0]})
+                Sign out
               </button>
-            ) : (
-              <button
-                type="button"
-                onClick={() => signInWithGoogle()}
-                className="px-2.5 py-1 rounded-md bg-white hover:bg-slate-50 text-slate-900 border border-slate-300 text-[11px] font-bold flex items-center gap-1 shadow-2xs cursor-pointer"
-              >
-                <span className="material-symbols-outlined text-[14px] text-blue-600">login</span>
-                <span>Google Sign-In</span>
-              </button>
-            )}
-          </div>
-        )}
+            </div>
+          ) : (
+            <button
+              type="button"
+              onClick={() => signInWithGoogle()}
+              className="px-3 py-1.5 rounded-xl bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-700 hover:to-indigo-700 text-white border border-blue-500/30 text-xs font-bold flex items-center gap-1.5 shadow-xs transition-all cursor-pointer"
+            >
+              <span className="material-symbols-outlined text-[15px]">login</span>
+              <span>Sign In with Google</span>
+            </button>
+          )}
+        </div>
 
         {/* Right Actions */}
         <div className="flex items-center gap-1.5 sm:gap-2.5 shrink-0">
@@ -447,7 +486,7 @@ export const Header: React.FC<HeaderProps> = ({
 
           {/* Public Storefront Direct Link */}
           <a
-            href="/s/aerocool"
+            href={`/s/${sellerBusiness?.slug || 'aerocool'}`}
             target="_blank"
             rel="noopener noreferrer"
             title="Open customer storefront in new window"

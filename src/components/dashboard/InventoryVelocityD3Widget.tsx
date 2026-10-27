@@ -1,4 +1,4 @@
-import React, { useEffect, useRef, useState } from 'react';
+import React, { useEffect, useRef, useState, useMemo } from 'react';
 import * as d3 from 'd3';
 import { formatINR } from '../../utils/finance';
 
@@ -75,17 +75,55 @@ const INITIAL_VELOCITY_DATA: VelocityItem[] = [
 interface InventoryVelocityD3WidgetProps {
   showToast?: (msg: string) => void;
   onNavigateProducts?: () => void;
+  dataSource?: 'demo' | 'live';
+  liveProducts?: Array<{
+    id: string;
+    sku?: string;
+    name: string;
+    price: number;
+    stock: number;
+    category?: string;
+  }>;
 }
 
 export const InventoryVelocityD3Widget: React.FC<InventoryVelocityD3WidgetProps> = ({
   showToast = console.log,
   onNavigateProducts,
+  dataSource = 'demo',
+  liveProducts = [],
 }) => {
   const svgRef = useRef<SVGSVGElement | null>(null);
   const containerRef = useRef<HTMLDivElement | null>(null);
-  const [items, setItems] = useState<VelocityItem[]>(INITIAL_VELOCITY_DATA);
+  const [demoItems, setDemoItems] = useState<VelocityItem[]>(INITIAL_VELOCITY_DATA);
   const [hoveredSku, setHoveredSku] = useState<string | null>(null);
   const [filterMode, setFilterMode] = useState<'ALL' | 'RESTOCK_NEEDED'>('ALL');
+
+  // Compute active items based on live vs demo
+  const items: VelocityItem[] = useMemo(() => {
+    if (dataSource === 'live') {
+      if (liveProducts.length === 0) return [];
+      return liveProducts.map((p) => {
+        const sku = p.sku || p.id.toUpperCase();
+        const stock = p.stock || 0;
+        const salesVel = 2.5;
+        const days = Math.round((stock / Math.max(0.1, salesVel)) * 10) / 10;
+        const urgency: VelocityItem['urgency'] =
+          days <= 2 ? 'CRITICAL' : days <= 7 ? 'WARNING' : 'HEALTHY';
+        return {
+          sku,
+          name: p.name,
+          category: p.category || 'General Catalog',
+          priceInr: p.price,
+          currentStock: stock,
+          smartCartDemand24h: Math.round(stock * 0.4) + 1,
+          salesVelocity7d: salesVel,
+          daysOfSupply: days,
+          urgency,
+        };
+      });
+    }
+    return demoItems;
+  }, [dataSource, liveProducts, demoItems]);
 
   const filteredData = items.filter((item) => {
     if (filterMode === 'RESTOCK_NEEDED') {
@@ -96,7 +134,7 @@ export const InventoryVelocityD3Widget: React.FC<InventoryVelocityD3WidgetProps>
 
   // Handle instant restock
   const handleRestock = (sku: string) => {
-    setItems((prev) =>
+    setDemoItems((prev) =>
       prev.map((item) => {
         if (item.sku === sku) {
           const nextStock = item.currentStock + 25;
@@ -316,8 +354,18 @@ export const InventoryVelocityD3Widget: React.FC<InventoryVelocityD3WidgetProps>
             </div>
           </div>
 
-          <div ref={containerRef} className="w-full relative min-h-[260px] bg-surface-container-lowest p-2 rounded-xl border border-outline-variant/20">
-            <svg ref={svgRef} className="w-full text-on-surface" />
+          <div ref={containerRef} className="w-full relative min-h-[260px] bg-surface-container-lowest p-2 rounded-xl border border-outline-variant/20 flex flex-col items-center justify-center">
+            {items.length === 0 ? (
+              <div className="flex flex-col items-center justify-center p-6 text-center space-y-2">
+                <span className="material-symbols-outlined text-outline text-[32px]">query_stats</span>
+                <p className="text-xs font-bold text-on-surface">No Inventory Velocity Yet</p>
+                <p className="text-[11px] text-secondary max-w-xs">
+                  Your SmartCart buyer intent vs in-stock inventory velocity will chart here once products are created.
+                </p>
+              </div>
+            ) : (
+              <svg ref={svgRef} className="w-full text-on-surface" />
+            )}
           </div>
         </div>
 
@@ -327,49 +375,76 @@ export const InventoryVelocityD3Widget: React.FC<InventoryVelocityD3WidgetProps>
             Velocity Restock Action Queue
           </span>
 
-          <div className="space-y-2 max-h-[260px] overflow-y-auto pr-1">
-            {filteredData.map((item) => (
-              <div
-                key={item.sku}
-                className={`p-3 rounded-xl border transition-all flex items-center justify-between gap-2 ${
-                  hoveredSku === item.sku
-                    ? 'border-primary bg-primary/5 shadow-2xs'
-                    : 'border-outline-variant/30 bg-surface-container-low/60'
-                }`}
-              >
-                <div className="min-w-0 space-y-0.5">
-                  <div className="flex items-center gap-1.5">
-                    <span
-                      className={`px-1.5 py-0.2 rounded text-[9px] font-bold uppercase ${
-                        item.urgency === 'CRITICAL'
-                          ? 'bg-rose-500/15 text-rose-700 border border-rose-500/30'
-                          : item.urgency === 'WARNING'
-                          ? 'bg-amber-500/15 text-amber-700 border border-amber-500/30'
-                          : 'bg-emerald-500/15 text-emerald-700 border border-emerald-500/30'
-                      }`}
-                    >
-                      {item.daysOfSupply}d Supply
-                    </span>
-                    <span className="text-[11px] font-mono font-bold text-on-surface truncate">
-                      {item.sku}
-                    </span>
-                  </div>
-                  <div className="text-xs font-bold text-on-surface truncate">{item.name}</div>
-                  <div className="text-[10px] text-secondary font-tabular-nums">
-                    {formatINR(item.priceInr)} • Cart Demand: {item.smartCartDemand24h} | Stock: {item.currentStock}
-                  </div>
+          <div className="space-y-2 max-h-[260px] overflow-y-auto pr-3 sm:pr-4 [scrollbar-gutter:stable]">
+            {filteredData.length === 0 ? (
+              <div className="p-6 text-center rounded-xl bg-surface-container-low/40 border border-outline-variant/30 flex flex-col items-center justify-center gap-2">
+                <span className="material-symbols-outlined text-[24px] text-outline">inventory_2</span>
+                <div>
+                  <p className="text-xs font-bold text-on-surface">
+                    {dataSource === 'live' ? 'No Products in Inventory' : 'No Restock Actions Needed'}
+                  </p>
+                  <p className="text-[11px] text-secondary mt-0.5 max-w-xs">
+                    {dataSource === 'live'
+                      ? 'Add your first product to monitor stock velocity, SmartCart intent, and get automated restock alerts.'
+                      : 'All inventory is currently above the minimum safety stock threshold.'}
+                  </p>
                 </div>
-
-                <button
-                  type="button"
-                  onClick={() => handleRestock(item.sku)}
-                  className="px-2.5 py-1.5 rounded-lg bg-primary hover:bg-primary-container text-on-primary text-[11px] font-bold shrink-0 shadow-2xs transition-colors cursor-pointer flex items-center gap-1"
-                >
-                  <span className="material-symbols-outlined text-[14px]">add</span>
-                  <span>+25</span>
-                </button>
+                {dataSource === 'live' && onNavigateProducts && (
+                  <button
+                    type="button"
+                    onClick={onNavigateProducts}
+                    className="mt-1 px-3 py-1.5 rounded-lg bg-primary hover:bg-primary/90 text-on-primary text-xs font-bold transition-all shadow-2xs flex items-center gap-1 cursor-pointer"
+                  >
+                    <span className="material-symbols-outlined text-[15px]">add</span>
+                    <span>Add First Product</span>
+                  </button>
+                )}
               </div>
-            ))}
+            ) : (
+              filteredData.map((item) => (
+                <div
+                  key={item.sku}
+                  className={`p-3 rounded-xl border transition-all flex items-center justify-between gap-3 min-w-0 ${
+                    hoveredSku === item.sku
+                      ? 'border-primary bg-primary/5 shadow-2xs'
+                      : 'border-outline-variant/30 bg-surface-container-low/60'
+                  }`}
+                >
+                  <div className="min-w-0 flex-1 space-y-0.5">
+                    <div className="flex items-center gap-1.5">
+                      <span
+                        className={`px-1.5 py-0.2 rounded text-[9px] font-bold uppercase shrink-0 ${
+                          item.urgency === 'CRITICAL'
+                            ? 'bg-rose-500/15 text-rose-700 border border-rose-500/30'
+                            : item.urgency === 'WARNING'
+                            ? 'bg-amber-500/15 text-amber-700 border border-amber-500/30'
+                            : 'bg-emerald-500/15 text-emerald-700 border border-emerald-500/30'
+                        }`}
+                      >
+                        {item.daysOfSupply}d Supply
+                      </span>
+                      <span className="text-[11px] font-mono font-bold text-on-surface truncate">
+                        {item.sku}
+                      </span>
+                    </div>
+                    <div className="text-xs font-bold text-on-surface truncate">{item.name}</div>
+                    <div className="text-[10px] text-secondary font-tabular-nums truncate">
+                      {formatINR(item.priceInr)} • Cart Demand: {item.smartCartDemand24h} | Stock: {item.currentStock}
+                    </div>
+                  </div>
+
+                  <button
+                    type="button"
+                    onClick={() => handleRestock(item.sku)}
+                    title={`Restock 25 units for ${item.name}`}
+                    className="px-3 py-1.5 rounded-lg bg-primary hover:bg-primary/90 text-on-primary text-xs font-bold shrink-0 shadow-2xs transition-all active:scale-95 cursor-pointer flex items-center justify-center gap-1 whitespace-nowrap min-w-[58px]"
+                  >
+                    <span className="material-symbols-outlined text-[15px] leading-none">add</span>
+                    <span className="leading-none">25</span>
+                  </button>
+                </div>
+              ))
+            )}
           </div>
         </div>
       </div>

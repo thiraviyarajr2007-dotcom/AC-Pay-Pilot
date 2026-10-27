@@ -42,7 +42,9 @@ import {
   DEFAULT_BIZ_ID,
   emitOrderPlacedNotification,
   ensureDefaultStoreExists,
+  subscribeStoreOrders,
 } from './services/storefrontService';
+import { StorefrontOrder } from './types/storefront';
 import { CopilotModal } from './components/modals/CopilotModal';
 import { FeeAuditModal } from './components/modals/FeeAuditModal';
 import { PayPalCheckoutModal } from './components/modals/PayPalCheckoutModal';
@@ -394,11 +396,12 @@ export default function App() {
   const location = useLocation();
   const navigate = useNavigate();
   const [searchParams, setSearchParams] = useSearchParams();
-  const { setRole } = useRole();
+  const { setRole, dataSource, activeBizId } = useRole();
 
   const [searchQuery, setSearchQuery] = useState('');
   const [customCatalog, setCustomCatalog] = useState<Record<string, any>>(CATALOG_BY_SKU);
   const [orders, setOrders] = useState<OrderRecord[]>(INITIAL_ORDER_RECORDS);
+  const [liveStoreOrders, setLiveStoreOrders] = useState<StorefrontOrder[]>([]);
   const [copilotInitialQuery, setCopilotInitialQuery] = useState<string>('');
   const [toastMessage, setToastMessage] = useState<string | null>(null);
   const [isOnboardingOpen, setIsOnboardingOpen] = useState(false);
@@ -406,6 +409,42 @@ export default function App() {
   React.useEffect(() => {
     ensureDefaultStoreExists();
   }, []);
+
+  React.useEffect(() => {
+    const unsub = subscribeStoreOrders(activeBizId, (ords) => {
+      setLiveStoreOrders(ords);
+    });
+    return () => unsub();
+  }, [activeBizId]);
+
+  const effectiveOrders = React.useMemo<OrderRecord[]>(() => {
+    if (dataSource === 'live') {
+      return liveStoreOrders.map((o) => {
+        const firstItem = o.items?.[0] || { productId: 'ITEM-1', name: 'Storefront Product', quantity: 1 };
+        const paymentState =
+          o.escrowStatus === 'Delivered — Escrow Released'
+            ? 'Captured'
+            : o.escrowStatus === 'Disputed'
+            ? 'Failed'
+            : 'Authorized';
+
+        return {
+          id: o.orderNumber || o.id,
+          invoiceId: `INV-${o.orderNumber || o.id}`,
+          buyerName: o.customerName || 'Verified Buyer',
+          buyerGstin: '29ABCDE1234F1Z5',
+          productSku: firstItem.productId,
+          productName: firstItem.name,
+          qty: firstItem.quantity || 1,
+          amount: o.total || 0,
+          paymentState,
+          date: o.createdAt ? new Date(o.createdAt).toISOString().split('T')[0] : '2026-10-27',
+          trackingId: o.trackingNumber || `AWB-${o.orderNumber || o.id}`,
+        };
+      });
+    }
+    return orders;
+  }, [dataSource, liveStoreOrders, orders]);
 
   // Determine if this is a customer visiting the public storefront
   const isPublicStorefront =
@@ -673,7 +712,7 @@ export default function App() {
                 <RoleRouteGuard allowedRoles={['seller', 'business_head']}>
                   <OrdersScreen
                     mode="seller"
-                    orders={orders}
+                    orders={effectiveOrders}
                     highlightedOrderId={highlightedOrderId}
                     onUpdateOrderState={handleUpdateOrderState}
                     onOpenInvoice={(invId) => navigate(`/seller/invoices/${invId}`)}
@@ -881,7 +920,7 @@ export default function App() {
                 <RoleRouteGuard allowedRoles={['customer', 'business_head']}>
                   <OrdersScreen
                     mode="customer"
-                    orders={orders}
+                    orders={effectiveOrders}
                     highlightedOrderId={highlightedOrderId}
                     onUpdateOrderState={handleUpdateOrderState}
                     onOpenInvoice={(invId) => navigate(`/seller/invoices/${invId}`)}

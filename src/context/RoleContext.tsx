@@ -201,6 +201,8 @@ interface RoleContextValue {
   getActorHeaders: () => Record<string, string>;
   dataSource: DataSource;
   setDataSource: (source: DataSource) => void;
+  activeBizId: string;
+  isDemoMode: boolean;
   serverConfirmed: boolean;
   setServerConfirmed: (confirmed: boolean) => void;
   feesVerified: boolean;
@@ -262,12 +264,26 @@ export const RoleProvider: React.FC<{ children: React.ReactNode }> = ({ children
         if (userDoc.role && ROLE_PROFILES[userDoc.role]) {
           setFirebaseRole(userDoc.role);
         }
+        try {
+          const savedSource = localStorage.getItem('paypilot_data_source');
+          if (!savedSource) {
+            setDataSourceState('live');
+          }
+        } catch {}
       }
       setAuthLoading(false);
     });
 
     return () => unsubscribe();
   }, []);
+
+  // Compute active business ID: isolated for logged-in users, shared demo biz for demo mode
+  const activeBizId = useMemo(() => {
+    if (dataSource === 'live' && firebaseUser?.uid) {
+      return `biz-${firebaseUser.uid}`;
+    }
+    return 'biz-aerocool';
+  }, [dataSource, firebaseUser]);
 
   // In 'live' mode with a signed-in Firebase user, role comes from Firestore users/{uid}.role.
   // In 'demo' mode, the clearly labelled "Demo role" switcher controls the role.
@@ -420,6 +436,8 @@ export const RoleProvider: React.FC<{ children: React.ReactNode }> = ({ children
       getActorHeaders,
       dataSource,
       setDataSource,
+      activeBizId,
+      isDemoMode: dataSource === 'demo',
       serverConfirmed,
       setServerConfirmed,
       feesVerified,
@@ -442,6 +460,7 @@ export const RoleProvider: React.FC<{ children: React.ReactNode }> = ({ children
       authLoading,
       firestoreConnected,
       dataSource,
+      activeBizId,
       serverConfirmed,
       feesVerified,
       lastServerOrderId,

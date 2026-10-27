@@ -23,12 +23,15 @@ import { InventoryVelocityD3Widget } from '../dashboard/InventoryVelocityD3Widge
 import { useRole } from '../../context/RoleContext';
 import {
   subscribeStoreOrders,
+  subscribeStoreProducts,
+  subscribeBusiness,
   subscribeNewOrderNotifications,
   LiveOrderNotification,
   updateStorefrontOrderEscrow,
   DEFAULT_BIZ_ID,
+  DEFAULT_SLUG,
 } from '../../services/storefrontService';
-import { StorefrontOrder } from '../../types/storefront';
+import { StorefrontOrder, StoreProduct, BusinessProfile } from '../../types/storefront';
 
 interface DashboardScreenProps {
   onOpenCopilot?: (query?: string) => void;
@@ -46,36 +49,99 @@ export function DashboardScreen({
   showToast = console.log,
 }: DashboardScreenProps) {
   const navigate = useNavigate();
-  const { role, dataSource } = useRole();
+  const { role, dataSource, activeBizId, firebaseUser } = useRole();
   const [feesVerified, setFeesVerified] = useState(true);
   const [serverConfirmed] = useState(true);
 
-  // 7-day Analytics Chart State
-  const [activeChartMetric, setActiveChartMetric] = useState<'sales' | 'visitors' | 'conversion'>('sales');
-  const [hoveredIndex, setHoveredIndex] = useState<number | null>(null);
-
-  const chartData = [
-    { day: 'Mon', date: '08 May', sales: 38500, visitors: 140, conversion: 3.1 },
-    { day: 'Tue', date: '09 May', sales: 42000, visitors: 165, conversion: 3.4 },
-    { day: 'Wed', date: '10 May', sales: 56000, visitors: 180, conversion: 3.6 },
-    { day: 'Thu', date: '11 May', sales: 68000, visitors: 210, conversion: 3.8 },
-    { day: 'Fri', date: '12 May', sales: 74000, visitors: 225, conversion: 3.9 },
-    { day: 'Sat', date: '13 May', sales: 112000, visitors: 260, conversion: 4.4 },
-    { day: 'Sun', date: '14 May', sales: 92000, visitors: 240, conversion: 4.1 },
-  ];
-
-  // Payout State
-  const [isProcessingWithdrawal, setIsProcessingWithdrawal] = useState(false);
-  const [payoutSchedule, setPayoutSchedule] = useState<'daily' | 'weekly'>('daily');
-
-  // Live Storefront Orders from Firestore + Real-time Order Toast
+  // Live Storefront State from Firestore
+  const [sellerBusiness, setSellerBusiness] = useState<BusinessProfile | null>(null);
+  const [storeProducts, setStoreProducts] = useState<StoreProduct[]>([]);
   const [liveOrders, setLiveOrders] = useState<StorefrontOrder[]>([]);
   const [newOrderNotice, setNewOrderNotice] = useState<string | null>(null);
   const [liveOrderToast, setLiveOrderToast] = useState<LiveOrderNotification | null>(null);
   const [volumeSeriesView, setVolumeSeriesView] = useState<'both' | 'orders' | 'settled'>('both');
 
-  // 30-Day Order Volume Trends dataset (merges 30-day baseline with liveOrders in real time)
+  // 7-day Analytics Chart State
+  const [activeChartMetric, setActiveChartMetric] = useState<'sales' | 'visitors' | 'conversion'>('sales');
+  const [hoveredIndex, setHoveredIndex] = useState<number | null>(null);
+
+  // Payout State
+  const [isProcessingWithdrawal, setIsProcessingWithdrawal] = useState(false);
+  const [payoutSchedule, setPayoutSchedule] = useState<'daily' | 'weekly'>('daily');
+
+  // 7-day Analytics Chart Data
+  const chartData = useMemo(() => {
+    if (dataSource === 'live') {
+      const days = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+      const now = new Date();
+      return Array.from({ length: 7 }).map((_, idx) => {
+        const daysAgo = 6 - idx;
+        const d = new Date(now.getTime() - daysAgo * 86400000);
+        const iso = d.toISOString().slice(0, 10);
+        const dayName = days[d.getDay()];
+        const label = d.toLocaleDateString('en-IN', { day: '2-digit', month: 'short' });
+
+        const ordersOnDay = liveOrders.filter((o) => (o.createdAt || '').slice(0, 10) === iso);
+        const daySales = ordersOnDay.reduce((acc, o) => acc + (o.total || 0), 0);
+        const dayVisitors = ordersOnDay.length > 0 ? ordersOnDay.length * 12 : 0;
+        const dayConversion = dayVisitors > 0 ? (ordersOnDay.length / dayVisitors) * 100 : 0;
+
+        return {
+          day: dayName,
+          date: label,
+          sales: daySales,
+          visitors: dayVisitors,
+          conversion: Math.round(dayConversion * 10) / 10,
+        };
+      });
+    }
+
+    return [
+      { day: 'Mon', date: '08 May', sales: 38500, visitors: 140, conversion: 3.1 },
+      { day: 'Tue', date: '09 May', sales: 42000, visitors: 165, conversion: 3.4 },
+      { day: 'Wed', date: '10 May', sales: 56000, visitors: 180, conversion: 3.6 },
+      { day: 'Thu', date: '11 May', sales: 68000, visitors: 210, conversion: 3.8 },
+      { day: 'Fri', date: '12 May', sales: 74000, visitors: 225, conversion: 3.9 },
+      { day: 'Sat', date: '13 May', sales: 112000, visitors: 260, conversion: 4.4 },
+      { day: 'Sun', date: '14 May', sales: 92000, visitors: 240, conversion: 4.1 },
+    ];
+  }, [dataSource, liveOrders]);
+
+  // 30-Day Order Volume Trends dataset (merges 30-day baseline in demo, uses actual orders in live)
   const orderVolume30dData = useMemo(() => {
+    if (dataSource === 'live') {
+      const now = new Date();
+      const liveCountsByDate: Record<string, { count: number; settled: number; gmv: number }> = {};
+
+      liveOrders.forEach((ord) => {
+        const key = (ord.createdAt || '').slice(0, 10);
+        if (!key) return;
+        if (!liveCountsByDate[key]) {
+          liveCountsByDate[key] = { count: 0, settled: 0, gmv: 0 };
+        }
+        liveCountsByDate[key].count += 1;
+        if (ord.escrowStatus === 'Delivered — Escrow Released') {
+          liveCountsByDate[key].settled += 1;
+        }
+        liveCountsByDate[key].gmv += Number(ord.total || 0);
+      });
+
+      return Array.from({ length: 30 }).map((_, idx) => {
+        const daysAgo = 29 - idx;
+        const d = new Date(now.getTime() - daysAgo * 86400000);
+        const isoDate = d.toISOString().slice(0, 10);
+        const label = d.toLocaleDateString('en-IN', { day: '2-digit', month: 'short' });
+        const liveDelta = liveCountsByDate[isoDate] || { count: 0, settled: 0, gmv: 0 };
+        return {
+          isoDate,
+          dateLabel: label,
+          orders: liveDelta.count,
+          escrowSettled: liveDelta.settled,
+          gmvInr: liveDelta.gmv,
+        };
+      });
+    }
+
     const baselinePattern = [
       11, 14, 13, 16, 19, 24, 22, 14, 15, 17, 18, 21, 27, 25, 16, 18, 17, 20, 23, 29, 26, 18, 19,
       21, 22, 25, 32, 28, 21, 24,
@@ -114,7 +180,7 @@ export function DashboardScreen({
         gmvInr,
       };
     });
-  }, [liveOrders]);
+  }, [dataSource, liveOrders]);
 
   const volume30dStats = useMemo(() => {
     const totalOrders = orderVolume30dData.reduce((acc, d) => acc + d.orders, 0);
@@ -164,14 +230,22 @@ export function DashboardScreen({
     { sku: 'AUD-ANC-99', name: 'AcousticSphere ANC Spatial Earbuds', stock: 8, minStock: 20 },
   ]);
 
-  // Subscribe to live storefront orders & real-time customer order notifications
+  // Subscribe to live storefront business profile, products, orders, and real-time alerts
   useEffect(() => {
-    const unsubOrders = subscribeStoreOrders(DEFAULT_BIZ_ID, (orders) => {
+    const unsubBiz = subscribeBusiness(activeBizId, (biz) => {
+      setSellerBusiness(biz);
+    });
+
+    const unsubOrders = subscribeStoreOrders(activeBizId, (orders) => {
       setLiveOrders(orders);
     });
 
+    const unsubProducts = subscribeStoreProducts(activeBizId, (prods) => {
+      setStoreProducts(prods);
+    });
+
     let toastTimer: ReturnType<typeof setTimeout> | null = null;
-    const unsubNewOrder = subscribeNewOrderNotifications(DEFAULT_BIZ_ID, (notif) => {
+    const unsubNewOrder = subscribeNewOrderNotifications(activeBizId, (notif) => {
       setLiveOrderToast(notif);
       setNewOrderNotice(
         `New order ${notif.orderNumber} placed by ${notif.customerName} (${formatINR(notif.totalInr)})`
@@ -194,22 +268,120 @@ export function DashboardScreen({
       }, 7000);
     });
 
-    // Fetch AI insights from server
-    fetch(`/api/ai/seller-insights?businessName=AeroCool%20Dynamics&category=Smart%20Hardware&ordersCount=14&gmv=₹4,82,500`)
-      .then((res) => (res.ok ? res.json() : null))
-      .then((data) => {
-        if (data?.insights) {
-          setInsights(data.insights);
-        }
-      })
-      .catch(() => {});
+    // Handle AI insights: contextual for live vs demo
+    if (dataSource === 'live') {
+      setInsights([
+        {
+          id: 'ins-live-1',
+          badge: 'Storefront Setup',
+          title: 'Publish Your First 3D/AR Product',
+          description:
+            'Upload a .glb CAD model in Seller Listing Studio to enable WebXR and interactive 360 preview for prospective buyers.',
+          actionText: 'Open Listing Studio',
+          metric: '2.4x Higher Conversion',
+        },
+        {
+          id: 'ins-live-2',
+          badge: 'Trust & Escrow',
+          title: 'Autonomous PayPal Escrow Protection',
+          description:
+            'All checkout transactions on your storefront automatically lock in escrow until proof of delivery is verified.',
+          actionText: 'Verify Sandbox Setup',
+          metric: '100% Protection',
+        },
+      ]);
+    } else {
+      fetch(`/api/ai/seller-insights?businessName=AeroCool%20Dynamics&category=Smart%20Hardware&ordersCount=14&gmv=₹4,82,500`)
+        .then((res) => (res.ok ? res.json() : null))
+        .then((data) => {
+          if (data?.insights) {
+            setInsights(data.insights);
+          }
+        })
+        .catch(() => {});
+    }
 
     return () => {
+      unsubBiz();
       unsubOrders();
+      unsubProducts();
       unsubNewOrder();
       if (toastTimer) clearTimeout(toastTimer);
     };
-  }, []);
+  }, [activeBizId, dataSource]);
+
+  // 4 Primary E-Commerce Metrics (Live calculated vs Demo preloaded)
+  const primaryMetrics = useMemo(() => {
+    if (dataSource === 'live') {
+      const liveGmv = liveOrders.reduce((acc, o) => acc + (o.total || 0), 0);
+      const ordersCount = liveOrders.length;
+      const aov = ordersCount > 0 ? Math.round(liveGmv / ordersCount) : 0;
+      const prodsCount = storeProducts.length;
+
+      return [
+        {
+          label: 'Total Storefront Sales',
+          value: formatINR(liveGmv),
+          sub: ordersCount === 0 ? 'Ready for your first sale' : `${ordersCount} orders recorded`,
+          icon: 'payments',
+          trend: liveGmv > 0 ? 'up' : 'neutral',
+        },
+        {
+          label: 'Active Store Products',
+          value: `${prodsCount}`,
+          sub: prodsCount === 0 ? 'No products published yet' : `${prodsCount} products live in 3D/AR`,
+          icon: 'inventory_2',
+          trend: prodsCount > 0 ? 'up' : 'neutral',
+        },
+        {
+          label: 'Storefront Orders',
+          value: `${ordersCount}`,
+          sub: ordersCount === 0 ? 'Awaiting buyer checkouts' : `${ordersCount} orders in escrow pipeline`,
+          icon: 'shopping_bag',
+          trend: ordersCount > 0 ? 'up' : 'neutral',
+        },
+        {
+          label: 'Average Order Value (AOV)',
+          value: formatINR(aov),
+          sub: 'Zero commission escrow settlement',
+          icon: 'analytics',
+          trend: aov > 0 ? 'up' : 'neutral',
+        },
+      ];
+    }
+
+    // Demo values
+    return [
+      {
+        label: 'Total Storefront Sales',
+        value: '₹4,82,500',
+        sub: '+24.5% vs last month',
+        icon: 'payments',
+        trend: 'up',
+      },
+      {
+        label: 'Unique Store Visitors',
+        value: '1,420',
+        sub: 'Across desktop & mobile',
+        icon: 'visibility',
+        trend: 'up',
+      },
+      {
+        label: 'Storefront Conversion Rate',
+        value: '3.8%',
+        sub: 'Benchmark for hardware is 2.4%',
+        icon: 'shopping_bag',
+        trend: 'up',
+      },
+      {
+        label: 'Average Order Value (AOV)',
+        value: '₹12,450',
+        sub: 'Zero commission escrow settlement',
+        icon: 'analytics',
+        trend: 'neutral',
+      },
+    ];
+  }, [dataSource, liveOrders, storeProducts]);
 
   // Compute live escrow totals
   const escrowHeldTotal = liveOrders
@@ -311,6 +483,44 @@ export function DashboardScreen({
     const releasedOrders = liveOrders.filter((o) => o.escrowStatus === 'Delivered — Escrow Released');
     const liveDisputed = liveOrders.filter((o) => o.escrowStatus === 'Disputed');
 
+    if (dataSource === 'live') {
+      const heldVolumeInr = heldOrders.reduce((s, o) => s + (o.total || 0), 0);
+      const pendingReleaseVolumeInr = inTransitOrders.reduce((s, o) => s + (o.total || 0), 0);
+      const disputedVolumeInr = liveDisputed.reduce((s, o) => s + (o.total || 0), 0);
+      const releasedVolumeInr = releasedOrders.reduce((s, o) => s + (o.total || 0), 0);
+      const totalManagedVolumeInr =
+        heldVolumeInr + pendingReleaseVolumeInr + disputedVolumeInr + releasedVolumeInr;
+
+      const totalActiveDisputeCount = liveDisputed.length;
+      const totalPendingReleaseCount = inTransitOrders.length;
+      const totalHeldCount = heldOrders.length;
+
+      const disputeRatioPct =
+        totalManagedVolumeInr > 0 ? (disputedVolumeInr / totalManagedVolumeInr) * 100 : 0;
+      const healthScore =
+        totalActiveDisputeCount === 0
+          ? 100
+          : Math.max(60, Math.round(100 - disputeRatioPct * 2 - totalActiveDisputeCount * 5));
+
+      return {
+        heldVolumeInr,
+        pendingReleaseVolumeInr,
+        disputedVolumeInr,
+        releasedVolumeInr,
+        totalManagedVolumeInr,
+        totalActiveDisputeCount,
+        totalPendingReleaseCount,
+        totalHeldCount,
+        disputeRatioPct,
+        healthScore,
+        heldOrders,
+        inTransitOrders,
+        liveDisputed,
+        activeSupplementalDisputes: [],
+        activeSupplementalPending: [],
+      };
+    }
+
     const activeSupplementalDisputes = flaggedDisputes.filter((d) => d.status === 'OPEN');
     const resolvedReleasedDisputesInr = flaggedDisputes
       .filter((d) => d.status === 'RESOLVED_RELEASED')
@@ -321,7 +531,7 @@ export function DashboardScreen({
       .filter((r) => r.released)
       .reduce((acc, r) => acc + r.amountInr, 0);
 
-    const heldVolumeInr = (heldOrders.reduce((s, o) => s + o.total, 0) || 84990);
+    const heldVolumeInr = heldOrders.reduce((s, o) => s + o.total, 0) || 84990;
     const pendingReleaseVolumeInr =
       inTransitOrders.reduce((s, o) => s + o.total, 0) +
       activeSupplementalPending.reduce((s, r) => s + r.amountInr, 0);
@@ -365,7 +575,21 @@ export function DashboardScreen({
       activeSupplementalDisputes,
       activeSupplementalPending,
     };
-  }, [liveOrders, flaggedDisputes, supplementalPendingReleases]);
+  }, [dataSource, liveOrders, flaggedDisputes, supplementalPendingReleases]);
+
+  const effectiveLowStockItems = useMemo(() => {
+    if (dataSource === 'live') {
+      return storeProducts
+        .filter((p) => p.stock <= 15)
+        .map((p) => ({
+          sku: p.sku || p.id.toUpperCase(),
+          name: p.name,
+          stock: p.stock,
+          minStock: 20,
+        }));
+    }
+    return lowStockItems;
+  }, [dataSource, storeProducts, lowStockItems]);
 
   // Rapid Resolution Handlers for Global Escrow Health Widget
   const handleRapidResolveDispute = async (
@@ -519,12 +743,12 @@ export function DashboardScreen({
           <p className="text-xs text-on-surface-variant leading-relaxed">
             Real-time business bundle: Seller Portal synced with customer storefront at{' '}
             <a
-              href="/s/aerocool"
+              href={`/s/${sellerBusiness?.slug || DEFAULT_SLUG}`}
               target="_blank"
               rel="noopener noreferrer"
               className="text-primary font-semibold underline"
             >
-              aerocool.acpaypilot.app
+              {sellerBusiness?.slug || DEFAULT_SLUG}.acpaypilot.app
             </a>
           </p>
         </div>
@@ -539,7 +763,7 @@ export function DashboardScreen({
           </button>
 
           <a
-            href="/s/aerocool"
+            href={`/s/${sellerBusiness?.slug || DEFAULT_SLUG}`}
             target="_blank"
             rel="noopener noreferrer"
             className="px-4 py-2.5 rounded-xl bg-surface border border-outline-variant text-xs font-bold text-on-surface hover:bg-surface-container flex items-center gap-1.5 transition-colors"
@@ -568,36 +792,7 @@ export function DashboardScreen({
 
       {/* 4 PRIMARY E-COMMERCE METRICS */}
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
-        {[
-          {
-            label: 'Total Storefront Sales',
-            value: '₹4,82,500',
-            sub: '+24.5% vs last month',
-            icon: 'payments',
-            trend: 'up',
-          },
-          {
-            label: 'Unique Store Visitors',
-            value: '1,420',
-            sub: 'Across desktop & mobile',
-            icon: 'visibility',
-            trend: 'up',
-          },
-          {
-            label: 'Storefront Conversion Rate',
-            value: '3.8%',
-            sub: 'Benchmark for hardware is 2.4%',
-            icon: 'shopping_bag',
-            trend: 'up',
-          },
-          {
-            label: 'Average Order Value (AOV)',
-            value: '₹12,450',
-            sub: 'Zero commission escrow settlement',
-            icon: 'analytics',
-            trend: 'neutral',
-          },
-        ].map((metric, idx) => (
+        {primaryMetrics.map((metric, idx) => (
           <div
             key={idx}
             className="p-5 rounded-2xl bg-surface-container-low border border-outline-variant/30 flex items-center justify-between shadow-sm"
@@ -622,6 +817,8 @@ export function DashboardScreen({
       <InventoryVelocityD3Widget
         showToast={showToast}
         onNavigateProducts={() => navigate('/seller/products')}
+        dataSource={dataSource}
+        liveProducts={storeProducts}
       />
 
       {/* PERFORMANCE CHARTS & PAYOUT SUMMARY ROW */}
@@ -690,7 +887,44 @@ export function DashboardScreen({
 
           {/* SVG Chart Graphic */}
           <div className="relative pt-2">
-            {(() => {
+            {dataSource === 'live' && liveOrders.length === 0 ? (
+              <div className="py-12 px-6 text-center flex flex-col items-center justify-center space-y-3 bg-surface-container-lowest/50 rounded-xl border border-dashed border-outline-variant/60">
+                <div className="w-12 h-12 rounded-2xl bg-primary/10 text-primary flex items-center justify-center">
+                  <span className="material-symbols-outlined text-[26px]">show_chart</span>
+                </div>
+                <div className="max-w-md space-y-1">
+                  <h4 className="text-sm font-bold text-on-surface">No Storefront Checkout Data Yet</h4>
+                  <p className="text-xs text-on-surface-variant leading-relaxed">
+                    Once buyers purchase products on your live public storefront, your 7-day sales velocity, traffic, and conversion curves will plot here in real-time.
+                  </p>
+                </div>
+                <div className="flex flex-wrap items-center justify-center gap-2 pt-2">
+                  <a
+                    href={`/s/${sellerBusiness?.slug || DEFAULT_SLUG}`}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="px-3.5 py-2 rounded-xl bg-primary text-on-primary text-xs font-bold hover:bg-primary/90 flex items-center gap-1.5 transition-all shadow-xs"
+                  >
+                    <span className="material-symbols-outlined text-[15px]">storefront</span>
+                    <span>Open Public Storefront</span>
+                  </a>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      if (typeof window !== 'undefined') {
+                        navigator.clipboard.writeText(`${window.location.origin}/s/${sellerBusiness?.slug || DEFAULT_SLUG}`);
+                        showToast('📋 Storefront URL copied to clipboard!');
+                      }
+                    }}
+                    className="px-3 py-2 rounded-xl border border-outline-variant text-xs font-bold text-on-surface hover:bg-surface-container flex items-center gap-1 transition-colors"
+                  >
+                    <span className="material-symbols-outlined text-[15px]">content_copy</span>
+                    <span>Copy Store Link</span>
+                  </button>
+                </div>
+              </div>
+            ) : (
+              (() => {
               const maxVal =
                 activeChartMetric === 'sales'
                   ? 120000
@@ -846,7 +1080,8 @@ export function DashboardScreen({
                   </div>
                 </div>
               );
-            })()}
+            })()
+          )}
           </div>
 
           {/* 30-Day Order Volume Trends (Recharts LineChart) */}
@@ -891,84 +1126,96 @@ export function DashboardScreen({
               </div>
             </div>
 
-            <div className="h-64 w-full" data-testid="order-volume-30d-chart">
-              <ResponsiveContainer width="100%" height="100%">
-                <LineChart
-                  data={orderVolume30dData}
-                  margin={{ top: 10, right: 16, left: -12, bottom: 4 }}
-                >
-                  <CartesianGrid strokeDasharray="3 3" stroke="rgba(148, 163, 184, 0.2)" vertical={false} />
-                  <XAxis
-                    dataKey="dateLabel"
-                    tick={{ fontSize: 11, fill: '#64748b' }}
-                    tickLine={false}
-                    axisLine={{ stroke: 'rgba(148, 163, 184, 0.25)' }}
-                    interval={4}
-                  />
-                  <YAxis
-                    tick={{ fontSize: 11, fill: '#64748b' }}
-                    tickLine={false}
-                    axisLine={false}
-                    allowDecimals={false}
-                  />
-                  <Tooltip
-                    content={({ active, payload, label }) => {
-                      if (!active || !payload || payload.length === 0) return null;
-                      const row = payload[0]?.payload as (typeof orderVolume30dData)[0];
-                      return (
-                        <div className="rounded-xl bg-surface/95 backdrop-blur-md border border-outline-variant/40 shadow-md px-3.5 py-2.5 text-xs space-y-1 font-tabular-nums">
-                          <div className="font-bold text-on-surface">{label}</div>
-                          <div className="flex items-center justify-between gap-4 text-on-surface-variant">
-                            <span>Orders Placed:</span>
-                            <span className="font-mono font-bold text-primary">{row.orders}</span>
-                          </div>
-                          <div className="flex items-center justify-between gap-4 text-on-surface-variant">
-                            <span>Escrow Settled:</span>
-                            <span className="font-mono font-bold text-emerald-600">
-                              {row.escrowSettled}
-                            </span>
-                          </div>
-                          <div className="pt-1 border-t border-outline-variant/20 flex items-center justify-between gap-4 text-on-surface-variant">
-                            <span>Daily GMV:</span>
-                             <span className="font-mono font-semibold text-on-surface">
-                               {formatINR(row.gmvInr)}
-                             </span>
-                          </div>
-                        </div>
-                      );
-                    }}
-                  />
-                  <ReferenceLine
-                    y={volume30dStats.avgDaily}
-                    stroke="#94a3b8"
-                    strokeDasharray="4 4"
-                  />
-                  {(volumeSeriesView === 'both' || volumeSeriesView === 'orders') && (
-                    <Line
-                      type="monotone"
-                      dataKey="orders"
-                      name="Orders Placed"
-                      stroke="#004ac6"
-                      strokeWidth={2.5}
-                      dot={{ r: 2.5, fill: '#004ac6', strokeWidth: 0 }}
-                      activeDot={{ r: 5, fill: '#004ac6', stroke: '#ffffff', strokeWidth: 2 }}
+            {orderVolume30dData.length === 0 ? (
+              <div className="h-44 w-full flex flex-col items-center justify-center text-center p-6 bg-surface-container-lowest/40 rounded-xl border border-dashed border-outline-variant/60">
+                <span className="material-symbols-outlined text-[28px] text-on-surface-variant/50">
+                  trending_up
+                </span>
+                <p className="text-xs font-semibold text-on-surface mt-1">No 30-Day Order History Recorded</p>
+                <p className="text-[11px] text-on-surface-variant max-w-sm">
+                  Daily orders and settled escrow volumes will plot across 30-day timelines once store checkouts occur.
+                </p>
+              </div>
+            ) : (
+              <div className="h-64 w-full" data-testid="order-volume-30d-chart">
+                <ResponsiveContainer width="100%" height="100%">
+                  <LineChart
+                    data={orderVolume30dData}
+                    margin={{ top: 10, right: 16, left: -12, bottom: 4 }}
+                  >
+                    <CartesianGrid strokeDasharray="3 3" stroke="rgba(148, 163, 184, 0.2)" vertical={false} />
+                    <XAxis
+                      dataKey="dateLabel"
+                      tick={{ fontSize: 11, fill: '#64748b' }}
+                      tickLine={false}
+                      axisLine={{ stroke: 'rgba(148, 163, 184, 0.25)' }}
+                      interval={4}
                     />
-                  )}
-                  {(volumeSeriesView === 'both' || volumeSeriesView === 'settled') && (
-                    <Line
-                      type="monotone"
-                      dataKey="escrowSettled"
-                      name="Escrow Settled"
-                      stroke="#059669"
-                      strokeWidth={2}
-                      strokeDasharray="5 3"
-                      dot={false}
-                      activeDot={{ r: 4, fill: '#059669', stroke: '#ffffff', strokeWidth: 2 }}
+                    <YAxis
+                      tick={{ fontSize: 11, fill: '#64748b' }}
+                      tickLine={false}
+                      axisLine={false}
+                      allowDecimals={false}
                     />
-                  )}
-                </LineChart>
-              </ResponsiveContainer>
-            </div>
+                    <Tooltip
+                      content={({ active, payload, label }) => {
+                        if (!active || !payload || payload.length === 0) return null;
+                        const row = payload[0]?.payload as (typeof orderVolume30dData)[0];
+                        return (
+                          <div className="rounded-xl bg-surface/95 backdrop-blur-md border border-outline-variant/40 shadow-md px-3.5 py-2.5 text-xs space-y-1 font-tabular-nums">
+                            <div className="font-bold text-on-surface">{label}</div>
+                            <div className="flex items-center justify-between gap-4 text-on-surface-variant">
+                              <span>Orders Placed:</span>
+                              <span className="font-mono font-bold text-primary">{row.orders}</span>
+                            </div>
+                            <div className="flex items-center justify-between gap-4 text-on-surface-variant">
+                              <span>Escrow Settled:</span>
+                              <span className="font-mono font-bold text-emerald-600">
+                                {row.escrowSettled}
+                              </span>
+                            </div>
+                            <div className="pt-1 border-t border-outline-variant/20 flex items-center justify-between gap-4 text-on-surface-variant">
+                              <span>Daily GMV:</span>
+                              <span className="font-mono font-semibold text-on-surface">
+                                {formatINR(row.gmvInr)}
+                              </span>
+                            </div>
+                          </div>
+                        );
+                      }}
+                    />
+                    <ReferenceLine
+                      y={volume30dStats.avgDaily}
+                      stroke="#94a3b8"
+                      strokeDasharray="4 4"
+                    />
+                    {(volumeSeriesView === 'both' || volumeSeriesView === 'orders') && (
+                      <Line
+                        type="monotone"
+                        dataKey="orders"
+                        name="Orders Placed"
+                        stroke="#004ac6"
+                        strokeWidth={2.5}
+                        dot={{ r: 2.5, fill: '#004ac6', strokeWidth: 0 }}
+                        activeDot={{ r: 5, fill: '#004ac6', stroke: '#ffffff', strokeWidth: 2 }}
+                      />
+                    )}
+                    {(volumeSeriesView === 'both' || volumeSeriesView === 'settled') && (
+                      <Line
+                        type="monotone"
+                        dataKey="escrowSettled"
+                        name="Escrow Settled"
+                        stroke="#059669"
+                        strokeWidth={2}
+                        strokeDasharray="5 3"
+                        dot={false}
+                        activeDot={{ r: 4, fill: '#059669', stroke: '#ffffff', strokeWidth: 2 }}
+                      />
+                    )}
+                  </LineChart>
+                </ResponsiveContainer>
+              </div>
+            )}
           </div>
         </div>
 
@@ -997,13 +1244,19 @@ export function DashboardScreen({
               </span>
               <div className="flex items-baseline justify-between">
                 <span className="text-2xl font-black text-on-surface font-tabular-nums">
-                  {formatINR(345110)}
+                  {formatINR(dataSource === 'live' ? globalEscrowMetrics.releasedVolumeInr : 345110)}
                 </span>
                 <span className="text-xs text-emerald-600 font-bold">100% Cleared</span>
               </div>
               <div className="flex justify-between items-center text-[11px] pt-1 border-t border-outline-variant/20 text-on-surface-variant">
                 <span>In Escrow Transit Hold:</span>
-                <span className="font-mono font-bold text-amber-700">{formatINR(84990)}</span>
+                <span className="font-mono font-bold text-amber-700">
+                  {formatINR(
+                    dataSource === 'live'
+                      ? globalEscrowMetrics.heldVolumeInr + globalEscrowMetrics.pendingReleaseVolumeInr
+                      : 84990
+                  )}
+                </span>
               </div>
             </div>
 
@@ -1014,7 +1267,11 @@ export function DashboardScreen({
               </div>
               <div className="flex justify-between py-1 border-b border-outline-variant/20">
                 <span className="text-secondary">Connected Gateway:</span>
-                <span className="font-semibold text-primary font-mono text-[11px]">seller-sandbox@aerocool.io</span>
+                <span className="font-semibold text-primary font-mono text-[11px]">
+                  {dataSource === 'live'
+                    ? firebaseUser?.email || `seller@${sellerBusiness?.slug || 'store'}.io`
+                    : 'seller-sandbox@aerocool.io'}
+                </span>
               </div>
               <div className="flex justify-between py-1">
                 <span className="text-secondary">Settlement Account:</span>
@@ -1026,18 +1283,34 @@ export function DashboardScreen({
           <div className="pt-2 space-y-2">
             <button
               type="button"
-              disabled={isProcessingWithdrawal}
+              disabled={
+                isProcessingWithdrawal ||
+                (dataSource === 'live' && globalEscrowMetrics.releasedVolumeInr === 0)
+              }
               onClick={() => {
+                const amount =
+                  dataSource === 'live' ? globalEscrowMetrics.releasedVolumeInr : 345110;
+                if (amount <= 0) return;
                 setIsProcessingWithdrawal(true);
                 setTimeout(() => {
                   setIsProcessingWithdrawal(false);
-                  showToast('⚡ Instant payout of ₹3,45,110 queued to HDFC Bank A/C •••• 4092 via PayPal Gateway.');
+                  showToast(
+                    `⚡ Instant payout of ${formatINR(amount)} queued to HDFC Bank A/C •••• 4092 via PayPal Gateway.`
+                  );
                 }, 1000);
               }}
               className="w-full py-2.5 rounded-xl bg-[#003087] hover:bg-[#00256b] text-white font-bold text-xs flex items-center justify-center gap-1.5 shadow-sm transition-all cursor-pointer disabled:opacity-50"
             >
               <span className="material-symbols-outlined text-[16px]">bolt</span>
-              <span>{isProcessingWithdrawal ? 'Transmitting Payout...' : 'Instant Payout (₹3,45,110)'}</span>
+              <span>
+                {isProcessingWithdrawal
+                  ? 'Transmitting Payout...'
+                  : dataSource === 'live' && globalEscrowMetrics.releasedVolumeInr === 0
+                  ? 'No Settled Balance Yet'
+                  : `Instant Payout (${formatINR(
+                      dataSource === 'live' ? globalEscrowMetrics.releasedVolumeInr : 345110
+                    )})`}
+              </span>
             </button>
 
             <button
@@ -1670,7 +1943,7 @@ export function DashboardScreen({
               Funds Held in Escrow
             </span>
             <span className="text-xl font-black text-amber-900 font-tabular-nums">
-              {formatINR(escrowHeldTotal || 84990)}
+              {formatINR(dataSource === 'live' ? globalEscrowMetrics.heldVolumeInr : (escrowHeldTotal || 84990))}
             </span>
             <p className="text-[10px] text-amber-800 mt-1">Pending carrier transit scans</p>
           </div>
@@ -1680,7 +1953,7 @@ export function DashboardScreen({
               Funds In Transit
             </span>
             <span className="text-xl font-black text-sky-900 font-tabular-nums">
-              {formatINR(escrowInTransitTotal || 52400)}
+              {formatINR(dataSource === 'live' ? globalEscrowMetrics.pendingReleaseVolumeInr : (escrowInTransitTotal || 52400))}
             </span>
             <p className="text-[10px] text-sky-800 mt-1">Shipped via BlueDart Air</p>
           </div>
@@ -1690,7 +1963,7 @@ export function DashboardScreen({
               Funds Released to Bank
             </span>
             <span className="text-xl font-black text-emerald-900 font-tabular-nums">
-              {formatINR(escrowReleasedTotal || 345110)}
+              {formatINR(dataSource === 'live' ? globalEscrowMetrics.releasedVolumeInr : (escrowReleasedTotal || 345110))}
             </span>
             <p className="text-[10px] text-emerald-800 mt-1">Delivered & verified</p>
           </div>
@@ -1700,7 +1973,7 @@ export function DashboardScreen({
               Disputed / In Review
             </span>
             <span className="text-xl font-black text-on-surface font-tabular-nums">
-              {formatINR(escrowDisputedLiveTotal || globalEscrowMetrics.disputedVolumeInr)}
+              {formatINR(dataSource === 'live' ? globalEscrowMetrics.disputedVolumeInr : (escrowDisputedLiveTotal || globalEscrowMetrics.disputedVolumeInr))}
             </span>
             <p className="text-[10px] text-emerald-600 font-medium mt-1">
               {globalEscrowMetrics.totalActiveDisputeCount === 0
@@ -1750,62 +2023,87 @@ export function DashboardScreen({
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-outline-variant/20">
-                  {liveOrders.slice(0, 5).map((order) => (
-                    <tr key={order.id} className="hover:bg-surface-container-low transition-colors">
-                      <td className="py-3 px-3 font-mono font-bold text-primary">
-                        {order.orderNumber}
-                      </td>
-                      <td className="py-3 px-3">
-                        <div className="font-semibold text-on-surface">{order.customerName}</div>
-                        <div className="text-[10px] text-on-surface-variant">{order.customerEmail}</div>
-                      </td>
-                      <td className="py-3 px-3">
-                        <span className="text-[11px] text-on-surface">
-                          {order.items.map((i) => `${i.name} (x${i.quantity})`).join(', ')}
-                        </span>
-                      </td>
-                      <td className="py-3 px-3 text-right font-bold text-on-surface font-tabular-nums">
-                        {formatINR(order.total)}
-                      </td>
-                      <td className="py-3 px-3">
-                        <span
-                          className={`px-2.5 py-1 rounded-full text-[10px] font-bold inline-flex items-center gap-1 ${
-                            order.escrowStatus === 'Escrow Locked'
-                              ? 'bg-amber-500/10 text-amber-700'
-                              : order.escrowStatus === 'In Transit'
-                              ? 'bg-sky-500/10 text-sky-700'
-                              : 'bg-emerald-500/10 text-emerald-700'
-                          }`}
-                        >
-                          <span className="w-1.5 h-1.5 rounded-full bg-current" />
-                          <span>{order.escrowStatus}</span>
-                        </span>
-                      </td>
-                      <td className="py-3 px-3 text-right">
-                        {order.escrowStatus === 'Escrow Locked' && (
-                          <button
-                            onClick={() => handleUpdateOrderStatus(order.id, 'In Transit')}
-                            className="px-2.5 py-1 bg-sky-600 hover:bg-sky-700 text-white rounded-lg text-[10px] font-bold"
+                  {liveOrders.length === 0 ? (
+                    <tr>
+                      <td colSpan={6} className="py-10 text-center text-on-surface-variant">
+                        <div className="flex flex-col items-center justify-center gap-2">
+                          <div className="w-10 h-10 rounded-full bg-surface-container flex items-center justify-center text-on-surface-variant">
+                            <span className="material-symbols-outlined text-[24px]">shopping_bag</span>
+                          </div>
+                          <p className="text-xs font-bold text-on-surface">No Storefront Orders Placed Yet</p>
+                          <p className="text-[11px] text-on-surface-variant max-w-sm">
+                            When customers checkout on your public storefront, their orders and escrow milestones will stream here in real-time.
+                          </p>
+                          <a
+                            href={`/s/${sellerBusiness?.slug || DEFAULT_SLUG}`}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className="mt-1 px-3 py-1.5 rounded-lg bg-primary text-on-primary text-xs font-bold inline-flex items-center gap-1 hover:bg-primary/90 transition-all shadow-xs"
                           >
-                            Mark Shipped
-                          </button>
-                        )}
-                        {order.escrowStatus === 'In Transit' && (
-                          <button
-                            onClick={() =>
-                              handleUpdateOrderStatus(order.id, 'Delivered — Escrow Released')
-                            }
-                            className="px-2.5 py-1 bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg text-[10px] font-bold"
-                          >
-                            Verify Delivery
-                          </button>
-                        )}
-                        {order.escrowStatus === 'Delivered — Escrow Released' && (
-                          <span className="text-[10px] text-emerald-600 font-bold">✓ Settled</span>
-                        )}
+                            <span>Open Storefront &amp; Place Test Order</span>
+                            <span className="material-symbols-outlined text-[14px]">open_in_new</span>
+                          </a>
+                        </div>
                       </td>
                     </tr>
-                  ))}
+                  ) : (
+                    liveOrders.slice(0, 5).map((order) => (
+                      <tr key={order.id} className="hover:bg-surface-container-low transition-colors">
+                        <td className="py-3 px-3 font-mono font-bold text-primary">
+                          {order.orderNumber}
+                        </td>
+                        <td className="py-3 px-3">
+                          <div className="font-semibold text-on-surface">{order.customerName}</div>
+                          <div className="text-[10px] text-on-surface-variant">{order.customerEmail}</div>
+                        </td>
+                        <td className="py-3 px-3">
+                          <span className="text-[11px] text-on-surface">
+                            {order.items.map((i) => `${i.name} (x${i.quantity})`).join(', ')}
+                          </span>
+                        </td>
+                        <td className="py-3 px-3 text-right font-bold text-on-surface font-tabular-nums">
+                          {formatINR(order.total)}
+                        </td>
+                        <td className="py-3 px-3">
+                          <span
+                            className={`px-2.5 py-1 rounded-full text-[10px] font-bold inline-flex items-center gap-1 ${
+                              order.escrowStatus === 'Escrow Locked'
+                                ? 'bg-amber-500/10 text-amber-700'
+                                : order.escrowStatus === 'In Transit'
+                                ? 'bg-sky-500/10 text-sky-700'
+                                : 'bg-emerald-500/10 text-emerald-700'
+                            }`}
+                          >
+                            <span className="w-1.5 h-1.5 rounded-full bg-current" />
+                            <span>{order.escrowStatus}</span>
+                          </span>
+                        </td>
+                        <td className="py-3 px-3 text-right">
+                          {order.escrowStatus === 'Escrow Locked' && (
+                            <button
+                              onClick={() => handleUpdateOrderStatus(order.id, 'In Transit')}
+                              className="px-2.5 py-1 bg-sky-600 hover:bg-sky-700 text-white rounded-lg text-[10px] font-bold"
+                            >
+                              Mark Shipped
+                            </button>
+                          )}
+                          {order.escrowStatus === 'In Transit' && (
+                            <button
+                              onClick={() =>
+                                handleUpdateOrderStatus(order.id, 'Delivered — Escrow Released')
+                              }
+                              className="px-2.5 py-1 bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg text-[10px] font-bold"
+                            >
+                              Verify Delivery
+                            </button>
+                          )}
+                          {order.escrowStatus === 'Delivered — Escrow Released' && (
+                            <span className="text-[10px] text-emerald-600 font-bold">✓ Settled</span>
+                          )}
+                        </td>
+                      </tr>
+                    ))
+                  )}
                 </tbody>
               </table>
             </div>
@@ -1822,25 +2120,53 @@ export function DashboardScreen({
             </div>
 
             <div className="space-y-2">
-              {lowStockItems.map((item) => (
-                <div
-                  key={item.sku}
-                  className="p-3 bg-surface-container-low border border-outline-variant/30 rounded-xl flex items-center justify-between text-xs"
-                >
-                  <div>
-                    <p className="font-bold text-on-surface">{item.name}</p>
-                    <p className="text-[11px] text-on-surface-variant font-mono">
-                      SKU: {item.sku} • In Stock: <span className="text-error font-bold">{item.stock}</span> (Min: {item.minStock})
-                    </p>
-                  </div>
-                  <button
-                    onClick={() => handleRestock(item.sku)}
-                    className="px-3 py-1.5 bg-primary/10 hover:bg-primary/20 text-primary border border-primary/20 rounded-lg text-xs font-bold transition-colors"
-                  >
-                    + Restock 20 Units
-                  </button>
+              {effectiveLowStockItems.length === 0 ? (
+                <div className="p-6 text-center rounded-xl bg-surface-container-low border border-dashed border-outline-variant/60 flex flex-col items-center justify-center gap-2">
+                  <span className="material-symbols-outlined text-[28px] text-emerald-600">
+                    check_circle
+                  </span>
+                  <p className="text-xs font-bold text-on-surface">
+                    {dataSource === 'live' && storeProducts.length === 0
+                      ? 'No Products Added Yet'
+                      : 'All Inventory Healthy'}
+                  </p>
+                  <p className="text-[11px] text-on-surface-variant max-w-xs">
+                    {dataSource === 'live' && storeProducts.length === 0
+                      ? 'Add your first product to activate autonomous inventory tracking and reorder alerts.'
+                      : 'Zero items currently below the minimum stock threshold.'}
+                  </p>
+                  {dataSource === 'live' && (
+                    <button
+                      type="button"
+                      onClick={() => navigate('/seller/products')}
+                      className="mt-1 px-3 py-1.5 bg-primary text-on-primary rounded-lg text-xs font-bold hover:bg-primary/90 flex items-center gap-1 transition-all"
+                    >
+                      <span className="material-symbols-outlined text-[14px]">add</span>
+                      <span>Add New Product</span>
+                    </button>
+                  )}
                 </div>
-              ))}
+              ) : (
+                effectiveLowStockItems.map((item) => (
+                  <div
+                    key={item.sku}
+                    className="p-3 bg-surface-container-low border border-outline-variant/30 rounded-xl flex items-center justify-between text-xs"
+                  >
+                    <div>
+                      <p className="font-bold text-on-surface">{item.name}</p>
+                      <p className="text-[11px] text-on-surface-variant font-mono">
+                        SKU: {item.sku} • In Stock: <span className="text-error font-bold">{item.stock}</span> (Min: {item.minStock})
+                      </p>
+                    </div>
+                    <button
+                      onClick={() => handleRestock(item.sku)}
+                      className="px-3 py-1.5 bg-primary/10 hover:bg-primary/20 text-primary border border-primary/20 rounded-lg text-xs font-bold transition-colors"
+                    >
+                      + Restock 20 Units
+                    </button>
+                  </div>
+                ))
+              )}
             </div>
           </div>
         </div>
@@ -1889,24 +2215,48 @@ export function DashboardScreen({
           {/* Top Selling Products */}
           <div className="p-6 rounded-2xl bg-surface border border-outline-variant/30 shadow-sm space-y-3">
             <h3 className="text-sm font-bold text-on-surface">Top Selling Catalog Products</h3>
-            <div className="space-y-2.5">
-              {[
-                { name: 'AeroBreeze 1200mm Smart BLDC Fan', units: 48, revenue: '₹4,07,952' },
-                { name: 'Yonex Astrox 99 Pro Carbon Racket', units: 14, revenue: '₹2,09,860' },
-                { name: 'AcousticSphere ANC Spatial Earbuds', units: 22, revenue: '₹2,52,978' },
-              ].map((p, idx) => (
-                <div
-                  key={idx}
-                  className="p-3 bg-surface-container-low rounded-xl flex items-center justify-between text-xs"
-                >
-                  <div>
-                    <p className="font-bold text-on-surface">{p.name}</p>
-                    <p className="text-[10px] text-on-surface-variant">{p.units} units sold</p>
+            {dataSource === 'live' && liveOrders.length === 0 ? (
+              <div className="p-5 text-center rounded-xl bg-surface-container-low border border-dashed border-outline-variant/60 flex flex-col items-center justify-center gap-2">
+                <span className="material-symbols-outlined text-[24px] text-on-surface-variant/60">
+                  leaderboard
+                </span>
+                <p className="text-xs font-bold text-on-surface">No Catalog Sales Yet</p>
+                <p className="text-[11px] text-on-surface-variant">
+                  {storeProducts.length === 0
+                    ? 'Publish products in your catalog to start recording sales.'
+                    : 'Your best performing items will rank here as orders complete.'}
+                </p>
+                {storeProducts.length === 0 && (
+                  <button
+                    type="button"
+                    onClick={() => navigate('/seller/products')}
+                    className="mt-1 px-3 py-1.5 bg-primary text-on-primary rounded-lg text-xs font-bold hover:bg-primary/90 flex items-center gap-1 transition-all"
+                  >
+                    <span className="material-symbols-outlined text-[14px]">add</span>
+                    <span>Add First Product</span>
+                  </button>
+                )}
+              </div>
+            ) : (
+              <div className="space-y-2.5">
+                {[
+                  { name: 'AeroBreeze 1200mm Smart BLDC Fan', units: 48, revenue: '₹4,07,952' },
+                  { name: 'Yonex Astrox 99 Pro Carbon Racket', units: 14, revenue: '₹2,09,860' },
+                  { name: 'AcousticSphere ANC Spatial Earbuds', units: 22, revenue: '₹2,52,978' },
+                ].map((p, idx) => (
+                  <div
+                    key={idx}
+                    className="p-3 bg-surface-container-low rounded-xl flex items-center justify-between text-xs"
+                  >
+                    <div>
+                      <p className="font-bold text-on-surface">{p.name}</p>
+                      <p className="text-[10px] text-on-surface-variant">{p.units} units sold</p>
+                    </div>
+                    <span className="font-black text-on-surface font-tabular-nums">{p.revenue}</span>
                   </div>
-                  <span className="font-black text-on-surface font-tabular-nums">{p.revenue}</span>
-                </div>
-              ))}
-            </div>
+                ))}
+              </div>
+            )}
           </div>
 
           {/* Customer Base Intelligence Snippet */}
@@ -1921,7 +2271,7 @@ export function DashboardScreen({
                 onClick={() => navigate('/seller/customers')}
                 className="text-xs font-bold text-primary hover:underline flex items-center gap-1 cursor-pointer"
               >
-                <span>View All (6)</span>
+                <span>View All ({dataSource === 'live' ? liveOrders.length : 6})</span>
                 <span className="material-symbols-outlined text-[14px]">arrow_forward</span>
               </button>
             </div>
@@ -1930,35 +2280,47 @@ export function DashboardScreen({
               Top repeat buyers across your public storefront with zero escrow disputes.
             </p>
 
-            <div className="space-y-2">
-              {[
-                { name: 'Priya Patel', city: 'Bengaluru', spent: '₹4,21,500', tier: 'VIP', trust: '99%' },
-                { name: 'Vikramaditya Rao', city: 'Hyderabad', spent: '₹2,92,000', tier: 'VIP', trust: '100%' },
-                { name: 'Ananya Deshmukh', city: 'New Delhi', spent: '₹1,64,000', tier: 'VIP', trust: '100%' },
-              ].map((c, idx) => (
-                <div
-                  key={idx}
-                  className="p-2.5 bg-surface-container-low rounded-xl flex items-center justify-between text-xs cursor-pointer hover:bg-surface-container transition-colors"
-                  onClick={() => navigate('/seller/customers')}
-                >
-                  <div className="flex items-center gap-2.5">
-                    <div className="w-7 h-7 rounded-full bg-primary/10 text-primary font-bold text-[11px] flex items-center justify-center">
-                      {c.name.split(' ').map((p) => p[0]).join('')}
+            {dataSource === 'live' && liveOrders.length === 0 ? (
+              <div className="p-5 text-center rounded-xl bg-surface-container-low border border-dashed border-outline-variant/60 flex flex-col items-center justify-center gap-2">
+                <span className="material-symbols-outlined text-[24px] text-on-surface-variant/60">
+                  person_add
+                </span>
+                <p className="text-xs font-bold text-on-surface">No Customers Recorded Yet</p>
+                <p className="text-[11px] text-on-surface-variant">
+                  Buyers who place orders on your storefront will automatically appear in your directory.
+                </p>
+              </div>
+            ) : (
+              <div className="space-y-2">
+                {[
+                  { name: 'Priya Patel', city: 'Bengaluru', spent: '₹4,21,500', tier: 'VIP', trust: '99%' },
+                  { name: 'Vikramaditya Rao', city: 'Hyderabad', spent: '₹2,92,000', tier: 'VIP', trust: '100%' },
+                  { name: 'Ananya Deshmukh', city: 'New Delhi', spent: '₹1,64,000', tier: 'VIP', trust: '100%' },
+                ].map((c, idx) => (
+                  <div
+                    key={idx}
+                    className="p-2.5 bg-surface-container-low rounded-xl flex items-center justify-between text-xs cursor-pointer hover:bg-surface-container transition-colors"
+                    onClick={() => navigate('/seller/customers')}
+                  >
+                    <div className="flex items-center gap-2.5">
+                      <div className="w-7 h-7 rounded-full bg-primary/10 text-primary font-bold text-[11px] flex items-center justify-center">
+                        {c.name.split(' ').map((p) => p[0]).join('')}
+                      </div>
+                      <div>
+                        <span className="font-bold text-on-surface block leading-tight">{c.name}</span>
+                        <span className="text-[10px] text-secondary">{c.city} • {c.trust} Escrow Score</span>
+                      </div>
                     </div>
-                    <div>
-                      <span className="font-bold text-on-surface block leading-tight">{c.name}</span>
-                      <span className="text-[10px] text-secondary">{c.city} • {c.trust} Escrow Score</span>
+                    <div className="text-right">
+                      <span className="font-bold text-on-surface font-tabular-nums block leading-tight">{c.spent}</span>
+                      <span className="px-1.5 py-0.2 rounded text-[9px] font-bold bg-purple-100 text-purple-900 border border-purple-200">
+                        {c.tier}
+                      </span>
                     </div>
                   </div>
-                  <div className="text-right">
-                    <span className="font-bold text-on-surface font-tabular-nums block leading-tight">{c.spent}</span>
-                    <span className="px-1.5 py-0.2 rounded text-[9px] font-bold bg-purple-100 text-purple-900 border border-purple-200">
-                      {c.tier}
-                    </span>
-                  </div>
-                </div>
-              ))}
-            </div>
+                ))}
+              </div>
+            )}
           </div>
         </div>
       </div>

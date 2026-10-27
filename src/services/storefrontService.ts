@@ -117,8 +117,26 @@ export function subscribeBusiness(
     (snap) => {
       if (snap.exists()) {
         onData(snap.data() as BusinessProfile);
-      } else {
+      } else if (bizId === DEFAULT_BIZ_ID) {
         onData(INITIAL_DEFAULT_BUSINESS);
+      } else {
+        const u = auth.currentUser;
+        const name = u?.displayName ? `${u.displayName}'s Store` : 'My Merchant Store';
+        const slug = u?.email
+          ? u.email.split('@')[0].toLowerCase().replace(/[^a-z0-9]/g, '')
+          : bizId.replace('biz-', '');
+        onData({
+          ...INITIAL_DEFAULT_BUSINESS,
+          id: bizId,
+          name,
+          slug,
+          ownerUid: u?.uid || 'user',
+          tagline: 'Autonomous B2B Commerce & Escrow Protected Store',
+          contact: {
+            ...INITIAL_DEFAULT_BUSINESS.contact,
+            email: u?.email || 'merchant@paypilot.app',
+          },
+        });
       }
     },
     (error) => {
@@ -179,7 +197,7 @@ export function subscribeStoreProducts(
         items.push({ id: d.id, ...(d.data() as Omit<StoreProduct, 'id'>) });
       });
       if (items.length === 0) {
-        onData(SEED_STORE_PRODUCTS);
+        onData(bizId === DEFAULT_BIZ_ID ? SEED_STORE_PRODUCTS : []);
       } else {
         onData(items);
       }
