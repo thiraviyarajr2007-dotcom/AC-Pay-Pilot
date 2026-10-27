@@ -114,7 +114,10 @@ async function checkPayPalSandboxHealth(): Promise<HealthCheckItem> {
 async function checkGeminiHealth(): Promise<HealthCheckItem> {
   const start = Date.now();
   const rawKey = process.env.GEMINI_API_KEY || '';
-  const hasKey = Boolean(rawKey) && rawKey !== 'MY_GEMINI_API_KEY';
+  const hasKey =
+    Boolean(rawKey) &&
+    rawKey !== 'MY_GEMINI_API_KEY' &&
+    process.env.NODE_ENV !== 'test';
 
   if (!hasKey) {
     return {
@@ -228,60 +231,52 @@ function checkStorageAnd3DHealth(): HealthCheckItem {
   }
 }
 
+import {
+  performFirestoreHealthCheck,
+  FIREBASE_PROJECT_ID,
+  FIRESTORE_DATABASE_ID,
+} from './firebaseAdmin';
+
 /**
- * Checks Firestore database connection & persistence.
+ * Checks Firestore database connection & persistence with real write+read+delete latency.
  */
 async function checkDatabaseHealth(): Promise<HealthCheckItem> {
-  const start = Date.now();
-  try {
-    const configPath = path.resolve(process.cwd(), 'firebase-applet-config.json');
-    let projectId = 'ai-studio-paypilotaiautono-5cf5c897-94de-4d92-83f5-3c2d5e3761dd';
-    let dbId = '(default)';
+  const result = await performFirestoreHealthCheck();
+  const projectId = FIREBASE_PROJECT_ID; // "ai-studio-applet-webapp-4bdcd"
+  const dbId = FIRESTORE_DATABASE_ID; // "ai-studio-paypilotaiautono-5cf5c897-94de-4d92-83f5-3c2d5e3761dd"
 
-    if (fs.existsSync(configPath)) {
-      const raw = fs.readFileSync(configPath, 'utf-8');
-      const parsed = JSON.parse(raw);
-      if (parsed.projectId) projectId = parsed.projectId;
-      if (parsed.firestoreDatabaseId) dbId = parsed.firestoreDatabaseId;
-    }
-
-    const latencyMs = Date.now() - start;
+  if (result.ok) {
     return {
       name: 'Cloud Firestore Database',
       category: 'database',
       status: 'healthy',
-      latencyMs,
-      message: `Configured for project '${projectId}', database '${dbId}'. Rules deployed and active.`,
+      latencyMs: result.latencyMs,
+      message: `Live round-trip write+read+delete verified on collection '_health' (doc: ${result.docId}) in ${result.latencyMs}ms. Project: '${projectId}', Database: '${dbId}'.`,
       details: {
         projectId,
         databaseId: dbId,
-        collections: [
-          'users',
-          'products',
-          'productAssets',
-          'inventory',
-          'carts',
-          'orders',
-          'orderItems',
-          'payments',
-          'invoices',
-          'invoiceItems',
-          'refunds',
-          'escrowEvents',
-        ],
+        livePingTest: 'SUCCESS',
+        docId: result.docId,
+        latencyMs: result.latencyMs,
       },
       timestamp: new Date().toISOString(),
     };
-  } catch (err) {
-    return {
-      name: 'Cloud Firestore Database',
-      category: 'database',
-      status: 'error',
-      latencyMs: Date.now() - start,
-      message: `Firestore configuration error: ${err instanceof Error ? err.message : String(err)}`,
-      timestamp: new Date().toISOString(),
-    };
   }
+
+  return {
+    name: 'Cloud Firestore Database',
+    category: 'database',
+    status: 'degraded',
+    latencyMs: result.latencyMs,
+    message: `Firestore round-trip ping error: ${result.error || 'Connection failed'}. Project: '${projectId}', Database: '${dbId}'.`,
+    details: {
+      projectId,
+      databaseId: dbId,
+      error: result.error,
+      latencyMs: result.latencyMs,
+    },
+    timestamp: new Date().toISOString(),
+  };
 }
 
 /**

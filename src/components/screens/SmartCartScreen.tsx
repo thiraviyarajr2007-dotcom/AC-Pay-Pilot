@@ -231,7 +231,7 @@ export const SmartCartScreen: React.FC<SmartCartScreenProps> = ({
                 grossTotal <= budgetCapInr ? 'text-emerald-700' : 'text-amber-700'
               }`}
             >
-              ₹{formatINR(grossTotal)} / ₹{formatINR(budgetCapInr)}
+              {formatINR(grossTotal)} / {formatINR(budgetCapInr)}
             </span>
           </div>
           <div className="w-full h-2 rounded-full bg-surface-container overflow-hidden">
@@ -244,8 +244,8 @@ export const SmartCartScreen: React.FC<SmartCartScreenProps> = ({
           </div>
           <span className="text-[11px] text-secondary block">
             {grossTotal <= budgetCapInr
-              ? `Within budget by ₹${formatINR(budgetCapInr - grossTotal)}`
-              : `Over target budget by ₹${formatINR(grossTotal - budgetCapInr)}`}
+              ? `Within budget by ${formatINR(budgetCapInr - grossTotal)}`
+              : `Over target budget by ${formatINR(grossTotal - budgetCapInr)}`}
           </span>
         </div>
       </div>
@@ -341,7 +341,7 @@ export const SmartCartScreen: React.FC<SmartCartScreenProps> = ({
 
                         <div className="flex sm:flex-col items-center sm:items-end justify-between gap-2 shrink-0">
                           <div className="text-base font-bold font-headline text-on-surface font-tabular-nums">
-                            ₹{formatINR(item.unitPrice * item.qty)}
+                            {formatINR(item.unitPrice * item.qty)}
                           </div>
                           <div className="flex items-center gap-1.5 bg-surface-container-low rounded-lg p-1 border border-surface-container-high">
                             <button
@@ -398,12 +398,11 @@ export const SmartCartScreen: React.FC<SmartCartScreenProps> = ({
                   >
                     <div className="space-y-1">
                       <div className="font-bold text-on-surface">
-                        {alt.alternativeName} ({alt.alternativeSku}) — ₹
-                        {formatINR(Math.round(alt.unitPriceMinor / 100))}
+                        {alt.alternativeName} ({alt.alternativeSku}) — {formatINR(Math.round(alt.unitPriceMinor / 100))}
                       </div>
                       <div className="text-secondary">{alt.reason}</div>
                       <div className="text-emerald-700 font-semibold font-tabular-nums">
-                        Saves ₹{formatINR(Math.round(alt.estimatedSavingMinor / 100))}
+                        Saves {formatINR(Math.round(alt.estimatedSavingMinor / 100))}
                       </div>
                     </div>
                     <button
@@ -457,7 +456,7 @@ export const SmartCartScreen: React.FC<SmartCartScreenProps> = ({
               className="w-full py-3.5 px-4 rounded-xl bg-primary hover:bg-primary-container disabled:opacity-50 text-on-primary font-bold text-sm flex items-center justify-center gap-2 transition-colors cursor-pointer"
             >
               <i className="fa-brands fa-paypal text-base"></i>
-              <span>Proceed to PayPal Checkout (₹{formatINR(grossTotal)})</span>
+              <span>Proceed to PayPal Checkout ({formatINR(grossTotal)})</span>
             </button>
           </div>
 

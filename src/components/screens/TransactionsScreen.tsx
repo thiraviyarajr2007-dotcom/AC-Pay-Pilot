@@ -208,7 +208,7 @@ export const TransactionsScreen: React.FC<TransactionsScreenProps> = ({
             Total Processed Volume
           </span>
           <span className="text-2xl font-bold font-headline text-on-surface font-tabular-nums mt-1 block">
-            ₹{formatINR(totalVolume)}
+            {formatINR(totalVolume)}
           </span>
           <span className="text-[11px] text-secondary mt-1 block">
             {TRANSACTIONS.length} recorded transactions
@@ -220,7 +220,7 @@ export const TransactionsScreen: React.FC<TransactionsScreenProps> = ({
             Completed Settlements
           </span>
           <span className="text-2xl font-bold font-headline text-emerald-700 font-tabular-nums mt-1 block">
-            ₹{formatINR(292000)}
+            {formatINR(292000)}
           </span>
           <span className="text-[11px] text-emerald-700 mt-1 block">
             Paid to bank account
@@ -232,7 +232,7 @@ export const TransactionsScreen: React.FC<TransactionsScreenProps> = ({
             Held in Escrow
           </span>
           <span className="text-2xl font-bold font-headline text-primary font-tabular-nums mt-1 block">
-            ₹{formatINR(118000)}
+            {formatINR(118000)}
           </span>
           <span className="text-[11px] text-secondary mt-1 block">
             Awaiting delivery confirmation
@@ -244,7 +244,7 @@ export const TransactionsScreen: React.FC<TransactionsScreenProps> = ({
             PayPal Fees
           </span>
           <span className="text-2xl font-bold font-headline text-on-surface font-tabular-nums mt-1 block">
-            {feesVerified ? `₹${formatINR(10203)}` : 'Not available'}
+            {feesVerified ? formatINR(10203) : 'Not available'}
           </span>
           <span className="text-[11px] text-secondary mt-1 block">
             3.49% + ₹12 standard tier
@@ -322,16 +322,16 @@ export const TransactionsScreen: React.FC<TransactionsScreenProps> = ({
                         </button>
                       </td>
                       <td className="py-3.5 px-3 text-right font-tabular-nums text-secondary">
-                        ₹{formatINR(tx.subtotal)}
+                        {formatINR(tx.subtotal)}
                       </td>
                       <td className="py-3.5 px-3 text-right font-tabular-nums text-secondary">
-                        ₹{formatINR(tx.gstAmount)}
+                        {formatINR(tx.gstAmount)}
                       </td>
                       <td className="py-3.5 px-3 text-right font-tabular-nums text-secondary">
-                        {feesVerified ? `₹${formatINR(tx.feeAmount)}` : 'Not available'}
+                        {feesVerified ? formatINR(tx.feeAmount) : 'Not available'}
                       </td>
                       <td className="py-3.5 px-3 text-right font-tabular-nums font-bold text-on-surface">
-                        ₹{formatINR(tx.grossAmount)}
+                        {formatINR(tx.grossAmount)}
                       </td>
                       <td className="py-3.5 pl-3">
                         <PaymentStateBadge

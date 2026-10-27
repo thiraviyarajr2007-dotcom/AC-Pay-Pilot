@@ -109,7 +109,7 @@ export const FinancialReportsScreen: React.FC<FinancialReportsScreenProps> = ({
             Gross Billed (MTD)
           </span>
           <span className="text-2xl font-bold font-headline text-on-surface font-tabular-nums mt-1 block">
-            ₹{formatINR(totalGross)}
+            {formatINR(totalGross)}
           </span>
           <span className="text-[11px] text-secondary mt-1 block">
             May 2026 statement
@@ -121,7 +121,7 @@ export const FinancialReportsScreen: React.FC<FinancialReportsScreenProps> = ({
             Taxable Subtotal
           </span>
           <span className="text-2xl font-bold font-headline text-on-surface font-tabular-nums mt-1 block">
-            ₹{formatINR(totalSubtotal)}
+            {formatINR(totalSubtotal)}
           </span>
           <span className="text-[11px] text-secondary mt-1 block">
             Net of 18% GST
@@ -133,7 +133,7 @@ export const FinancialReportsScreen: React.FC<FinancialReportsScreenProps> = ({
             Total GST (18%)
           </span>
           <span className="text-2xl font-bold font-headline text-primary font-tabular-nums mt-1 block">
-            ₹{formatINR(totalGst)}
+            {formatINR(totalGst)}
           </span>
           <span className="text-[11px] text-secondary mt-1 block">
             3 HSN categories
@@ -145,7 +145,7 @@ export const FinancialReportsScreen: React.FC<FinancialReportsScreenProps> = ({
             Net Payout
           </span>
           <span className="text-2xl font-bold font-headline text-emerald-700 font-tabular-nums mt-1 block">
-            {feesVerified ? `₹${formatINR(totalGross - totalFee)}` : 'Estimated'}
+            {feesVerified ? formatINR(totalGross - totalFee) : 'Estimated'}
           </span>
           <span className="text-[11px] text-secondary mt-1 block">
             After PayPal fees
@@ -183,16 +183,16 @@ export const FinancialReportsScreen: React.FC<FinancialReportsScreenProps> = ({
                         <div className="text-[11px] text-secondary">{row.period}</div>
                       </td>
                       <td className="py-3.5 px-3 text-right font-tabular-nums text-secondary">
-                        ₹{formatINR(row.subtotal)}
+                        {formatINR(row.subtotal)}
                       </td>
                       <td className="py-3.5 px-3 text-right font-tabular-nums text-secondary">
-                        ₹{formatINR(row.gstAmount)}
+                        {formatINR(row.gstAmount)}
                       </td>
                       <td className="py-3.5 px-3 text-right font-tabular-nums text-secondary">
-                        {feesVerified ? `₹${formatINR(row.feeAmount)}` : 'Not available'}
+                        {feesVerified ? formatINR(row.feeAmount) : 'Not available'}
                       </td>
                       <td className="py-3.5 pl-3 text-right font-tabular-nums font-bold text-on-surface">
-                        ₹{formatINR(row.grossTotal)}
+                        {formatINR(row.grossTotal)}
                       </td>
                     </tr>
                   ))}

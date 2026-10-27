@@ -590,7 +590,7 @@ export const InvoiceIQScreen: React.FC<InvoiceIQScreenProps> = ({
                         </div>
                       </td>
                       <td className="py-3.5 px-3 text-right font-mono font-bold text-slate-900">
-                        INR {formatINR(inv.total)}
+                        {formatINR(inv.total)}
                       </td>
                       <td className="py-3.5 pl-3">
                         <PaymentStateBadge

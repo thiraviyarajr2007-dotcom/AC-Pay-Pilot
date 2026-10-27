@@ -21,7 +21,7 @@ import {
 import { AuthenticatedActor, evaluateRoleAccess } from '../utils/rbac';
 import { defaultServerLedger } from './paymentEngine';
 
-const GEMINI_MODEL = 'gemini-3.8-flash';
+const GEMINI_MODEL = process.env.GEMINI_MODEL || 'gemini-3.1-flash-lite';
 const GEMINI_TIMEOUT_MS = 15000;
 
 // ============================================================================
@@ -74,7 +74,12 @@ export function checkAiRateLimit(actorKey: string): {
 
 export function getLiveGeminiClient(): GoogleGenAI | null {
   const apiKey = process.env.GEMINI_API_KEY;
-  if (!apiKey || apiKey === 'MY_GEMINI_API_KEY' || apiKey.trim() === '') {
+  if (
+    !apiKey ||
+    apiKey === 'MY_GEMINI_API_KEY' ||
+    apiKey.trim() === '' ||
+    process.env.NODE_ENV === 'test'
+  ) {
     return null;
   }
   return new GoogleGenAI({

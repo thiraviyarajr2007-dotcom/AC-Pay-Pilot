@@ -4,6 +4,7 @@ export interface AuthenticatedActor {
   uid: string;
   email: string;
   role: AppUserRole;
+  bizId?: string;
 }
 
 export type ResourceCollection =

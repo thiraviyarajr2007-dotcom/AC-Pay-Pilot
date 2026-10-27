@@ -10,20 +10,26 @@
     "preview": "vite preview",
     "clean": "rm -rf dist server.js",
     "lint": "tsc --noEmit",
-    "test": "tsx --test src/utils/finance.test.ts"
+    "test": "tsx --test src/utils/finance.test.ts src/test/securityAndSingleSource.test.ts"
   },
   "dependencies": {
     "@google/genai": "^2.4.0",
     "@tailwindcss/vite": "^4.3.3",
+    "@types/d3": "^7.4.3",
     "@vitejs/plugin-react": "^6.1.1",
+    "ag-studio": "^3.0.0",
+    "ag-studio-react": "^3.0.0",
+    "d3": "^7.9.0",
     "dotenv": "^17.2.3",
     "express": "^4.21.2",
     "firebase": "^13.1.0",
+    "firebase-admin": "^14.5.0",
     "lucide-react": "^0.546.0",
     "motion": "^12.23.24",
     "react": "^19.0.1",
     "react-dom": "^19.0.1",
     "react-router-dom": "^7.18.4",
+    "recharts": "^3.10.1",
     "three": "^0.186.1",
     "vite": "^8.3.0",
     "zod": "^4.6.7"
@@ -35,7 +41,7 @@
     "@types/react-dom": "^19.3.0",
     "@types/three": "^0.186.0",
     "autoprefixer": "^10.4.21",
-    "esbuild": "^0.25.0",
+    "esbuild": "^0.27.0",
     "tailwindcss": "^4.3.3",
     "tsx": "^4.21.0",
     "typescript": "^7.0.2"

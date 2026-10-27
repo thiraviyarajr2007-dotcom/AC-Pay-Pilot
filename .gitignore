@@ -7,4 +7,5 @@ coverage/
 .aistudio/
 .env*
 !.env.example
-
+.antigravity/
+.firebase/

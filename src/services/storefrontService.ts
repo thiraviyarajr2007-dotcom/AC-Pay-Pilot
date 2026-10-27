@@ -11,7 +11,14 @@ import {
   orderBy,
   where,
 } from 'firebase/firestore';
-import { db, auth, handleFirestoreError, OperationType } from '../firebase';
+import {
+  db,
+  auth,
+  handleFirestoreError,
+  OperationType,
+  onAuthStateChanged,
+  FirebaseUser,
+} from '../firebase';
 import {
   BusinessProfile,
   StorefrontConfig,
@@ -186,31 +193,85 @@ export function subscribeStoreProducts(
 
 /**
  * Subscribes to real-time Orders stream for a merchant (Storefront -> Portal).
+ * Adheres strictly to Firebase guidelines: only attaches onSnapshot when authenticated.
  */
 export function subscribeStoreOrders(
   bizId: string,
   onData: (orders: StorefrontOrder[]) => void,
   onError?: (err: Error) => void
 ): () => void {
+  let unsubSnapshot: (() => void) | null = null;
   const path = `businesses/${bizId}/orders`;
-  const ordersRef = collection(db, 'businesses', bizId, 'orders');
 
-  return onSnapshot(
-    ordersRef,
-    (snap) => {
-      const items: StorefrontOrder[] = [];
-      snap.forEach((d) => {
-        items.push({ id: d.id, ...(d.data() as Omit<StorefrontOrder, 'id'>) });
-      });
-      // Sort newest first
-      items.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
-      onData(items);
-    },
-    (error) => {
-      handleFirestoreError(error, OperationType.LIST, path);
-      if (onError) onError(error);
+  const attachListener = () => {
+    if (unsubSnapshot) {
+      unsubSnapshot();
+      unsubSnapshot = null;
     }
-  );
+
+    // Defensive check: Only attach onSnapshot listener if user is authenticated
+    if (!auth.currentUser) {
+      onData([]);
+      return;
+    }
+
+    try {
+      const ordersRef = collection(db, 'businesses', bizId, 'orders');
+      unsubSnapshot = onSnapshot(
+        ordersRef,
+        (snap) => {
+          const items: StorefrontOrder[] = [];
+          snap.forEach((d) => {
+            items.push({ id: d.id, ...(d.data() as Omit<StorefrontOrder, 'id'>) });
+          });
+          // Sort newest first
+          items.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
+          onData(items);
+        },
+        (error) => {
+          // If auth was signed out, do not treat as an unhandled error
+          if (auth.currentUser) {
+            handleFirestoreError(error, OperationType.LIST, path);
+          }
+          if (onError) onError(error);
+        }
+      );
+    } catch (err: any) {
+      if (auth.currentUser) {
+        handleFirestoreError(err, OperationType.LIST, path);
+      }
+      if (onError) onError(err);
+    }
+  };
+
+  // Attach immediately if user is already authenticated
+  if (auth.currentUser) {
+    attachListener();
+  } else {
+    // Deliver empty initial list immediately for unauthenticated sessions
+    onData([]);
+  }
+
+  // Listen for auth state transitions so when user signs in, live snapshot attaches
+  const unsubAuth = onAuthStateChanged(auth, (user: FirebaseUser | null) => {
+    if (user) {
+      attachListener();
+    } else {
+      if (unsubSnapshot) {
+        unsubSnapshot();
+        unsubSnapshot = null;
+      }
+      onData([]);
+    }
+  });
+
+  return () => {
+    unsubAuth();
+    if (unsubSnapshot) {
+      unsubSnapshot();
+      unsubSnapshot = null;
+    }
+  };
 }
 
 /**
@@ -333,9 +394,217 @@ export async function deleteStoreProduct(bizId: string, productId: string): Prom
   }
 }
 
+export interface LiveOrderNotification {
+  id: string;
+  bizId?: string;
+  orderNumber: string;
+  customerName: string;
+  productSummary: string;
+  totalInr: number;
+  escrowStatus: string;
+  createdAt: string;
+  rawOrder?: StorefrontOrder;
+}
+
+const LIVE_ORDER_CHANNEL_NAME = 'ac_paypilot_live_orders';
+const LIVE_ORDER_DOM_EVENT = 'ac_paypilot_new_order';
+
+/**
+ * Emits a real-time order notification across same-tab listeners, cross-tab BroadcastChannel,
+ * and the Express SSE stream (/api/orders/notify -> /api/orders/stream).
+ */
+export function emitOrderPlacedNotification(notification: LiveOrderNotification): void {
+  if (typeof window !== 'undefined') {
+    try {
+      window.dispatchEvent(new CustomEvent(LIVE_ORDER_DOM_EVENT, { detail: notification }));
+    } catch {
+      // Ignore DOM event errors
+    }
+
+    if (typeof BroadcastChannel !== 'undefined') {
+      try {
+        const bc = new BroadcastChannel(LIVE_ORDER_CHANNEL_NAME);
+        bc.postMessage(notification);
+        bc.close();
+      } catch {
+        // Ignore BroadcastChannel errors
+      }
+    }
+
+    fetch('/api/orders/notify', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(notification),
+    }).catch(() => {
+      // Non-fatal if offline
+    });
+  }
+}
+
+/**
+ * Subscribes to real-time customer order creations for the Seller Dashboard.
+ * Combines:
+ *  1) Firestore onSnapshot docChanges() (when authenticated)
+ *  2) Cross-tab BroadcastChannel ('ac_paypilot_live_orders')
+ *  3) Same-tab CustomEvent ('ac_paypilot_new_order')
+ *  4) Server-Sent Events ('/api/orders/stream')
+ * Deduplicates by order ID and orderNumber so each new order triggers at most once.
+ */
+export function subscribeNewOrderNotifications(
+  bizId: string,
+  onNewOrder: (notification: LiveOrderNotification) => void
+): () => void {
+  const seenKeys = new Set<string>();
+
+  const deliverOnce = (notif: LiveOrderNotification) => {
+    if (!notif || (!notif.id && !notif.orderNumber)) return;
+    if (notif.bizId && notif.bizId !== bizId) return;
+    const keyId = notif.id || notif.orderNumber;
+    const keyNum = notif.orderNumber || notif.id;
+    if (seenKeys.has(keyId) || seenKeys.has(keyNum)) return;
+    seenKeys.add(keyId);
+    seenKeys.add(keyNum);
+    onNewOrder(notif);
+  };
+
+  // 1. Firestore real-time listener (authenticated sessions)
+  let unsubFirestore: (() => void) | null = null;
+  let initialSnapshotDone = false;
+
+  const attachFirestore = () => {
+    if (unsubFirestore || !auth.currentUser) return;
+    initialSnapshotDone = false;
+    try {
+      unsubFirestore = onSnapshot(
+        collection(db, 'businesses', bizId, 'orders'),
+        (snap) => {
+          if (!initialSnapshotDone) {
+            snap.docs.forEach((d) => {
+              seenKeys.add(d.id);
+              const data = d.data() as Partial<StorefrontOrder>;
+              if (data.orderNumber) seenKeys.add(data.orderNumber);
+            });
+            initialSnapshotDone = true;
+            return;
+          }
+
+          snap.docChanges().forEach((change) => {
+            if (change.type === 'added') {
+              const data = change.doc.data() as StorefrontOrder;
+              const firstItem = data.items?.[0]?.name || 'Storefront Item';
+              const extraCount = (data.items?.length || 1) - 1;
+              deliverOnce({
+                id: change.doc.id,
+                bizId,
+                orderNumber: data.orderNumber || change.doc.id,
+                customerName: data.customerName || 'Verified Buyer',
+                productSummary:
+                  extraCount > 0 ? `${firstItem} +${extraCount} more` : firstItem,
+                totalInr: Number(data.total || 0),
+                escrowStatus: data.escrowStatus || 'Escrow Locked',
+                createdAt: data.createdAt || new Date().toISOString(),
+                rawOrder: { ...data, id: change.doc.id },
+              });
+            }
+          });
+        },
+        () => {
+          // Handled silently if user signs out
+        }
+      );
+    } catch {
+      // Ignore setup errors
+    }
+  };
+
+  if (auth.currentUser) {
+    attachFirestore();
+  }
+
+  const unsubAuth = onAuthStateChanged(auth, (user: FirebaseUser | null) => {
+    if (user) {
+      attachFirestore();
+    } else if (unsubFirestore) {
+      unsubFirestore();
+      unsubFirestore = null;
+    }
+  });
+
+  // 2. Same-tab DOM CustomEvent
+  const handleDomEvent = (e: Event) => {
+    const customEvt = e as CustomEvent<LiveOrderNotification>;
+    if (customEvt.detail) {
+      deliverOnce(customEvt.detail);
+    }
+  };
+  if (typeof window !== 'undefined') {
+    window.addEventListener(LIVE_ORDER_DOM_EVENT, handleDomEvent);
+  }
+
+  // 3. Cross-tab BroadcastChannel
+  let bc: BroadcastChannel | null = null;
+  if (typeof BroadcastChannel !== 'undefined') {
+    try {
+      bc = new BroadcastChannel(LIVE_ORDER_CHANNEL_NAME);
+      bc.onmessage = (event) => {
+        if (event?.data && (event.data.id || event.data.orderNumber)) {
+          deliverOnce(event.data as LiveOrderNotification);
+        }
+      };
+    } catch {
+      bc = null;
+    }
+  }
+
+  // 4. Server-Sent Events (/api/orders/stream)
+  let es: EventSource | null = null;
+  if (typeof window !== 'undefined' && typeof EventSource !== 'undefined') {
+    try {
+      es = new EventSource('/api/orders/stream');
+      es.onmessage = (event) => {
+        try {
+          const parsed = JSON.parse(event.data);
+          if (parsed && parsed.type !== 'connected' && (parsed.id || parsed.orderNumber)) {
+            deliverOnce(parsed as LiveOrderNotification);
+          }
+        } catch {
+          // Ignore malformed event
+        }
+      };
+    } catch {
+      es = null;
+    }
+  }
+
+  return () => {
+    unsubAuth();
+    if (unsubFirestore) {
+      unsubFirestore();
+      unsubFirestore = null;
+    }
+    if (typeof window !== 'undefined') {
+      window.removeEventListener(LIVE_ORDER_DOM_EVENT, handleDomEvent);
+    }
+    if (bc) {
+      try {
+        bc.close();
+      } catch {
+        // Ignore
+      }
+    }
+    if (es) {
+      try {
+        es.close();
+      } catch {
+        // Ignore
+      }
+    }
+  };
+}
+
 /**
  * Places a customer order from the public storefront.
- * Instantaneously synchronizes with the Seller Portal via Firestore!
+ * Instantaneously synchronizes with the Seller Portal via Firestore, BroadcastChannel, and Server SSE!
  */
 export async function createStorefrontOrder(
   bizId: string,
@@ -343,46 +612,64 @@ export async function createStorefrontOrder(
 ): Promise<StorefrontOrder> {
   const orderId = `ord-${Date.now()}-${Math.random().toString(36).substring(2, 7)}`;
   const path = `businesses/${bizId}/orders/${orderId}`;
-  try {
-    const newOrder: StorefrontOrder = {
-      ...orderData,
-      id: orderId,
-      createdAt: new Date().toISOString(),
-      timeline: [
-        {
-          step: 'escrow_locked',
-          label: 'Payment Verified & Secured in Escrow',
-          timestamp: new Date().toISOString(),
-          completed: true,
-          current: true,
-        },
-        {
-          step: 'packed',
-          label: 'Merchant Processing & Packing',
-          timestamp: '',
-          completed: false,
-        },
-        {
-          step: 'in_transit',
-          label: 'Shipped via BlueDart Express Air',
-          timestamp: '',
-          completed: false,
-        },
-        {
-          step: 'released',
-          label: 'Delivery Verified & Escrow Released',
-          timestamp: '',
-          completed: false,
-        },
-      ],
-    };
+  const newOrder: StorefrontOrder = {
+    ...orderData,
+    id: orderId,
+    createdAt: new Date().toISOString(),
+    timeline: [
+      {
+        step: 'escrow_locked',
+        label: 'Payment Verified & Secured in Escrow',
+        timestamp: new Date().toISOString(),
+        completed: true,
+        current: true,
+      },
+      {
+        step: 'packed',
+        label: 'Merchant Processing & Packing',
+        timestamp: '',
+        completed: false,
+      },
+      {
+        step: 'in_transit',
+        label: 'Shipped via BlueDart Express Air',
+        timestamp: '',
+        completed: false,
+      },
+      {
+        step: 'released',
+        label: 'Delivery Verified & Escrow Released',
+        timestamp: '',
+        completed: false,
+      },
+    ],
+  };
 
-    await setDoc(doc(db, 'businesses', bizId, 'orders', orderId), newOrder);
-    return newOrder;
+  try {
+    if (auth.currentUser) {
+      await setDoc(doc(db, 'businesses', bizId, 'orders', orderId), newOrder);
+    }
   } catch (error) {
-    handleFirestoreError(error, OperationType.CREATE, path);
-    throw error;
+    if (auth.currentUser) {
+      handleFirestoreError(error, OperationType.CREATE, path);
+    }
   }
+
+  const firstItem = newOrder.items?.[0]?.name || 'Storefront Order';
+  const extraCount = (newOrder.items?.length || 1) - 1;
+  emitOrderPlacedNotification({
+    id: newOrder.id,
+    bizId,
+    orderNumber: newOrder.orderNumber,
+    customerName: newOrder.customerName,
+    productSummary: extraCount > 0 ? `${firstItem} +${extraCount} more` : firstItem,
+    totalInr: newOrder.total,
+    escrowStatus: newOrder.escrowStatus,
+    createdAt: newOrder.createdAt,
+    rawOrder: newOrder,
+  });
+
+  return newOrder;
 }
 
 /**

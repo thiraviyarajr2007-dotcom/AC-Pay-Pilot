@@ -76,17 +76,62 @@ service cloud.firestore {
       }
 
       match /orders/{orderId} {
-        // Business owner, finance, or customer by email/auth can read
-        allow read: if (isAuthenticated() && get(/databases/$(database)/documents/businesses/$(bizId)).data.ownerUid == request.auth.uid) ||
-          (isAuthenticated() && resource.data.customerEmail == request.auth.token.email) ||
-          isFinance() || isBusinessHead();
+        // Business owner, seller, finance, business head, or matching customer can get
+        allow get: if isAuthenticated() && (
+          isBusinessOwner(bizId) ||
+          isSeller() ||
+          isFinance() ||
+          isBusinessHead() ||
+          (resource.data.customerEmail != null && resource.data.customerEmail == request.auth.token.email) ||
+          (resource.data.customerId != null && resource.data.customerId == request.auth.uid)
+        );
+        // Business owner, seller, finance, business head, or matching customer can list
+        allow list: if isAuthenticated() && (
+          isBusinessOwner(bizId) ||
+          isSeller() ||
+          isFinance() ||
+          isBusinessHead() ||
+          (resource.data.customerEmail != null && resource.data.customerEmail == request.auth.token.email) ||
+          (resource.data.customerId != null && resource.data.customerId == request.auth.uid)
+        );
         // Public checkout creation: any customer can place an order
         allow create: if request.resource.data.total is int && request.resource.data.total >= 0;
-        // Only business owner, finance, or business head can update escrow/fulfillment status
-        allow update: if (isAuthenticated() && get(/databases/$(database)/documents/businesses/$(bizId)).data.ownerUid == request.auth.uid) ||
-          isFinance() || isBusinessHead();
+        // Only business owner, seller, finance, or business head can update escrow/fulfillment status
+        allow update: if isAuthenticated() && (
+          isBusinessOwner(bizId) ||
+          isSeller() ||
+          isFinance() ||
+          isBusinessHead()
+        );
         allow delete: if false;
       }
+
+      match /payments/{paymentId} {
+        // Finance, business head, business owner, and sellers read payments
+        allow read: if (isAuthenticated() && (
+            isBusinessOwner(bizId) ||
+            isSeller() ||
+            isFinance() ||
+            isBusinessHead()
+          ));
+        allow write: if false; // Captured securely on server via Admin SDK
+      }
+
+      match /escrowEvents/{eventId} {
+        // Business owner, seller, finance, and participants read audit trail
+        allow read: if (isAuthenticated() && (
+            isBusinessOwner(bizId) ||
+            isSeller() ||
+            isFinance() ||
+            isBusinessHead() ||
+            resource.data.actorId == request.auth.uid
+          ));
+        allow write: if false; // Immutable audit log written securely on server via Admin SDK
+      }
+    }
+
+    match /_health/{docId} {
+      allow read, write: if true; // Ephemeral health check round-trip ping collection
     }
 
     match /domains/{domain} {

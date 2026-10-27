@@ -1,0 +1,8 @@
+{
+  "firestore": {
+    "databaseId": "ai-studio-paypilotaiautono-5cf5c897-94de-4d92-83f5-3c2d5e3761dd",
+    "rules": "firestore.rules",
+    "edition": "ENTERPRISE",
+    "dataAccessMode": "FIRESTORE_NATIVE"
+  }
+}

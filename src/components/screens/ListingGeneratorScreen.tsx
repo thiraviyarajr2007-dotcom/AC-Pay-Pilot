@@ -879,7 +879,7 @@ export const ListingGeneratorScreen: React.FC<ListingGeneratorScreenProps> = ({
                         {item.cadStatus}
                       </td>
                       <td className="py-3 px-3 text-right font-mono font-bold text-slate-900">
-                        INR {formatINR(item.price)}
+                        {formatINR(item.price)}
                       </td>
                       <td className="py-3 pl-3 text-right">
                         <div className="inline-flex items-center gap-2">

@@ -253,7 +253,7 @@ export const DiscoveryScreen: React.FC<DiscoveryScreenProps> = ({
               <div className="flex items-center justify-between text-xs">
                 <span className="font-semibold text-on-surface">Max Price</span>
                 <span className="font-bold font-tabular-nums text-primary">
-                  ₹{formatINR(maxPriceFilter)}
+                  {formatINR(maxPriceFilter)}
                 </span>
               </div>
               <input
@@ -349,11 +349,11 @@ export const DiscoveryScreen: React.FC<DiscoveryScreenProps> = ({
                       </h3>
                       <div className="flex items-baseline gap-2.5 pt-1">
                         <span className="text-2xl font-bold font-headline text-on-surface font-tabular-nums">
-                          ₹{formatINR(product.price)}
+                          {formatINR(product.price)}
                         </span>
                         {product.mrp > product.price && (
                           <span className="text-xs text-secondary line-through font-tabular-nums">
-                            ₹{formatINR(product.mrp)}
+                            {formatINR(product.mrp)}
                           </span>
                         )}
                       </div>
@@ -430,7 +430,7 @@ export const DiscoveryScreen: React.FC<DiscoveryScreenProps> = ({
                       </td>
                       <td className="py-3 px-3 text-secondary">{p.warranty}</td>
                       <td className="py-3 pl-3 text-right font-tabular-nums font-bold text-on-surface">
-                        ₹{formatINR(p.price)}
+                        {formatINR(p.price)}
                       </td>
                     </tr>
                   ))}

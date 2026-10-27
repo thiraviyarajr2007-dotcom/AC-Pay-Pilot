@@ -1,6 +1,12 @@
-import React from 'react';
+import React, { useEffect, useState } from 'react';
 import { NavLink, useLocation } from 'react-router-dom';
 import { useRole } from '../context/RoleContext';
+import {
+  DEFAULT_BIZ_ID,
+  INITIAL_DEFAULT_BUSINESS,
+  subscribeBusiness,
+} from '../services/storefrontService';
+import { BusinessProfile } from '../types/storefront';
 
 interface SidebarProps {
   onOpenCopilot: (initialPrompt?: string) => void;
@@ -17,7 +23,15 @@ interface NavItemConfig {
 
 export const Sidebar: React.FC<SidebarProps> = ({ onOpenCopilot }) => {
   const location = useLocation();
-  const { role, profile, dataSource } = useRole();
+  const { role, profile } = useRole();
+  const [sellerBusiness, setSellerBusiness] = useState<BusinessProfile>(INITIAL_DEFAULT_BUSINESS);
+
+  useEffect(() => {
+    const unsub = subscribeBusiness(DEFAULT_BIZ_ID, (biz) => {
+      if (biz) setSellerBusiness(biz);
+    });
+    return () => unsub();
+  }, []);
 
   const isActive = (item: NavItemConfig) => {
     const path = location.pathname;
@@ -38,6 +52,13 @@ export const Sidebar: React.FC<SidebarProps> = ({ onOpenCopilot }) => {
       label: 'Seller Dashboard',
     },
     {
+      to: '/seller/command-center',
+      icon: 'space_dashboard',
+      label: 'Command Center',
+      badge: 'AG Studio',
+      badgeColor: 'bg-sky-500/15 text-sky-700',
+    },
+    {
       to: '/seller/website',
       icon: 'web',
       label: 'My Website',
@@ -51,9 +72,22 @@ export const Sidebar: React.FC<SidebarProps> = ({ onOpenCopilot }) => {
       badge: 'AI',
     },
     {
+      to: '/seller/ai-studio',
+      icon: '3d_rotation',
+      label: '3D & AI Media Studio',
+      badge: 'New',
+      badgeColor: 'bg-primary text-on-primary',
+    },
+    {
       to: '/seller/orders',
       icon: 'orders',
       label: 'Orders & Escrow',
+    },
+    {
+      to: '/seller/customers',
+      icon: 'group',
+      label: 'Customer Base',
+      badge: '6',
     },
     {
       to: '/seller/invoices',
@@ -66,7 +100,7 @@ export const Sidebar: React.FC<SidebarProps> = ({ onOpenCopilot }) => {
     {
       to: '/seller/transactions',
       icon: 'account_balance_wallet',
-      label: 'Transactions & Fees',
+      label: 'Transactions & Payouts',
     },
     {
       to: '/seller/reports',
@@ -123,6 +157,13 @@ export const Sidebar: React.FC<SidebarProps> = ({ onOpenCopilot }) => {
       icon: 'view_in_ar',
       label: '3D & WebXR VR View',
       badge: 'VR',
+      badgeColor: 'bg-primary text-on-primary',
+    },
+    {
+      to: '/customer/ai-studio',
+      icon: '3d_rotation',
+      label: '3D & AI Media Studio',
+      badge: 'New',
       badgeColor: 'bg-primary text-on-primary',
     },
     {
@@ -191,40 +232,84 @@ export const Sidebar: React.FC<SidebarProps> = ({ onOpenCopilot }) => {
   };
 
   return (
-    <aside className="hidden lg:flex flex-col w-64 shrink-0 bg-surface-container-lowest border-r border-surface-container-high/60 min-h-[calc(100vh-4rem)] p-4 justify-between select-none">
+    <aside className="hidden lg:flex flex-col w-64 shrink-0 bg-surface-container-lowest border-r border-surface-container-high/60 sticky top-16 max-h-[calc(100vh-4rem)] overflow-y-auto p-4 justify-between select-none">
       <div className="flex flex-col gap-5">
-        {/* Role-Distinct Workspace Identity & Accent Chip */}
+        {/* Role-Distinct Workspace Identity & Brand Header */}
         <div
           data-testid="sidebar-role-card"
           className={`p-3.5 rounded-xl border flex flex-col gap-2 shadow-2xs ${profile.accentSoftClass}`}
         >
-          <div className="flex items-center justify-between gap-2">
-            <span
-              data-testid="role-accent-chip"
-              className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-[10px] font-bold uppercase tracking-wider ${profile.accentChipClass}`}
-            >
-              <span className="material-symbols-outlined text-[12px]">{profile.roleIcon}</span>
-              <span>{profile.label} Role</span>
-            </span>
-            <span
-              className={`px-2 py-0.5 rounded text-[10px] font-bold uppercase ${
-                dataSource === 'demo'
-                  ? 'bg-amber-100 text-amber-900 border border-amber-300'
-                  : 'bg-emerald-100 text-emerald-900 border border-emerald-300'
-              }`}
-            >
-              {dataSource === 'demo' ? 'Demo' : 'Live'}
-            </span>
-          </div>
-          <div className="flex flex-col">
-            <span className="font-headline-sm text-xs font-extrabold leading-tight">
-              AC <span className="text-primary">PayPilot</span> • {profile.workspaceName}
-            </span>
-            <span className="font-label-sm text-[11px] opacity-80 mt-0.5">
-              {profile.userName} • {profile.userTitle}
-            </span>
-          </div>
+          {role === 'customer' ? (
+            <div className="flex items-center gap-2.5">
+              <img
+                src={sellerBusiness.logoUrl}
+                alt={sellerBusiness.name}
+                referrerPolicy="no-referrer"
+                className="w-8 h-8 rounded-lg object-cover border border-surface-container-high bg-white shrink-0"
+              />
+              <span className="font-headline-sm text-sm font-extrabold leading-tight truncate">
+                {sellerBusiness.name}
+              </span>
+            </div>
+          ) : (
+            <>
+              <div className="flex items-center justify-between gap-2">
+                <span
+                  data-testid="role-accent-chip"
+                  className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-[10px] font-bold uppercase tracking-wider ${profile.accentChipClass}`}
+                >
+                  <span className="material-symbols-outlined text-[12px]">{profile.roleIcon}</span>
+                  <span>{profile.label}</span>
+                </span>
+              </div>
+              <div className="flex items-center gap-2.5">
+                <img
+                  src="/assets/acpaypilot-logo.svg"
+                  alt="ACPayPilot"
+                  referrerPolicy="no-referrer"
+                  className="w-7 h-7 rounded-lg object-cover border border-surface-container-high shrink-0"
+                />
+                <span className="font-headline-sm text-sm font-extrabold leading-tight truncate">
+                  AC<span className="text-primary">PayPilot</span>
+                </span>
+              </div>
+            </>
+          )}
         </div>
+
+        {/* Public Storefront Direct Preview Card (Seller & Executive only) */}
+        {role !== 'customer' && (
+          <div className="p-3 rounded-xl bg-gradient-to-r from-emerald-500/10 via-surface-container to-surface-container border border-emerald-500/25 flex flex-col gap-2 shadow-2xs">
+            <div className="flex items-center justify-between">
+              <span className="flex items-center gap-1.5 text-[10px] font-bold text-emerald-800 uppercase tracking-wider">
+                <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse" />
+                <span>Public Storefront</span>
+              </span>
+              <span className="px-1.5 py-0.2 rounded text-[9px] font-bold bg-emerald-100 text-emerald-800 border border-emerald-300">
+                Live
+              </span>
+            </div>
+            <div className="flex items-center gap-2">
+              <img
+                src={sellerBusiness.logoUrl}
+                alt={sellerBusiness.name}
+                className="w-5 h-5 rounded object-cover bg-white border border-emerald-500/20 shrink-0"
+              />
+              <span className="text-xs font-bold text-on-surface truncate">
+                {sellerBusiness.name}
+              </span>
+            </div>
+            <a
+              href={`/s/${sellerBusiness.slug || 'aerocool'}`}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="w-full py-1.5 px-2.5 rounded-lg bg-emerald-600 hover:bg-emerald-700 text-white font-label-md text-xs font-semibold shadow-2xs transition-colors flex items-center justify-center gap-1.5 cursor-pointer"
+            >
+              <span className="material-symbols-outlined text-[15px]">open_in_new</span>
+              <span>View Live Store</span>
+            </a>
+          </div>
+        )}
 
         {/* Role-Specific Primary Navigation */}
         {role === 'seller' && (
@@ -305,14 +390,13 @@ export const Sidebar: React.FC<SidebarProps> = ({ onOpenCopilot }) => {
         <div className="flex flex-col gap-1">
           <div className="px-3 pb-1.5 flex items-center justify-between">
             <span className="font-label-sm text-[10px] uppercase tracking-widest font-bold text-outline">
-              Workspace Utilities
+              Utilities
             </span>
           </div>
           {renderItem({
             to: '/assistant',
             icon: 'smart_toy',
             label: 'AI Assistant',
-            badge: dataSource === 'demo' ? 'Demo' : 'Live AI',
           })}
           {role !== 'customer' &&
             renderItem({
@@ -331,29 +415,15 @@ export const Sidebar: React.FC<SidebarProps> = ({ onOpenCopilot }) => {
         </div>
       </div>
 
-      {/* Bottom Data Source & Copilot Card */}
-      <div className="mt-6 p-3.5 rounded-xl bg-gradient-to-br from-surface-container-low to-surface-container border border-surface-container-high/80 flex flex-col gap-2.5">
-        <div className="flex items-center justify-between">
-          <span className="font-label-sm text-[10px] uppercase tracking-wider text-primary font-bold">
-            AC PayPilot Copilot
-          </span>
-          <span className="flex items-center gap-1 text-[10px] text-amber-800 font-semibold">
-            <span className="w-1.5 h-1.5 rounded-full bg-amber-500"></span>
-            {dataSource === 'demo' ? 'Demo Mode' : 'Live AI'}
-          </span>
-        </div>
-        <p className="font-body-sm text-[11px] text-on-surface-variant leading-relaxed">
-          {dataSource === 'demo'
-            ? 'AI suggests, you decide. Every suggestion includes source + "Why this?" + Edit/Approve.'
-            : 'Live data mode selected with explicit user approval before changes.'}
-        </p>
+      {/* Bottom Quick Assistant Button */}
+      <div className="mt-6 pt-3 border-t border-surface-container-high/60">
         <button
           type="button"
           onClick={() => onOpenCopilot()}
-          className="w-full py-1.5 px-2.5 rounded-lg bg-surface-container-lowest hover:bg-primary hover:text-on-primary text-primary font-label-md text-xs font-semibold shadow-2xs transition-colors flex items-center justify-center gap-1.5 border border-primary/20 cursor-pointer"
+          className="w-full py-2 px-3 rounded-xl bg-surface-container-low hover:bg-primary hover:text-on-primary text-primary font-label-md text-xs font-semibold shadow-2xs transition-colors flex items-center justify-center gap-1.5 border border-primary/20 cursor-pointer"
         >
-          <span className="material-symbols-outlined text-[15px]">chat_spark</span>
-          <span>Ask AC PayPilot Copilot</span>
+          <span className="material-symbols-outlined text-[16px]">auto_awesome</span>
+          <span>Ask Assistant</span>
         </button>
       </div>
     </aside>

@@ -113,7 +113,7 @@ export const ARPreviewModal: React.FC<ARPreviewModalProps> = ({
               <div className="grid grid-cols-2 gap-3 text-xs">
                 <div className="p-3 rounded-xl bg-white/5 border border-white/10">
                   <span className="text-white/40 block text-[10px] uppercase font-bold">Price</span>
-                  <span className="text-base font-bold text-white font-mono">₹{formatINR(price)}</span>
+                  <span className="text-base font-bold text-white font-mono">{formatINR(price)}</span>
                 </div>
                 <div className="p-3 rounded-xl bg-white/5 border border-white/10">
                   <span className="text-white/40 block text-[10px] uppercase font-bold">Escrow Protection</span>

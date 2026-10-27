@@ -14,14 +14,18 @@ import {
   subscribeStorefrontConfig,
   subscribeStoreProducts,
   saveStorefrontConfig,
+  saveBusinessProfile,
   DEFAULT_BIZ_ID,
 } from '../../services/storefrontService';
 import {
   TEMPLATE_DEFINITIONS,
   getDefaultStorefrontConfig,
 } from '../../data/templateDefaults';
-import { PublicStorefrontApp } from '../storefront/PublicStorefrontApp';
 import { hostingerProvider } from '../../services/domainProvider';
+
+const PublicStorefrontApp = React.lazy(() =>
+  import('../storefront/PublicStorefrontApp').then((m) => ({ default: m.PublicStorefrontApp }))
+);
 
 interface StorefrontBuilderScreenProps {
   bizId?: string;
@@ -274,9 +278,10 @@ export function StorefrontBuilderScreen({
   const handleSaveDraft = async () => {
     setIsSaving(true);
     try {
+      await saveBusinessProfile(bizId, business);
       await saveStorefrontConfig(bizId, draftConfig, false);
       setHasUnsavedChanges(false);
-      showToast('Draft configuration saved to Firestore.');
+      showToast('Draft configuration and brand identity saved.');
     } catch {
       showToast('Failed to save draft');
     } finally {
@@ -287,10 +292,11 @@ export function StorefrontBuilderScreen({
   const handlePublish = async () => {
     setIsSaving(true);
     try {
+      await saveBusinessProfile(bizId, business);
       await saveStorefrontConfig(bizId, draftConfig, true);
       setPublishedConfig(JSON.parse(JSON.stringify(draftConfig)));
       setHasUnsavedChanges(false);
-      showToast('🎉 Storefront published live! Real-time sync updated.');
+      showToast('Storefront and brand identity published live!');
     } catch {
       showToast('Failed to publish storefront');
     } finally {
@@ -717,6 +723,81 @@ export function StorefrontBuilderScreen({
             {/* 4. BRAND & CONTENT TAB */}
             {activeTab === 'content' && (
               <div className="space-y-4">
+                <div className="p-3.5 rounded-xl bg-surface-container-low border border-outline-variant/30 space-y-3">
+                  <h3 className="text-xs font-bold uppercase tracking-wider text-on-surface">
+                    Store Brand Name &amp; Logo
+                  </h3>
+                  <div>
+                    <label className="block text-[11px] font-medium text-on-surface-variant mb-1">
+                      Brand Name (Shown in User Storefront Top Bar &amp; Browser Tab)
+                    </label>
+                    <input
+                      type="text"
+                      value={business.name}
+                      onChange={(e) => {
+                        const nextName = e.target.value;
+                        setBusiness((prev) => (prev ? { ...prev, name: nextName } : prev));
+                        updateDraft((p) => ({
+                          ...p,
+                          seo: { ...p.seo, title: nextName },
+                        }));
+                      }}
+                      className="w-full px-3 py-2 bg-surface border border-outline-variant rounded-xl text-xs font-bold text-on-surface"
+                    />
+                  </div>
+                  <div className="space-y-2">
+                    <label className="block text-[11px] font-medium text-on-surface-variant">
+                      Brand Logo
+                    </label>
+                    <div className="flex items-center gap-3">
+                      {business.logoUrl && (
+                        <img
+                          src={business.logoUrl}
+                          alt={business.name}
+                          className="w-11 h-11 rounded-xl object-cover border border-outline-variant shrink-0"
+                        />
+                      )}
+                      <div className="flex-1 space-y-1.5">
+                        <input
+                          type="text"
+                          value={business.logoUrl}
+                          onChange={(e) => {
+                            const nextLogo = e.target.value;
+                            setBusiness((prev) => (prev ? { ...prev, logoUrl: nextLogo } : prev));
+                            setHasUnsavedChanges(true);
+                          }}
+                          placeholder="Paste Logo Image URL..."
+                          className="w-full px-3 py-1.5 bg-surface border border-outline-variant rounded-lg text-xs text-on-surface"
+                        />
+                        <label className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-primary/10 hover:bg-primary/20 text-primary text-[11px] font-bold cursor-pointer">
+                          <span className="material-symbols-outlined text-[14px]">upload</span>
+                          <span>Upload Logo File</span>
+                          <input
+                            type="file"
+                            accept="image/*"
+                            className="hidden"
+                            onChange={(e) => {
+                              const file = e.target.files?.[0];
+                              if (!file) return;
+                              const reader = new FileReader();
+                              reader.onload = (ev) => {
+                                const dataUrl = ev.target?.result as string;
+                                if (dataUrl) {
+                                  setBusiness((prev) =>
+                                    prev ? { ...prev, logoUrl: dataUrl } : prev
+                                  );
+                                  setHasUnsavedChanges(true);
+                                }
+                              };
+                              reader.readAsDataURL(file);
+                            }}
+                          />
+                        </label>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+
                 <div>
                   <h3 className="text-xs font-bold uppercase tracking-wider text-on-surface">
                     Announcement Bar
@@ -1133,14 +1214,23 @@ export function StorefrontBuilderScreen({
 
             {/* Live Interactive Preview Container */}
             <div className="flex-1 overflow-y-auto">
-              <PublicStorefrontApp
-                slug={business.slug}
-                bizId={bizId}
-                previewConfig={draftConfig}
-                previewBusiness={business}
-                previewProducts={products}
-                isEmbeddedPreview={true}
-              />
+              <React.Suspense
+                fallback={
+                  <div className="h-full min-h-[300px] flex items-center justify-center text-xs text-on-surface-variant gap-2">
+                    <span className="material-symbols-outlined animate-spin text-[18px]">progress_activity</span>
+                    <span>Loading Live Preview...</span>
+                  </div>
+                }
+              >
+                <PublicStorefrontApp
+                  slug={business.slug}
+                  bizId={bizId}
+                  previewConfig={draftConfig}
+                  previewBusiness={business}
+                  previewProducts={products}
+                  isEmbeddedPreview={true}
+                />
+              </React.Suspense>
             </div>
           </div>
         </div>

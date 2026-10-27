@@ -29,9 +29,20 @@ import { AssistantScreen } from './components/screens/AssistantScreen';
 import { CheckoutResultScreen, NotFoundScreen } from './components/screens/CheckoutResultScreen';
 import { HealthScreen } from './components/screens/HealthScreen';
 import { StorefrontBuilderScreen } from './components/screens/StorefrontBuilderScreen';
-import { PublicStorefrontApp } from './components/storefront/PublicStorefrontApp';
+import { CustomersScreen } from './components/screens/CustomersScreen';
+import { SellerCommandCenterScreen } from './components/screens/SellerCommandCenterScreen';
+import { CreativeStudioScreen } from './components/screens/CreativeStudioScreen';
+const PublicStorefrontApp = React.lazy(() =>
+  import('./components/storefront/PublicStorefrontApp').then((m) => ({
+    default: m.PublicStorefrontApp,
+  }))
+);
 import { OnboardingWizard } from './components/onboarding/OnboardingWizard';
-import { ensureDefaultStoreExists } from './services/storefrontService';
+import {
+  DEFAULT_BIZ_ID,
+  emitOrderPlacedNotification,
+  ensureDefaultStoreExists,
+} from './services/storefrontService';
 import { CopilotModal } from './components/modals/CopilotModal';
 import { FeeAuditModal } from './components/modals/FeeAuditModal';
 import { PayPalCheckoutModal } from './components/modals/PayPalCheckoutModal';
@@ -63,7 +74,7 @@ export const CATALOG_BY_SKU: Record<string, any> = {
     warranty: '3 Years On-Site Replacement',
     aiMatchScore: 99,
     aiReason:
-      'Main 3D/AR demo SKU: 28W BLDC motor cuts energy draw by 65% vs 75W induction fans with 1200mm room air throw.',
+      '28W BLDC motor cuts energy draw by 65% vs 75W induction fans with 1200mm room air throw.',
     img: 'https://lh3.googleusercontent.com/aida-public/AB6AXuAdZqURIDL_NaUXiAifTbLg4cem9jV1GV8iZOZph4aZvIM_kBIBsVSYaq0LFoeWQ1Xe11jOuDpYR0RHnVhSurjQprJuCqeXfR6luOW8JojolfW3AL3RlJG5cFe-YmAZaYz7-lll8h5sqcs83z5WRWhCSmB_-pIxVPGanujJtlcWqHaGPRDckKJmoCqqWoVmhA4SIWYCZ53ylY77gEHOrpObunEt2PyFUzIVJzYoOpMS9aQvgYTluWmbLg',
   },
   '#FAN-BLDC-892': {
@@ -82,7 +93,7 @@ export const CATALOG_BY_SKU: Record<string, any> = {
     warranty: '3 Years On-Site Replacement',
     aiMatchScore: 99,
     aiReason:
-      'Main 3D/AR demo SKU: 28W BLDC motor cuts energy draw by 65% vs 75W induction fans with 1200mm room air throw.',
+      '28W BLDC motor cuts energy draw by 65% vs 75W induction fans with 1200mm room air throw.',
     img: 'https://lh3.googleusercontent.com/aida-public/AB6AXuAdZqURIDL_NaUXiAifTbLg4cem9jV1GV8iZOZph4aZvIM_kBIBsVSYaq0LFoeWQ1Xe11jOuDpYR0RHnVhSurjQprJuCqeXfR6luOW8JojolfW3AL3RlJG5cFe-YmAZaYz7-lll8h5sqcs83z5WRWhCSmB_-pIxVPGanujJtlcWqHaGPRDckKJmoCqqWoVmhA4SIWYCZ53ylY77gEHOrpObunEt2PyFUzIVJzYoOpMS9aQvgYTluWmbLg',
   },
   'SPO-YNX-99P': {
@@ -101,7 +112,7 @@ export const CATALOG_BY_SKU: Record<string, any> = {
     warranty: '1 Year Yonex Brand Protection',
     aiMatchScore: 96,
     aiReason:
-      'Secondary 3D/AR demo SKU: Rotational Generator System distributes weight across grip, frame top, and T-joint.',
+      'Rotational Generator System distributes weight across grip, frame top, and T-joint.',
     img: 'https://lh3.googleusercontent.com/aida-public/AB6AXuDURq8df1AvNhd6BXPOnLSDepBVFAZQQdhN7XCJzqUwmcV79SqYGalleVqm5XyenVa4nFesHY7jCNLROrqBHlgtE92aPFjCmcNoiYuJEPzJjul5AYdnnHkeKQevXmwyO8xozEtp1qExjA6sfd8tRUMhTAaE5rLBnqslJx9r-5JgtL82V5kmTgx9bt5QmOiAjh1sa5vjPP7EB5WSaeKeMK9zuVgCH8RJFezfeBmyvYUJuYqroAVrKuYT6A',
   },
   '#SPO-YNX-99P': {
@@ -120,12 +131,12 @@ export const CATALOG_BY_SKU: Record<string, any> = {
     warranty: '1 Year Yonex Brand Protection',
     aiMatchScore: 96,
     aiReason:
-      'Secondary 3D/AR demo SKU: Rotational Generator System distributes weight across grip, frame top, and T-joint.',
+      'Rotational Generator System distributes weight across grip, frame top, and T-joint.',
     img: 'https://lh3.googleusercontent.com/aida-public/AB6AXuDURq8df1AvNhd6BXPOnLSDepBVFAZQQdhN7XCJzqUwmcV79SqYGalleVqm5XyenVa4nFesHY7jCNLROrqBHlgtE92aPFjCmcNoiYuJEPzJjul5AYdnnHkeKQevXmwyO8xozEtp1qExjA6sfd8tRUMhTAaE5rLBnqslJx9r-5JgtL82V5kmTgx9bt5QmOiAjh1sa5vjPP7EB5WSaeKeMK9zuVgCH8RJFezfeBmyvYUJuYqroAVrKuYT6A',
   },
   'AUD-ANC-99': {
     sku: '#AUD-ANC-99',
-    name: 'AcousticSphere ANC Pods (No .glb Model Demo)',
+    name: 'AcousticSphere ANC Wireless Earbuds',
     price: 11499,
     mrp: 14999,
     gstRate: 18,
@@ -134,12 +145,12 @@ export const CATALOG_BY_SKU: Record<string, any> = {
     stock: 45,
     modelUrl: null,
     specs: ['Lossless LDAC', 'Spatial Audio'],
-    dimensions: 'Not provided',
-    weight: 'Not provided',
-    warranty: 'Not provided',
+    dimensions: '62 × 48 × 28 mm',
+    weight: '0.048 kg',
+    warranty: '1 Year Brand Warranty',
     aiMatchScore: 88,
     aiReason:
-      'No .glb file uploaded for this SKU — demonstrates honest "3D model unavailable" + 2D image gallery fallback.',
+      'Studio-grade active noise cancellation with 36-hour battery life and spatial audio.',
     img: 'https://lh3.googleusercontent.com/aida-public/AB6AXuATX6652NttkNvGUKx5jflqNG9RH8CT1bcmBhwPs5ONeLhU9pt_yu_fLrBW741KftvyB8iGKx74rvwQHwuPCAi3l4R3tYkHwBDG9n3OPdy9Mlu8L_I0x4OPz9BwauAkb1vv9Y9m6inErwdhjPUN3ppwCGPbYGt503flhtRIVgYmpxZIuYY_1j9Rm3YHrFW7YLzOu7wmGH2HMVU6LtZPoH8W80bhQ8Ax7MbgTzEynmMscW556GyOm__wiw',
   },
   'AC-WRK-8990': {
@@ -301,6 +312,7 @@ const INITIAL_ORDER_RECORDS: OrderRecord[] = [
 export const SCREEN_ID_TO_PATH: Record<ScreenId, string> = {
   'executive-insights': '/executive',
   'seller-dashboard': '/seller/dashboard',
+  'seller-command-center': '/seller/command-center',
   'seller-website': '/seller/website',
   'seller-invoiceiq': '/seller/invoices',
   'seller-orders': '/seller/orders',
@@ -414,7 +426,20 @@ export default function App() {
         slug = sub;
       }
     }
-    return <PublicStorefrontApp slug={slug} />;
+    return (
+      <React.Suspense
+        fallback={
+          <div className="min-h-screen flex items-center justify-center bg-surface">
+            <div className="flex flex-col items-center gap-3">
+              <div className="w-8 h-8 border-3 border-primary border-t-transparent rounded-full animate-spin" />
+              <span className="text-xs text-on-surface-variant font-medium">Loading Storefront...</span>
+            </div>
+          </div>
+        }
+      >
+        <PublicStorefrontApp slug={slug} />
+      </React.Suspense>
+    );
   }
 
   const activeModal = searchParams.get('modal');
@@ -518,6 +543,16 @@ export default function App() {
       trackingId: 'ESCROW-LOCKED-NEW',
     };
     setOrders((prev) => [newOrder, ...prev]);
+    emitOrderPlacedNotification({
+      id: newOrderId,
+      bizId: DEFAULT_BIZ_ID,
+      orderNumber: newOrderId,
+      customerName: newOrder.buyerName,
+      productSummary: newOrder.productName,
+      totalInr: newOrder.amount,
+      escrowStatus: 'Escrow Locked',
+      createdAt: new Date().toISOString(),
+    });
     const next = new URLSearchParams();
     next.set('highlight', newOrderId);
     navigate({
@@ -538,7 +573,7 @@ export default function App() {
   );
 
   return (
-    <div className="min-h-screen bg-surface text-on-surface font-body selection:bg-primary-fixed selection:text-on-primary-fixed">
+    <div className="min-h-screen flex flex-col bg-surface text-on-surface font-body selection:bg-primary-fixed selection:text-on-primary-fixed">
       <Header
         searchQuery={searchQuery}
         onSearchChange={setSearchQuery}
@@ -550,12 +585,13 @@ export default function App() {
         orders={mockOrders}
       />
 
-      <Sidebar onOpenCopilot={(q) => openModalParam('copilot', q)} />
+      <div className="flex flex-1 min-h-0 items-start">
+        <Sidebar onOpenCopilot={(q) => openModalParam('copilot', q)} />
 
-      <main className="md:pl-64 pt-28 md:pt-16 min-h-screen">
-        <div className="p-4 sm:p-6 md:p-8 max-w-[1600px] mx-auto">
-          <ScreenDataSourceBanner />
-          <Routes>
+        <main className="flex-1 min-w-0">
+          <div className="p-3 sm:p-4 md:p-5 max-w-[1600px] mx-auto">
+            <ScreenDataSourceBanner />
+            <Routes>
             <Route path="/" element={<RoleHomeRedirect />} />
 
             <Route
@@ -588,6 +624,16 @@ export default function App() {
               }
             />
 
+            {/* Seller Command Center (AG Studio Enterprise) */}
+            <Route
+              path="/seller/command-center"
+              element={
+                <RoleRouteGuard allowedRoles={['seller', 'business_head', 'finance']}>
+                  <SellerCommandCenterScreen showToast={showToast} />
+                </RoleRouteGuard>
+              }
+            />
+
             {/* My Website - Storefront Studio */}
             <Route
               path="/seller/website"
@@ -613,6 +659,15 @@ export default function App() {
             />
 
             <Route
+              path="/seller/ai-studio"
+              element={
+                <RoleRouteGuard allowedRoles={['seller', 'business_head', 'finance']}>
+                  <CreativeStudioScreen portalMode="seller" showToast={showToast} />
+                </RoleRouteGuard>
+              }
+            />
+
+            <Route
               path="/seller/orders"
               element={
                 <RoleRouteGuard allowedRoles={['seller', 'business_head']}>
@@ -626,6 +681,15 @@ export default function App() {
                     showToast={showToast}
                     globalSearchQuery={searchQuery}
                   />
+                </RoleRouteGuard>
+              }
+            />
+
+            <Route
+              path="/seller/customers"
+              element={
+                <RoleRouteGuard allowedRoles={['seller', 'business_head']}>
+                  <CustomersScreen showToast={showToast} />
                 </RoleRouteGuard>
               }
             />
@@ -803,6 +867,15 @@ export default function App() {
             />
 
             <Route
+              path="/customer/ai-studio"
+              element={
+                <RoleRouteGuard allowedRoles={['customer', 'seller', 'business_head']}>
+                  <CreativeStudioScreen portalMode="customer" showToast={showToast} />
+                </RoleRouteGuard>
+              }
+            />
+
+            <Route
               path="/customer/orders"
               element={
                 <RoleRouteGuard allowedRoles={['customer', 'business_head']}>
@@ -866,8 +939,9 @@ export default function App() {
             {/* 404 Catch-all Route */}
             <Route path="*" element={<NotFoundScreen />} />
           </Routes>
-        </div>
-      </main>
+          </div>
+        </main>
+      </div>
 
       {/* URL-Synced Modals (?modal=copilot|fee-audit|checkout|qr|ar) */}
       <CopilotModal
@@ -897,8 +971,6 @@ export default function App() {
         onSimulateRedirectCancel={() => navigate('/checkout/cancel?reason=user_aborted')}
       />
 
-      <QRModal isOpen={activeModal === 'qr'} onClose={closeModalParam} />
-
       {(() => {
         const pathMatch = location.pathname.match(/\/customer\/product\/([^/]+)/);
         const routeSku = pathMatch ? decodeURIComponent(pathMatch[1]).replace(/^#/, '') : 'FAN-BLDC-892';
@@ -909,18 +981,26 @@ export default function App() {
           CATALOG_BY_SKU['FAN-BLDC-892'];
 
         return (
-          <ARPreviewModal
-            isOpen={activeModal === 'ar' || activeModal === 'vr'}
-            initialVrMode={activeModal === 'vr'}
-            onClose={closeModalParam}
-            productName={activeProd?.name || 'AeroBreeze Stealth 1200mm Smart BLDC Ceiling Fan'}
-            productSku={activeProd?.sku || routeSku}
-            price={activeProd?.price || 8499}
-            onReservePayPal={() => {
-              closeModalParam();
-              handleAddToCart(activeProd);
-            }}
-          />
+          <>
+            <QRModal
+              isOpen={activeModal === 'qr'}
+              onClose={closeModalParam}
+              title="Quick Scan to AR — Mobile Spatial View"
+              subtitle={`Open your phone camera to place ${activeProd?.name || 'the 1200mm AeroBreeze ceiling fan'} (${activeProd?.dimensions || 'True Scale'}) in your room at true scale.`}
+            />
+            <ARPreviewModal
+              isOpen={activeModal === 'ar' || activeModal === 'vr'}
+              initialVrMode={activeModal === 'vr'}
+              onClose={closeModalParam}
+              productName={activeProd?.name || 'AeroBreeze Stealth 1200mm Smart BLDC Ceiling Fan'}
+              productSku={activeProd?.sku || routeSku}
+              price={activeProd?.price || 8499}
+              onReservePayPal={() => {
+                closeModalParam();
+                handleAddToCart(activeProd);
+              }}
+            />
+          </>
         );
       })()}
 
@@ -940,7 +1020,7 @@ export default function App() {
         <div
           role="status"
           aria-live="polite"
-          className="fixed bottom-6 left-1/2 -translate-x-1/2 z-50 bg-inverse-surface text-inverse-on-surface px-5 py-3 rounded-xl shadow-xl flex items-center gap-3 animate-bounce"
+          className="fixed bottom-6 left-1/2 -translate-x-1/2 z-50 bg-inverse-surface text-inverse-on-surface px-5 py-3 rounded-xl shadow-xl flex items-center gap-3 transition-all duration-300"
         >
           <span className="material-symbols-outlined text-emerald-400 text-[20px]">
             check_circle

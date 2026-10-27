@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { NavLink, useLocation, useNavigate } from 'react-router-dom';
 import { ROLE_PROFILES, useRole } from '../context/RoleContext';
 import {
@@ -16,6 +16,12 @@ import {
   formatINR,
   normalizeSkuForUrl,
 } from '../utils/finance';
+import {
+  subscribeBusiness,
+  DEFAULT_BIZ_ID,
+  INITIAL_DEFAULT_BUSINESS,
+} from '../services/storefrontService';
+import { BusinessProfile } from '../types/storefront';
 
 interface HeaderProps {
   searchQuery: string;
@@ -58,6 +64,37 @@ export const Header: React.FC<HeaderProps> = ({
   const [showNotifications, setShowNotifications] = useState(false);
   const [showSearchDropdown, setShowSearchDropdown] = useState(false);
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
+  const [sellerBusiness, setSellerBusiness] = useState<BusinessProfile>(INITIAL_DEFAULT_BUSINESS);
+
+  useEffect(() => {
+    const unsub = subscribeBusiness(DEFAULT_BIZ_ID, (biz) => {
+      setSellerBusiness(biz);
+    });
+    return () => unsub();
+  }, []);
+
+  const isCustomerSite = role === 'customer' || location.pathname.startsWith('/customer');
+
+  const ACPAYPILOT_LOGO_URL = '/assets/acpaypilot-logo.svg';
+
+  useEffect(() => {
+    if (typeof document === 'undefined') return;
+    let iconLink = document.querySelector("link[rel~='icon']") as HTMLLinkElement | null;
+    if (!iconLink) {
+      iconLink = document.createElement('link');
+      iconLink.rel = 'icon';
+      document.head.appendChild(iconLink);
+    }
+    if (isCustomerSite && sellerBusiness?.name) {
+      document.title = sellerBusiness.name;
+      if (sellerBusiness.logoUrl) {
+        iconLink.href = sellerBusiness.logoUrl;
+      }
+    } else {
+      document.title = `ACPayPilot — ${profile.workspaceName}`;
+      iconLink.href = ACPAYPILOT_LOGO_URL;
+    }
+  }, [isCustomerSite, sellerBusiness?.name, sellerBusiness?.logoUrl, profile.workspaceName]);
 
   const q = searchQuery.trim();
   const matchedProducts = q ? filterCatalogProducts(catalog, q).slice(0, 3) : [];
@@ -130,30 +167,45 @@ export const Header: React.FC<HeaderProps> = ({
           <button
             type="button"
             onClick={() => navigate(profile.homeRoute)}
-            className="flex items-center gap-2 text-left group cursor-pointer shrink-0"
+            className="flex items-center gap-2.5 text-left group cursor-pointer shrink-0"
           >
-            <div className="w-8 h-8 sm:w-9 sm:h-9 rounded-xl bg-gradient-to-br from-primary to-primary-container flex items-center justify-center text-on-primary shadow-sm group-hover:scale-105 transition-transform">
-              <span className="material-symbols-outlined text-[18px] sm:text-[20px]">payments</span>
-            </div>
-            <div className="flex flex-col">
-              <div className="flex items-center gap-1.5">
+            {isCustomerSite ? (
+              <>
+                {sellerBusiness.logoUrl ? (
+                  <img
+                    src={sellerBusiness.logoUrl}
+                    alt={sellerBusiness.name}
+                    className="w-8 h-8 sm:w-9 sm:h-9 rounded-xl object-cover border border-surface-container-high shadow-sm group-hover:scale-105 transition-transform"
+                  />
+                ) : (
+                  <div className="w-8 h-8 sm:w-9 sm:h-9 rounded-xl bg-gradient-to-br from-primary to-primary-container flex items-center justify-center text-on-primary shadow-sm">
+                    <span className="material-symbols-outlined text-[18px] sm:text-[20px]">
+                      storefront
+                    </span>
+                  </div>
+                )}
                 <span className="font-headline-sm font-extrabold tracking-tight text-on-surface text-sm sm:text-base leading-none">
-                  AC <span className="text-primary">PayPilot</span>
+                  {sellerBusiness.name}
                 </span>
-                <span
-                  className={`px-1.5 py-0.5 rounded font-label-sm text-[9px] font-bold uppercase tracking-wider ${
-                    dataSource === 'demo'
-                      ? 'bg-amber-100 text-amber-900 border border-amber-300'
-                      : 'bg-emerald-100 text-emerald-900 border border-emerald-300'
-                  }`}
-                >
-                  {dataSource === 'demo' ? 'Demo data' : 'Live'}
-                </span>
-              </div>
-              <span className="hidden sm:inline font-label-sm text-[10px] text-secondary uppercase tracking-widest mt-0.5">
-                {profile.workspaceName}
-              </span>
-            </div>
+              </>
+            ) : (
+              <>
+                <img
+                  src={ACPAYPILOT_LOGO_URL}
+                  alt="ACPayPilot"
+                  referrerPolicy="no-referrer"
+                  className="w-8 h-8 sm:w-9 sm:h-9 rounded-xl object-cover border border-surface-container-high shadow-sm group-hover:scale-105 transition-transform"
+                />
+                <div className="flex flex-col">
+                  <span className="font-headline-sm font-extrabold tracking-tight text-on-surface text-sm sm:text-base leading-none">
+                    AC<span className="text-primary">PayPilot</span>
+                  </span>
+                  <span className="hidden sm:inline font-label-sm text-[10px] text-secondary uppercase tracking-widest mt-0.5">
+                    {profile.workspaceName}
+                  </span>
+                </div>
+              </>
+            )}
           </button>
 
           {/* Global Search Bar with Cross-Screen Results Dropdown */}
@@ -174,7 +226,7 @@ export const Header: React.FC<HeaderProps> = ({
               aria-label="Global workspace search"
               className="w-full h-9 pl-9 pr-8 rounded-lg bg-surface-container-low text-on-surface placeholder:text-outline font-body-sm text-xs focus:outline-none focus:ring-2 focus:ring-primary/20 focus:bg-surface-container-lowest transition-all border border-surface-container-high/50"
             />
-            {searchQuery ? (
+            {searchQuery && (
               <button
                 type="button"
                 onClick={() => onSearchChange('')}
@@ -183,10 +235,6 @@ export const Header: React.FC<HeaderProps> = ({
               >
                 <span className="material-symbols-outlined text-[15px]">close</span>
               </button>
-            ) : (
-              <kbd className="absolute right-2.5 px-1.5 py-0.5 text-[10px] font-mono bg-surface-container text-outline rounded">
-                ⌘K
-              </kbd>
             )}
 
             {/* Cross-Screen Search Results Dropdown */}
@@ -315,13 +363,9 @@ export const Header: React.FC<HeaderProps> = ({
           </div>
         </div>
 
-        {/* Center: Demo Role Switcher ONLY in Demo Mode; Real Auth Role in Live Mode */}
+        {/* Center: Role Switcher */}
         {dataSource === 'demo' ? (
-          <div className="hidden lg:flex items-center gap-1.5 bg-surface-container-low p-1 pl-2.5 rounded-xl border border-surface-container-high/60">
-            <span className="font-label-sm text-[10px] uppercase tracking-wider text-secondary font-bold flex items-center gap-1 pr-1.5 border-r border-surface-container-high">
-              <span className="material-symbols-outlined text-[14px] text-primary">badge</span>
-              <span>Demo role:</span>
-            </span>
+          <div className="hidden lg:flex items-center gap-1 bg-surface-container-low p-1 rounded-xl border border-surface-container-high/60">
             {rolesOrder.map((rKey) => {
               const rInfo = ROLE_PROFILES[rKey];
               const active = role === rKey;
@@ -375,51 +419,17 @@ export const Header: React.FC<HeaderProps> = ({
           </div>
         )}
 
-        {/* Right: Start Demo, DataSource Toggle, Copilot CTA, Notifications & Active Persona Profile */}
+        {/* Right Actions */}
         <div className="flex items-center gap-1.5 sm:gap-2.5 shrink-0">
-          {/* Start Demo Walkthrough Button */}
-          <button
-            type="button"
-            onClick={startDemoTour}
-            data-testid="start-demo-btn"
-            className={`flex items-center gap-1 px-2.5 sm:px-3 py-1.5 rounded-lg font-label-md text-[11px] sm:text-xs font-bold transition-all shadow-xs cursor-pointer ${
-              isDemoTourActive
-                ? 'bg-[#ffc439] text-[#003087] ring-2 ring-[#003087]/30'
-                : 'bg-[#003087] hover:bg-[#00256b] text-white'
-            }`}
-          >
-            <span className="material-symbols-outlined text-[15px] sm:text-[16px]">play_circle</span>
-            <span>{isDemoTourActive ? 'Restart demo' : 'Start demo'}</span>
-          </button>
-
-          {/* DataSource Toggle Badge */}
-          <button
-            type="button"
-            onClick={() => setDataSource(dataSource === 'demo' ? 'live' : 'demo')}
-            title="Toggle Demo data vs Live mode"
-            className={`hidden sm:inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg font-label-sm text-xs font-bold border transition-colors cursor-pointer ${
-              dataSource === 'demo'
-                ? 'bg-amber-50 text-amber-900 border-amber-300 hover:bg-amber-100'
-                : 'bg-emerald-50 text-emerald-900 border-emerald-300 hover:bg-emerald-100'
-            }`}
-          >
-            <span
-              className={`w-1.5 h-1.5 rounded-full ${
-                dataSource === 'demo' ? 'bg-amber-600' : 'bg-emerald-600'
-              }`}
-            />
-            <span>{dataSource === 'demo' ? 'Demo data' : 'Live'}</span>
-          </button>
-
           {/* AI Copilot Trigger */}
           <button
             type="button"
             onClick={() => onOpenCopilot()}
-            title="Ask AC PayPilot Copilot"
+            title="Ask AI Copilot"
             className="flex items-center gap-1.5 px-2.5 sm:px-3 py-1.5 rounded-lg bg-gradient-to-r from-primary to-tertiary text-on-primary font-label-md text-xs font-semibold shadow-sm hover:opacity-95 transition-all active:scale-95 cursor-pointer"
           >
             <span className="material-symbols-outlined text-[16px]">auto_awesome</span>
-            <span className="hidden xl:inline">Ask AC PayPilot Copilot</span>
+            <span className="hidden xl:inline">AI Copilot</span>
           </button>
 
           {/* Store Setup Wizard Trigger */}
@@ -441,10 +451,12 @@ export const Header: React.FC<HeaderProps> = ({
             target="_blank"
             rel="noopener noreferrer"
             title="Open customer storefront in new window"
-            className="hidden lg:inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg border border-outline-variant bg-surface-container-low text-on-surface font-label-md text-xs font-semibold hover:bg-surface-container transition-all"
+            className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-emerald-500/30 bg-emerald-500/10 text-emerald-800 hover:bg-emerald-500/20 font-label-md text-xs font-bold transition-all shadow-2xs"
           >
-            <span className="material-symbols-outlined text-[15px] text-emerald-600">storefront</span>
-            <span>Storefront →</span>
+            <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse" />
+            <span className="material-symbols-outlined text-[15px] text-emerald-700">storefront</span>
+            <span className="hidden sm:inline">Live Storefront</span>
+            <span className="material-symbols-outlined text-[13px]">open_in_new</span>
           </a>
 
           {/* Notifications Popover Trigger */}
@@ -462,14 +474,9 @@ export const Header: React.FC<HeaderProps> = ({
             {showNotifications && (
               <div className="absolute right-0 top-11 w-80 bg-surface-container-lowest rounded-2xl shadow-xl border border-surface-container-high/80 p-3 z-50 flex flex-col gap-2">
                 <div className="flex items-center justify-between px-1 pb-1 border-b border-surface-container-low">
-                  <div className="flex items-center gap-1.5">
-                    <span className="font-headline-sm text-xs font-bold text-on-surface">
-                      Workspace Alerts
-                    </span>
-                    <span className="px-1.5 py-0.5 rounded bg-amber-100 text-amber-900 font-label-sm text-[9px] font-bold uppercase">
-                      Demo response
-                    </span>
-                  </div>
+                  <span className="font-headline-sm text-xs font-bold text-on-surface">
+                    Notifications
+                  </span>
                   <button
                     type="button"
                     onClick={() => setShowNotifications(false)}
@@ -548,7 +555,7 @@ export const Header: React.FC<HeaderProps> = ({
                 {profile.userName}
               </span>
               <span className="font-label-sm text-[10px] text-outline mt-0.5">
-                {profile.label} • {dataSource === 'demo' ? 'Demo' : 'Live'}
+                {profile.label}
               </span>
             </div>
           </div>

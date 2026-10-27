@@ -596,7 +596,7 @@ export const OrdersScreen: React.FC<OrdersScreenProps> = ({
                           </span>
                         </td>
                         <td className="py-3.5 px-3 text-right font-mono font-bold text-slate-900">
-                          INR {formatINR(order.amount)}
+                          {formatINR(order.amount)}
                         </td>
                         <td className="py-3.5 px-3 space-y-1">
                           <PaymentStateBadge

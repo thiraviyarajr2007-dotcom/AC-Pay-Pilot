@@ -9,6 +9,7 @@ import {
 import { useRole } from '../../context/RoleContext';
 import { ProductARViewerSection } from './ProductARViewerSection';
 import { ProductSpecsAndQASection } from './ProductSpecsAndQASection';
+import { QRModal } from '../modals/QRModal';
 
 interface ProductDetailARScreenProps {
   selectedProduct?: any;
@@ -140,6 +141,15 @@ export const ProductDetailARScreen: React.FC<ProductDetailARScreenProps> = ({
 
   const [approvedConfigNote, setApprovedConfigNote] = useState<string | null>(null);
   const [aiSuggestionApproved, setAiSuggestionApproved] = useState(false);
+  const [isLocalQRModalOpen, setIsLocalQRModalOpen] = useState(false);
+
+  const handleQuickScanToAR = () => {
+    if (onOpenQRModal) {
+      onOpenQRModal();
+    } else {
+      setIsLocalQRModalOpen(true);
+    }
+  };
 
   const modelViewerRef = useRef<any>(null);
 
@@ -482,15 +492,15 @@ export const ProductDetailARScreen: React.FC<ProductDetailARScreenProps> = ({
             <div className="p-5 bg-surface-container-low rounded-xl border border-surface-container-high space-y-4">
               <div className="flex items-baseline gap-3">
                 <span className="text-3xl font-bold font-headline text-on-surface font-tabular-nums">
-                  ₹{formatINR(product.price)}
+                  {formatINR(product.price)}
                 </span>
                 {product.mrp && product.mrp > product.price && (
                   <>
                     <span className="text-sm text-secondary line-through font-tabular-nums">
-                      ₹{formatINR(product.mrp)}
+                      {formatINR(product.mrp)}
                     </span>
                     <span className="bg-emerald-100 text-emerald-800 text-[11px] font-bold px-2 py-0.5 rounded">
-                      Save ₹{formatINR(product.mrp - product.price)}
+                      Save {formatINR(product.mrp - product.price)}
                     </span>
                   </>
                 )}
@@ -503,7 +513,7 @@ export const ProductDetailARScreen: React.FC<ProductDetailARScreenProps> = ({
                     <p className="font-semibold text-on-surface">
                       Pay in 4 interest-free payments of{' '}
                       <span className="font-tabular-nums text-primary">
-                        ₹{formatINR(payIn4Installment)}
+                        {formatINR(payIn4Installment)}
                       </span>
                     </p>
                     <p className="text-[11px] text-secondary">
@@ -536,6 +546,27 @@ export const ProductDetailARScreen: React.FC<ProductDetailARScreenProps> = ({
                 >
                   <i className="fa-brands fa-paypal"></i>
                   <span>PayPal Checkout</span>
+                </button>
+              </div>
+
+              {/* Quick Scan to AR Button for Mobile Spatial View */}
+              <div className="pt-2 border-t border-surface-container-high/80 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                <div className="flex items-center gap-2 text-xs text-on-surface-variant">
+                  <span className="material-symbols-outlined text-primary text-[18px]">
+                    view_in_ar
+                  </span>
+                  <span>
+                    Want to inspect <strong className="text-on-surface">{product.name}</strong> in your room on mobile?
+                  </span>
+                </div>
+                <button
+                  type="button"
+                  onClick={handleQuickScanToAR}
+                  data-testid="quick-scan-to-ar-btn"
+                  className="px-3.5 py-2 rounded-xl bg-primary/10 hover:bg-primary/20 border border-primary/25 text-primary font-bold text-xs flex items-center justify-center gap-1.5 transition-colors shrink-0 cursor-pointer"
+                >
+                  <span className="material-symbols-outlined text-[16px]">qr_code_scanner</span>
+                  <span>Quick Scan to AR</span>
                 </button>
               </div>
             </div>
@@ -578,6 +609,14 @@ export const ProductDetailARScreen: React.FC<ProductDetailARScreenProps> = ({
           />
         </div>
       </div>
+
+      {/* Fallback Local QR Modal if onOpenQRModal prop is not supplied */}
+      <QRModal
+        isOpen={isLocalQRModalOpen}
+        onClose={() => setIsLocalQRModalOpen(false)}
+        title="Quick Scan to AR — Mobile Spatial View"
+        subtitle={`Scan with your phone camera to place ${product.name} (${product.dimensions || 'True Scale'}) directly into your room.`}
+      />
     </div>
   );
 };

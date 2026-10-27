@@ -82,9 +82,72 @@ export const AssistantScreen: React.FC<AssistantScreenProps> = ({
 
   const [input, setInput] = useState('');
   const [streaming, setStreaming] = useState(false);
+  const [selectedModel, setSelectedModel] = useState<
+    'gemini-4-argon' | 'gemini-3.8-flash' | 'gemini-3.1-flash-lite'
+  >('gemini-3.8-flash');
+  const [isRecordingMic, setIsRecordingMic] = useState(false);
+  const [isTranscribingMic, setIsTranscribingMic] = useState(false);
+  const mediaRecorderRef = useRef<MediaRecorder | null>(null);
+  const audioChunksRef = useRef<Blob[]>([]);
   const [editingMsgId, setEditingMsgId] = useState<string | null>(null);
   const [draftEdit, setDraftEdit] = useState<string>('');
   const bottomRef = useRef<HTMLDivElement>(null);
+
+  const toggleMicRecording = async () => {
+    if (isRecordingMic) {
+      if (mediaRecorderRef.current && mediaRecorderRef.current.state !== 'inactive') {
+        mediaRecorderRef.current.stop();
+      }
+      setIsRecordingMic(false);
+      return;
+    }
+
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      const recorder = new MediaRecorder(stream);
+      audioChunksRef.current = [];
+      recorder.ondataavailable = (e) => {
+        if (e.data && e.data.size > 0) audioChunksRef.current.push(e.data);
+      };
+      recorder.onstop = () => {
+        stream.getTracks().forEach((t) => t.stop());
+        const mimeType = recorder.mimeType || 'audio/webm';
+        const blob = new Blob(audioChunksRef.current, { type: mimeType });
+        if (blob.size === 0) return;
+        setIsTranscribingMic(true);
+        const reader = new FileReader();
+        reader.onloadend = async () => {
+          try {
+            const res = await fetch('/api/ai/transcribe', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({
+                audioBase64: String(reader.result || ''),
+                mimeType,
+              }),
+            });
+            const data = await res.json();
+            if (res.ok && data.ok && data.transcript) {
+              setInput((prev) => (prev ? `${prev} ${data.transcript}` : data.transcript));
+              showToast('Voice transcribed with gemini-3.5-transcribe');
+            } else {
+              showToast(data.error || 'Voice transcription failed');
+            }
+          } catch {
+            showToast('Unable to transcribe audio');
+          } finally {
+            setIsTranscribingMic(false);
+          }
+        };
+        reader.readAsDataURL(blob);
+      };
+      mediaRecorderRef.current = recorder;
+      recorder.start();
+      setIsRecordingMic(true);
+    } catch {
+      showToast('Microphone permission is required for voice transcription.');
+    }
+  };
 
   const sendMessage = async (textToSend: string) => {
     const trimmed = textToSend.trim();
@@ -269,8 +332,32 @@ export const AssistantScreen: React.FC<AssistantScreenProps> = ({
             AC PayPilot Autonomous Copilot
           </h1>
           <p className="text-xs text-secondary mt-1">
-            Ask questions about your products, cart budget, orders, or invoices.
+            Multi-turn conversation history with role-specific system instructions &amp; voice transcription.
           </p>
+        </div>
+
+        {/* Model Selector (gemini-4-argon, gemini-3.8-flash, gemini-3.1-flash-lite) */}
+        <div className="flex flex-wrap items-center gap-1.5 bg-surface-container-low p-1 rounded-xl border border-surface-container-high">
+          {(
+            [
+              { id: 'gemini-4-argon', label: 'gemini-4-argon (Complex)' },
+              { id: 'gemini-3.8-flash', label: 'gemini-3.8-flash (General)' },
+              { id: 'gemini-3.1-flash-lite', label: 'gemini-3.1-flash-lite (Fast)' },
+            ] as const
+          ).map((m) => (
+            <button
+              key={m.id}
+              type="button"
+              onClick={() => setSelectedModel(m.id)}
+              className={`px-2.5 py-1.5 rounded-lg text-[11px] font-mono font-bold transition-colors cursor-pointer ${
+                selectedModel === m.id
+                  ? 'bg-primary text-on-primary'
+                  : 'text-on-surface-variant hover:text-on-surface'
+              }`}
+            >
+              {m.label}
+            </button>
+          ))}
         </div>
       </div>
 
@@ -415,11 +502,28 @@ export const AssistantScreen: React.FC<AssistantScreenProps> = ({
             }}
             className="p-4 border-t border-surface-container-high bg-surface-container-low flex items-center gap-2"
           >
+            <button
+              type="button"
+              onClick={() => void toggleMicRecording()}
+              title="Transcribe microphone audio with gemini-3.5-transcribe"
+              className={`px-3 py-2.5 rounded-xl border text-xs font-semibold flex items-center gap-1 cursor-pointer shrink-0 ${
+                isRecordingMic
+                  ? 'bg-rose-600 text-white border-rose-600'
+                  : 'bg-surface-container-lowest text-on-surface border-surface-container-high hover:bg-surface-container'
+              }`}
+            >
+              <span className="material-symbols-outlined text-[16px]">
+                {isRecordingMic ? 'stop' : 'mic'}
+              </span>
+              <span className="hidden sm:inline">
+                {isRecordingMic ? 'Stop' : isTranscribingMic ? 'Transcribing...' : 'Voice'}
+              </span>
+            </button>
             <input
               type="text"
               value={input}
               onChange={(e) => setInput(e.target.value)}
-              placeholder="Ask AC PayPilot Copilot about products, orders, invoices, or your cart..."
+              placeholder={`Ask ${selectedModel} about products, orders, invoices, or click Voice to transcribe...`}
               className="flex-1 px-3.5 py-2.5 rounded-xl border border-surface-container-high bg-surface-container-lowest text-xs text-on-surface focus:outline-none focus:border-primary"
             />
             <button

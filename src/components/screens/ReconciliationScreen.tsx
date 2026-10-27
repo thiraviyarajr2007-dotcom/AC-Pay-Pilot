@@ -168,7 +168,7 @@ export const ReconciliationScreen: React.FC<ReconciliationScreenProps> = ({
             Matched to Bank
           </span>
           <span className="text-2xl font-bold font-headline text-emerald-700 font-tabular-nums mt-1 block">
-            ₹{formatINR(292000)}
+            {formatINR(292000)}
           </span>
           <span className="text-[11px] text-emerald-700 mt-1 block">
             UTR verified
@@ -180,7 +180,7 @@ export const ReconciliationScreen: React.FC<ReconciliationScreenProps> = ({
             Pending Settlement
           </span>
           <span className="text-2xl font-bold font-headline text-primary font-tabular-nums mt-1 block">
-            ₹{formatINR(282000)}
+            {formatINR(282000)}
           </span>
           <span className="text-[11px] text-secondary mt-1 block">
             In delivery / awaiting payment
@@ -204,7 +204,7 @@ export const ReconciliationScreen: React.FC<ReconciliationScreenProps> = ({
             Net Bank Deposit
           </span>
           <span className="text-2xl font-bold font-headline text-on-surface font-tabular-nums mt-1 block">
-            {feesVerified ? `₹${formatINR(281797)}` : 'Estimated'}
+            {feesVerified ? formatINR(281797) : 'Estimated'}
           </span>
           <span className="text-[11px] text-secondary mt-1 block">
             After PayPal fee deduction
@@ -262,7 +262,7 @@ export const ReconciliationScreen: React.FC<ReconciliationScreenProps> = ({
                         {item.bankUtr}
                       </td>
                       <td className="py-3.5 px-3 text-right font-tabular-nums font-bold text-on-surface">
-                        ₹{formatINR(item.grossAmount)}
+                        {formatINR(item.grossAmount)}
                       </td>
                       <td className="py-3.5 px-3">
                         <PaymentStateBadge

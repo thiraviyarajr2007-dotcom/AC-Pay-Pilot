@@ -1,7 +1,1 @@
-{
-  "name": "AC PayPilot — Autonomous Commerce & Intelligent Escrow Platform",
-  "description": "AC PayPilot autonomous commerce platform featuring InvoiceIQ AI reconciliation, SmartCart algorithmic procurement, 3D/AR spatial discovery, real-time PayPal escrow settlement, and executive command telemetry.",
-  "requestFramePermissions": [],
-  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
-}
-
+{"name":"PayPilot AI — Autonomous Commerce \u0026 Intelligent Escrow Platform","description":"AC PayPilot autonomous commerce platform featuring InvoiceIQ AI reconciliation, SmartCart algorithmic procurement, 3D/AR spatial discovery, real-time PayPal escrow settlement, and executive command telemetry.","requestFramePermissions":["microphone","camera"],"majorCapabilities":["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]}

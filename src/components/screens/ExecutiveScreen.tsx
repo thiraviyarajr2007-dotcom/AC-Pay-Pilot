@@ -227,7 +227,7 @@ export const ExecutiveScreen: React.FC<ExecutiveScreenProps> = ({
             Gross Volume ({dateRange})
           </span>
           <span className="text-xl font-bold font-headline text-on-surface font-tabular-nums mt-1 block">
-            {loadingKpis ? '...' : `₹${formatINR(gmvMajor)}`}
+            {loadingKpis ? '...' : formatINR(gmvMajor)}
           </span>
           <span className="text-[11px] text-secondary mt-1 block">
             {serverKpis?.comparisonNote || 'No comparison data'}
@@ -242,7 +242,7 @@ export const ExecutiveScreen: React.FC<ExecutiveScreenProps> = ({
             Net Settled Payout
           </span>
           <span className="text-xl font-bold font-headline text-on-surface font-tabular-nums mt-1 block">
-            {providerFeesAvailable || feesVerified ? `₹${formatINR(netMajor)}` : 'Estimated'}
+            {providerFeesAvailable || feesVerified ? formatINR(netMajor) : 'Estimated'}
           </span>
           <span className="text-[11px] text-secondary mt-1 block">
             After PayPal fees
@@ -257,7 +257,7 @@ export const ExecutiveScreen: React.FC<ExecutiveScreenProps> = ({
             PayPal Fees
           </span>
           <span className="text-xl font-bold font-headline text-on-surface font-tabular-nums mt-1 block">
-            {providerFeesAvailable || feesVerified ? `₹${formatINR(feeMajor)}` : 'Not available'}
+            {providerFeesAvailable || feesVerified ? formatINR(feeMajor) : 'Not available'}
           </span>
           <span className="text-[11px] text-secondary mt-1 block">
             {providerFeesAvailable || feesVerified ? 'From settlement records' : 'Pending settlement'}
@@ -272,7 +272,7 @@ export const ExecutiveScreen: React.FC<ExecutiveScreenProps> = ({
             Active Escrow Hold
           </span>
           <span className="text-xl font-bold font-headline text-primary font-tabular-nums mt-1 block">
-            ₹{formatINR(escrowMajor)}
+            {formatINR(escrowMajor)}
           </span>
           <span className="text-[11px] text-secondary mt-1 block">
             Awaiting delivery release
@@ -430,7 +430,7 @@ export const ExecutiveScreen: React.FC<ExecutiveScreenProps> = ({
                       3D file upload, 3-column AI listing studio, order releases
                     </td>
                     <td className="py-3.5 px-3 font-tabular-nums font-semibold text-on-surface">
-                      ₹{formatINR(gmvMajor)} Sales
+                      {formatINR(gmvMajor)} Sales
                     </td>
                     <td className="py-3.5 pl-3 text-right">
                       <button
@@ -448,7 +448,7 @@ export const ExecutiveScreen: React.FC<ExecutiveScreenProps> = ({
                       InvoiceIQ GST compliance, PayPal fee audit, reconciliation
                     </td>
                     <td className="py-3.5 px-3 font-tabular-nums font-semibold text-on-surface">
-                      ₹{formatINR(taxMajor)} GST
+                      {formatINR(taxMajor)} GST
                     </td>
                     <td className="py-3.5 pl-3 text-right">
                       <button

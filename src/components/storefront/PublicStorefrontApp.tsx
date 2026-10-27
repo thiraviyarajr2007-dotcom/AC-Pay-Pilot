@@ -14,6 +14,7 @@ import {
 } from '../../services/storefrontService';
 import { getDefaultStorefrontConfig, SEED_STORE_PRODUCTS } from '../../data/templateDefaults';
 import { ARPreviewModal } from '../modals/ARPreviewModal';
+import { QRModal } from '../modals/QRModal';
 
 interface PublicStorefrontAppProps {
   slug?: string;
@@ -79,6 +80,7 @@ export function PublicStorefrontApp({
   const [couponFeedback, setCouponFeedback] = useState('');
   const [toastMessage, setToastMessage] = useState<string | null>(null);
   const [vrModalProduct, setVrModalProduct] = useState<StoreProduct | null>(null);
+  const [qrModalProduct, setQrModalProduct] = useState<StoreProduct | null>(null);
 
   // Customer Checkout Form
   const [custName, setCustName] = useState('');
@@ -115,6 +117,23 @@ export function PublicStorefrontApp({
     const unsub = subscribeStoreProducts(bizId, (p) => setProducts(p));
     return () => unsub();
   }, [bizId, previewProducts]);
+
+  // Dynamically sync browser tab title & favicon to the seller's chosen brand name & logo
+  useEffect(() => {
+    if (isEmbeddedPreview || typeof document === 'undefined') return;
+    if (business?.name) {
+      document.title = business.name;
+    }
+    if (business?.logoUrl) {
+      let iconLink = document.querySelector("link[rel~='icon']") as HTMLLinkElement | null;
+      if (!iconLink) {
+        iconLink = document.createElement('link');
+        iconLink.rel = 'icon';
+        document.head.appendChild(iconLink);
+      }
+      iconLink.href = business.logoUrl;
+    }
+  }, [business?.name, business?.logoUrl, isEmbeddedPreview]);
 
   const showToast = (msg: string) => {
     setToastMessage(msg);
@@ -299,7 +318,7 @@ export function PublicStorefrontApp({
         }}
       >
         <div className="max-w-7xl mx-auto flex items-center justify-between gap-4">
-          {/* Brand Logo & Name */}
+          {/* Brand Logo & Name (Only seller's chosen logo and brand name) */}
           <div className="flex items-center gap-3">
             {business.logoUrl && (
               <img
@@ -308,12 +327,12 @@ export function PublicStorefrontApp({
                 className="w-10 h-10 object-cover rounded-xl border border-black/10 shadow-sm"
               />
             )}
-            <div>
-              <h1 className="text-base lg:text-lg font-black tracking-tight leading-none" style={{ color: theme.textColor }}>
-                {business.name}
-              </h1>
-              <p className="text-[11px] opacity-70 mt-0.5 font-medium">{business.tagline || business.category}</p>
-            </div>
+            <h1
+              className="text-base lg:text-lg font-black tracking-tight leading-none"
+              style={{ color: theme.textColor }}
+            >
+              {business.name}
+            </h1>
           </div>
 
           {/* Search Bar (Desktop) */}
@@ -434,14 +453,8 @@ export function PublicStorefrontApp({
                           href={config.hero.ctaLink || '#products'}
                           className={`px-7 py-3 text-xs font-mono font-bold tracking-wider text-black bg-cyan-400 hover:bg-cyan-300 shadow-cyan-500/30 shadow-lg transition-all ${radiusClass}`}
                         >
-                          {config.hero.ctaText || 'INSPECT HARDWARE'}
+                          {config.hero.ctaText || 'Explore Catalog'}
                         </a>
-                        <div className="px-4 py-2 rounded-xl bg-slate-900/80 border border-slate-700 text-xs font-mono text-slate-300 flex items-center gap-2">
-                          <span className="material-symbols-outlined text-cyan-400 text-[18px]">
-                            view_in_ar
-                          </span>
-                          <span>3D / WebGL Enabled</span>
-                        </div>
                       </div>
                     </div>
                     {/* Background glow & subtle overlay */}
@@ -543,14 +556,9 @@ export function PublicStorefrontApp({
             return (
               <section id="products" key="featured" className="max-w-7xl mx-auto px-4 lg:px-8">
                 <div className="flex items-center justify-between mb-6">
-                  <div>
-                    <h3 className="text-xl lg:text-2xl font-black tracking-tight">
-                      {selectedCategory === 'All' ? 'Catalog Showcase' : selectedCategory}
-                    </h3>
-                    <p className="text-xs opacity-70 mt-0.5">
-                      Showing {filteredProducts.length} items with escrow checkout
-                    </p>
-                  </div>
+                  <h3 className="text-xl lg:text-2xl font-black tracking-tight">
+                    {selectedCategory === 'All' ? 'Featured Products' : selectedCategory}
+                  </h3>
                 </div>
 
                 <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-6">
@@ -634,20 +642,15 @@ export function PublicStorefrontApp({
 
                         {/* Price & Add to Cart Action */}
                         <div className="pt-2 border-t border-black/5 flex items-center justify-between gap-2">
-                          <div>
-                            <div className="flex items-baseline gap-1.5">
-                              <span className="text-base font-black">
-                                {currencySymbol}{prod.price.toLocaleString()}
-                              </span>
-                              {prod.mrp > prod.price && (
-                                <span className="text-xs line-through opacity-50">
-                                  {currencySymbol}{prod.mrp.toLocaleString()}
-                                </span>
-                              )}
-                            </div>
-                            <span className="text-[10px] font-medium text-emerald-600">
-                              Free Escrow Protection
+                          <div className="flex items-baseline gap-1.5">
+                            <span className="text-base font-black">
+                              {currencySymbol}{prod.price.toLocaleString()}
                             </span>
+                            {prod.mrp > prod.price && (
+                              <span className="text-xs line-through opacity-50">
+                                {currencySymbol}{prod.mrp.toLocaleString()}
+                              </span>
+                            )}
                           </div>
 
                           <button
@@ -840,7 +843,6 @@ export function PublicStorefrontApp({
 
         <div className="max-w-7xl mx-auto pt-8 mt-8 border-t border-black/5 flex flex-col sm:flex-row items-center justify-between gap-4 opacity-60 text-[11px]">
           <span>{config.footer?.copyright || `© ${new Date().getFullYear()} ${business.name}. All rights reserved.`}</span>
-          <span>Powered by AC PayPilot Autonomous Commerce</span>
         </div>
       </footer>
 
@@ -945,18 +947,29 @@ export function PublicStorefrontApp({
               </div>
 
               <div className="pt-4 border-t border-black/5 space-y-2">
-                <button
-                  onClick={() => {
-                    addToCart(selectedProduct, 1);
-                    setSelectedProduct(null);
-                    setIsCartOpen(true);
-                  }}
-                  className={`w-full py-3 text-xs font-bold text-white shadow-md transition-opacity hover:opacity-90 flex items-center justify-center gap-2 ${radiusClass}`}
-                  style={{ backgroundColor: theme.primaryColor }}
-                >
-                  <span className="material-symbols-outlined text-[18px]">shopping_bag</span>
-                  <span>Add to Cart & Checkout</span>
-                </button>
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                  <button
+                    type="button"
+                    onClick={() => setQrModalProduct(selectedProduct)}
+                    data-testid="storefront-quick-scan-to-ar-btn"
+                    className={`py-3 px-3 text-xs font-bold border border-black/15 bg-black/5 hover:bg-black/10 transition-colors flex items-center justify-center gap-1.5 cursor-pointer ${radiusClass}`}
+                  >
+                    <span className="material-symbols-outlined text-[16px]">qr_code_scanner</span>
+                    <span>Quick Scan to AR</span>
+                  </button>
+                  <button
+                    onClick={() => {
+                      addToCart(selectedProduct, 1);
+                      setSelectedProduct(null);
+                      setIsCartOpen(true);
+                    }}
+                    className={`py-3 px-3 text-xs font-bold text-white shadow-md transition-opacity hover:opacity-90 flex items-center justify-center gap-2 ${radiusClass}`}
+                    style={{ backgroundColor: theme.primaryColor }}
+                  >
+                    <span className="material-symbols-outlined text-[18px]">shopping_bag</span>
+                    <span>Add to Cart &amp; Checkout</span>
+                  </button>
+                </div>
                 <p className="text-center text-[10px] opacity-60">
                   ⚡ 100% Escrow Protection: Funds held until delivery confirmation.
                 </p>
@@ -1365,6 +1378,18 @@ export function PublicStorefrontApp({
           }}
         />
       )}
+
+      {/* Quick Scan to AR QR Code Modal */}
+      <QRModal
+        isOpen={Boolean(qrModalProduct)}
+        onClose={() => setQrModalProduct(null)}
+        title="Quick Scan to AR — Mobile Spatial View"
+        subtitle={
+          qrModalProduct
+            ? `Scan with your phone camera to launch ${qrModalProduct.name} in true-scale spatial AR view.`
+            : undefined
+        }
+      />
     </div>
   );
 }

@@ -351,6 +351,18 @@
       "schema": { "$ref": "#/entities/StorefrontOrder" },
       "description": "Orders received by this merchant from public storefront"
     },
+    "/businesses/{bizId}/payments/{paymentId}": {
+      "schema": { "$ref": "#/entities/Payment" },
+      "description": "Payment records associated with this merchant"
+    },
+    "/businesses/{bizId}/escrowEvents/{eventId}": {
+      "schema": { "$ref": "#/entities/EscrowEvent" },
+      "description": "Escrow event transition records for this merchant"
+    },
+    "/_health/{docId}": {
+      "schema": { "$ref": "#/entities/Product" },
+      "description": "Ephemeral health check ping documents"
+    },
     "/domains/{domain}": {
       "schema": { "$ref": "#/entities/DomainRecord" },
       "description": "Subdomain and custom domain DNS mapping"

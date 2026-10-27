@@ -82,7 +82,7 @@ export const ListingCatalogSidebar: React.FC<ListingCatalogSidebarProps> = ({
                     </span>
                   </div>
                   <span className="text-xs font-bold font-tabular-nums text-on-surface shrink-0">
-                    ₹{formatINR(item.price)}
+                    {formatINR(item.price)}
                   </span>
                 </div>
 

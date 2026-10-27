@@ -8,6 +8,7 @@ export type DataSource = 'demo' | 'live';
 export type AppRoute =
   | '/'
   | '/seller/dashboard'
+  | '/seller/command-center'
   | '/seller/website'
   | '/website'
   | '/seller/products'
@@ -35,6 +36,7 @@ export type AppRoute =
 
 export type ScreenId =
   | 'seller-dashboard'
+  | 'seller-command-center'
   | 'seller-website'
   | 'seller-products'
   | 'seller-orders'
@@ -174,3 +176,96 @@ export interface Order {
   carrier: string;
   items: OrderItem[];
 }
+
+export type EscrowStage = 'held' | 'shipped' | 'released' | 'refunded' | 'disputed';
+
+export interface EscrowEvent {
+  id: string;
+  orderId: string;
+  paypalOrderId: string;
+  stage: EscrowStage;
+  previousStage?: EscrowStage | null;
+  amountInr: number;
+  escrowFeeInr: number;
+  actor: string;
+  reason: string;
+  timestamp: string;
+  region: string;
+  productSku: string;
+  buyerEmail: string;
+  isAnomaly?: boolean;
+}
+
+export interface CommandCenterProduct {
+  id: string;
+  sku: string;
+  name: string;
+  category: string;
+  unitPriceInr: number;
+  gstPercent: number;
+  stock: number;
+  unitsSold60d: number;
+  revenue60dInr: number;
+  refundRatePct: number;
+}
+
+export interface CommandCenterCustomer {
+  id: string;
+  name: string;
+  email: string;
+  segment: 'Enterprise B2B' | 'SMB Studio' | 'Prosumer Creator' | 'Retail Direct';
+  region: string;
+  city: string;
+  gstin?: string;
+  lifetimeOrders: number;
+  lifetimeValueInr: number;
+  disputeCount: number;
+  riskLevel: 'Low' | 'Medium' | 'High' | 'Critical';
+}
+
+export interface CommandCenterPayout {
+  id: string;
+  payoutRef: string;
+  scheduledDate: string;
+  settledDate?: string | null;
+  status: 'Scheduled' | 'In Clearing' | 'Settled' | 'On Hold';
+  grossReleasedInr: number;
+  escrowFeesInr: number;
+  gstOnFeesInr: number;
+  netPayoutInr: number;
+  ordersCount: number;
+  bankAccount: string;
+}
+
+export interface CommandCenterOrder {
+  id: string;
+  orderNumber: string;
+  paypalOrderId: string;
+  productId: string;
+  productSku: string;
+  productName: string;
+  category: string;
+  customerId: string;
+  customerName: string;
+  customerEmail: string;
+  customerSegment: 'Enterprise B2B' | 'SMB Studio' | 'Prosumer Creator' | 'Retail Direct';
+  region: string;
+  city: string;
+  quantity: number;
+  amountInr: number;
+  escrowFeeInr: number;
+  gstAmountInr: number;
+  netRevenueAfterFeesInr: number;
+  escrowStage: EscrowStage;
+  paymentStatus: 'Authorized' | 'Captured' | 'Refunded' | 'Failed' | 'Disputed';
+  createdAt: string;
+  updatedAt: string;
+  expectedPayoutDate: string;
+  ageHours: number;
+  releaseTimeHours: number;
+  riskScore: number;
+  riskSeverity: 'Normal' | 'Medium' | 'High' | 'Critical';
+  riskReason: string;
+  anomalyTag: 'none' | 'refund_spike' | 'failed_payment_burst' | 'repeat_dispute_buyer';
+}
+
