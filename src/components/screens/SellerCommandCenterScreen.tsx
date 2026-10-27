@@ -734,29 +734,29 @@ const KpiSparklineTilesWidgetComp: React.FC<AgWidgetParams<any>> = ({
         return (
           <div
             key={tile.id}
-            className={`p-3.5 rounded-xl border flex flex-col justify-between ${
+            className={`p-3 rounded-xl border flex flex-col justify-between min-w-[140px] overflow-hidden ${
               isDark
                 ? 'bg-slate-900/95 border-slate-800 text-slate-100'
                 : 'bg-white border-slate-200/90 text-slate-900'
             }`}
           >
-            <div className="flex items-center justify-between gap-1">
-              <span className="text-[11px] font-bold opacity-75">{tile.label}</span>
-              <span className={`px-1.5 py-0.5 rounded text-[9px] font-bold border ${pillClass}`}>
+            <div className="flex items-center justify-between gap-1 min-w-0">
+              <span className="text-[11px] font-bold opacity-75 truncate">{tile.label}</span>
+              <span className={`px-1.5 py-0.5 rounded text-[9px] font-bold border shrink-0 ${pillClass}`}>
                 {tile.badge}
               </span>
             </div>
 
-            <div className="flex items-end justify-between gap-2 my-1.5">
-              <div>
-                <div className="text-xl font-black tracking-tight">{tile.value}</div>
-                <div className="text-[10px] opacity-70 mt-0.5">{tile.subValue}</div>
+            <div className="flex items-end justify-between gap-2 my-1.5 min-w-0">
+              <div className="min-w-0">
+                <div className="text-lg sm:text-xl font-black tracking-tight truncate">{tile.value}</div>
+                <div className="text-[10px] opacity-70 mt-0.5 truncate">{tile.subValue}</div>
               </div>
               <svg
-                width="92"
-                height="26"
+                width="72"
+                height="24"
                 viewBox="0 0 92 26"
-                className="shrink-0 overflow-visible"
+                className="shrink-0 max-w-[72px]"
                 aria-hidden="true"
               >
                 <polyline
@@ -1308,7 +1308,7 @@ export const SellerCommandCenterScreen: React.FC<SellerCommandCenterScreenProps>
 
   // Saved Views ("Overview", "Escrow Ops", "Risk") & Studio Mode ("edit" | "view")
   const [activeView, setActiveView] = useState<SavedViewPresetId>('overview');
-  const [studioMode, setStudioMode] = useState<AgStudioMode>('edit');
+  const [studioMode, setStudioMode] = useState<AgStudioMode>('view');
   const [reportState, setReportState] = useState<AgReportState>(() =>
     buildReportStateForPreset('overview')
   );
@@ -1912,23 +1912,25 @@ export const SellerCommandCenterScreen: React.FC<SellerCommandCenterScreenProps>
       <CommandCenterWidgetContext.Provider value={widgetContextValue}>
         <AgStudioProvider licenseKey={cleanAgStudioLicense || undefined}>
           <div
-            className={`w-full min-h-[760px] rounded-2xl border overflow-hidden shadow-xs ${
+            className={`w-full min-h-[760px] rounded-2xl border overflow-x-auto min-w-0 shadow-xs ${
               isDark ? 'bg-slate-900 border-slate-800' : 'bg-white border-slate-200'
             }`}
           >
-            <AgStudio
-              mode={studioMode}
-              theme={customAgTheme}
-              data={agDataSources}
-              widgets={COMMAND_CENTER_WIDGETS}
-              initialState={reportState}
-              onApiReady={(event: AgStudioApiReadyEvent) => {
-                studioApiRef.current = event.api;
-              }}
-              onStateUpdated={(event: AgStudioStateUpdatedEvent) => {
-                setReportState(event.state);
-              }}
-            />
+            <div className="w-full min-w-[840px] min-h-[760px]">
+              <AgStudio
+                mode={studioMode}
+                theme={customAgTheme}
+                data={agDataSources}
+                widgets={COMMAND_CENTER_WIDGETS}
+                initialState={reportState}
+                onApiReady={(event: AgStudioApiReadyEvent) => {
+                  studioApiRef.current = event.api;
+                }}
+                onStateUpdated={(event: AgStudioStateUpdatedEvent) => {
+                  setReportState(event.state);
+                }}
+              />
+            </div>
           </div>
         </AgStudioProvider>
       </CommandCenterWidgetContext.Provider>

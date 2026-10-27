@@ -32,6 +32,7 @@ import { StorefrontBuilderScreen } from './components/screens/StorefrontBuilderS
 import { CustomersScreen } from './components/screens/CustomersScreen';
 import { SellerCommandCenterScreen } from './components/screens/SellerCommandCenterScreen';
 import { CreativeStudioScreen } from './components/screens/CreativeStudioScreen';
+import { LoginScreen } from './components/screens/LoginScreen';
 const PublicStorefrontApp = React.lazy(() =>
   import('./components/storefront/PublicStorefrontApp').then((m) => ({
     default: m.PublicStorefrontApp,
@@ -50,6 +51,8 @@ import { FeeAuditModal } from './components/modals/FeeAuditModal';
 import { PayPalCheckoutModal } from './components/modals/PayPalCheckoutModal';
 import { QRModal } from './components/modals/QRModal';
 import { ARPreviewModal } from './components/modals/ARPreviewModal';
+import { AuthModal } from './components/modals/AuthModal';
+import { ProfileOnboardingModal } from './components/modals/ProfileOnboardingModal';
 import { ScreenId, UserRole } from './types';
 import { CanonicalPaymentState } from './components/ui/HonestTrustComponents';
 import {
@@ -396,7 +399,15 @@ export default function App() {
   const location = useLocation();
   const navigate = useNavigate();
   const [searchParams, setSearchParams] = useSearchParams();
-  const { setRole, dataSource, activeBizId } = useRole();
+  const {
+    setRole,
+    dataSource,
+    activeBizId,
+    isAuthModalOpen,
+    closeAuthModal,
+    isProfileOnboardingPending,
+    dismissProfileOnboarding,
+  } = useRole();
 
   const [searchQuery, setSearchQuery] = useState('');
   const [customCatalog, setCustomCatalog] = useState<Record<string, any>>(CATALOG_BY_SKU);
@@ -632,6 +643,8 @@ export default function App() {
             <ScreenDataSourceBanner />
             <Routes>
             <Route path="/" element={<RoleHomeRedirect />} />
+            <Route path="/login" element={<LoginScreen />} />
+            <Route path="/auth" element={<LoginScreen />} />
 
             <Route
               path="/executive"
@@ -678,7 +691,7 @@ export default function App() {
               path="/seller/website"
               element={
                 <RoleRouteGuard allowedRoles={['seller', 'business_head']}>
-                  <StorefrontBuilderScreen showToast={showToast} />
+                  <StorefrontBuilderScreen bizId={activeBizId} showToast={showToast} />
                 </RoleRouteGuard>
               }
             />
@@ -975,6 +988,10 @@ export default function App() {
             <Route path="/checkout/success" element={<CheckoutResultScreen status="success" />} />
             <Route path="/checkout/cancel" element={<CheckoutResultScreen status="cancel" />} />
 
+            {/* Standalone Authentication & Onboarding Routes */}
+            <Route path="/login" element={<LoginScreen />} />
+            <Route path="/auth" element={<LoginScreen />} />
+
             {/* 404 Catch-all Route */}
             <Route path="*" element={<NotFoundScreen />} />
           </Routes>
@@ -1052,6 +1069,20 @@ export default function App() {
           showToast(`Storefront auto-generated for ${newBiz.name}!`);
           navigate('/seller/website');
         }}
+      />
+
+      {/* Universal Multi-Provider Authentication Modal */}
+      <AuthModal
+        isOpen={isAuthModalOpen}
+        onClose={closeAuthModal}
+        showToast={showToast}
+      />
+
+      {/* Mandatory First-Time Profile Onboarding Modal */}
+      <ProfileOnboardingModal
+        isOpen={isProfileOnboardingPending}
+        onClose={dismissProfileOnboarding}
+        showToast={showToast}
       />
 
       {/* Global Toast Notification */}

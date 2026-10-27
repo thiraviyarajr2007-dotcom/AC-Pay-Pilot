@@ -209,6 +209,15 @@ export function getDefaultStorefrontConfig(
       enabled: true,
       phoneNumber: '+919876543210',
       defaultMessage: `Hi ${businessName}, I would like to inquire about your products.`,
+      botEnabled: true,
+      botMode: 'ai_recommender',
+      welcomeMessage: `Welcome to ${businessName}! 🚀 I am your WhatsApp Commerce Bot. How may I assist you today?`,
+      quickActionChips: [
+        '🔍 Best Deals & Catalog',
+        '📦 Track Escrow Order',
+        '🛡️ Buyer Protection Policy',
+        '💬 Chat with Specialist',
+      ],
     },
     seo: {
       title: `${businessName} — Official Store & Escrow Protected Checkout`,

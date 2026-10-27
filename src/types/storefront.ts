@@ -110,6 +110,10 @@ export interface WhatsAppConfig {
   enabled: boolean;
   phoneNumber: string;
   defaultMessage: string;
+  botEnabled?: boolean;
+  botMode?: 'ai_recommender' | 'escrow_tracking' | 'support_b2b';
+  welcomeMessage?: string;
+  quickActionChips?: string[];
 }
 
 export interface SeoConfig {

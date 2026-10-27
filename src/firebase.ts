@@ -2,7 +2,10 @@ import { initializeApp } from 'firebase/app';
 import {
   getAuth,
   GoogleAuthProvider,
+  FacebookAuthProvider,
   signInWithPopup,
+  signInWithEmailAndPassword,
+  createUserWithEmailAndPassword,
   signOut as firebaseSignOut,
   onAuthStateChanged,
   User as FirebaseUser,
@@ -22,6 +25,9 @@ const app = initializeApp(firebaseConfig);
 export const auth = getAuth(app);
 export const db = getFirestore(app, firebaseConfig.firestoreDatabaseId);
 export const googleProvider = new GoogleAuthProvider();
+export const facebookProvider = new FacebookAuthProvider();
+facebookProvider.addScope('email');
+facebookProvider.addScope('public_profile');
 
 export enum OperationType {
   CREATE = 'create',
@@ -69,7 +75,13 @@ export interface FirestoreUserProfile {
   email: string;
   displayName: string;
   role: AppUserRole;
+  gender?: 'Male' | 'Female' | 'Non-binary' | 'Prefer not to say';
+  age?: number;
+  phone?: string;
+  countryCode?: string;
+  onboardingCompleted?: boolean;
   createdAt: string;
+  updatedAt?: string;
 }
 
 export async function ensureFirestoreUserProfile(
@@ -89,6 +101,7 @@ export async function ensureFirestoreUserProfile(
       email: fbUser.email || 'user@paypilot.in',
       displayName: fbUser.displayName || fbUser.email?.split('@')[0] || 'AC PayPilot User',
       role: defaultRole,
+      onboardingCompleted: false,
       createdAt: new Date().toISOString(),
     };
     await setDoc(userRef, newProfile);
@@ -100,8 +113,50 @@ export async function ensureFirestoreUserProfile(
       email: fbUser.email || 'user@paypilot.in',
       displayName: fbUser.displayName || 'AC PayPilot User',
       role: defaultRole,
+      onboardingCompleted: false,
       createdAt: new Date().toISOString(),
     };
+  }
+}
+
+export async function updateFirestoreUserProfile(
+  uid: string,
+  profileData: Partial<FirestoreUserProfile>
+): Promise<boolean> {
+  const userRef = doc(db, 'users', uid);
+  try {
+    const snap = await getDoc(userRef);
+    const payload = {
+      ...profileData,
+      updatedAt: new Date().toISOString(),
+    };
+    if (snap.exists()) {
+      await setDoc(userRef, { ...(snap.data() as FirestoreUserProfile), ...payload });
+    } else {
+      await setDoc(userRef, {
+        uid,
+        email: auth.currentUser?.email || '',
+        displayName: auth.currentUser?.displayName || 'User',
+        role: 'customer',
+        createdAt: new Date().toISOString(),
+        ...payload,
+      });
+    }
+    // Backup to local storage for instant retrieval
+    try {
+      localStorage.setItem(`ac_user_profile_${uid}`, JSON.stringify(payload));
+    } catch {
+      // Ignore
+    }
+    return true;
+  } catch (err) {
+    handleFirestoreError(err, OperationType.UPDATE, `users/${uid}`);
+    try {
+      localStorage.setItem(`ac_user_profile_${uid}`, JSON.stringify(profileData));
+      return true;
+    } catch {
+      return false;
+    }
   }
 }
 
@@ -134,6 +189,18 @@ export async function updateFirestoreUserRole(
 
 export async function signInWithGooglePopup() {
   return signInWithPopup(auth, googleProvider);
+}
+
+export async function signInWithFacebookPopup() {
+  return signInWithPopup(auth, facebookProvider);
+}
+
+export async function signInWithEmailPassword(email: string, pass: string) {
+  return signInWithEmailAndPassword(auth, email, pass);
+}
+
+export async function signUpWithEmailPassword(email: string, pass: string) {
+  return createUserWithEmailAndPassword(auth, email, pass);
 }
 
 export async function signOutFirebase() {

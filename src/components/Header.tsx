@@ -59,11 +59,13 @@ export const Header: React.FC<HeaderProps> = ({
     isDemoTourActive,
     firebaseUser,
     signInWithGoogle,
+    openAuthModal,
     signOutUser,
   } = useRole();
 
   const [showNotifications, setShowNotifications] = useState(false);
   const [showSearchDropdown, setShowSearchDropdown] = useState(false);
+  const [showSearchModal, setShowSearchModal] = useState(false);
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
   const [sellerBusiness, setSellerBusiness] = useState<BusinessProfile>(INITIAL_DEFAULT_BUSINESS);
 
@@ -111,6 +113,7 @@ export const Header: React.FC<HeaderProps> = ({
 
   const handleSelectResult = (route: string) => {
     setShowSearchDropdown(false);
+    setShowSearchModal(false);
     setMobileMenuOpen(false);
     navigate(route);
   };
@@ -150,9 +153,9 @@ export const Header: React.FC<HeaderProps> = ({
   return (
     <header className="sticky top-0 z-40 w-full bg-surface-container-lowest/95 backdrop-blur-xl border-b border-surface-container-high/60 shadow-2xs flex flex-col">
       {/* Main Top Row */}
-      <div className="h-16 w-full px-3 sm:px-4 lg:px-8 flex items-center justify-between gap-2">
+      <div className="h-16 w-full px-3 sm:px-4 lg:px-6 flex items-center justify-between gap-2">
         {/* Left: Mobile Drawer Button + Brand Logo + Global Search */}
-        <div className="flex items-center gap-2 sm:gap-4 min-w-0">
+        <div className="flex items-center gap-2 sm:gap-3 shrink-0">
           <button
             type="button"
             onClick={() => setMobileMenuOpen((prev) => !prev)}
@@ -209,8 +212,18 @@ export const Header: React.FC<HeaderProps> = ({
             )}
           </button>
 
-          {/* Global Search Bar with Cross-Screen Results Dropdown */}
-          <div className="hidden md:flex items-center relative w-52 xl:w-72">
+          {/* Quick Search Button for < 2xl screens */}
+          <button
+            type="button"
+            onClick={() => setShowSearchModal(true)}
+            title="Search workspace (SKUs, invoices, orders)"
+            className="2xl:hidden w-8 h-8 rounded-lg bg-surface-container-low hover:bg-surface-container text-on-surface-variant flex items-center justify-center shrink-0 transition-colors cursor-pointer"
+          >
+            <span className="material-symbols-outlined text-[18px]">search</span>
+          </button>
+
+          {/* Global Search Bar with Cross-Screen Results Dropdown for 2xl screens */}
+          <div className="hidden 2xl:flex items-center relative w-56 shrink-0">
             <span className="material-symbols-outlined text-outline text-[18px] absolute left-3 pointer-events-none">
               search
             </span>
@@ -365,14 +378,14 @@ export const Header: React.FC<HeaderProps> = ({
         </div>
 
         {/* Center: Live / Demo Account Switcher & Persona Bar */}
-        <div className="hidden lg:flex items-center gap-2">
+        <div className="hidden lg:flex items-center gap-2 shrink-0">
           {/* Mode Switcher Pill */}
-          <div className="flex items-center bg-surface-container-low p-1 rounded-xl border border-surface-container-high/60 text-xs">
+          <div className="flex items-center bg-surface-container-low p-1 rounded-xl border border-surface-container-high/60 text-xs shrink-0">
             <button
               type="button"
               onClick={() => {
                 if (!firebaseUser) {
-                  signInWithGoogle();
+                  navigate('/login?mode=signin&role=seller');
                 } else {
                   setDataSource('live');
                 }
@@ -402,46 +415,76 @@ export const Header: React.FC<HeaderProps> = ({
             </button>
           </div>
 
-          {/* If in Demo mode: show the 4 persona buttons so users can choose demo account before login */}
+          {/* If in Demo mode: show persona switcher */}
           {dataSource === 'demo' && (
-            <div className="flex items-center gap-1 bg-surface-container-low/70 p-1 rounded-xl border border-surface-container-high/40">
-              <span className="text-[10px] uppercase font-bold text-on-surface-variant px-1.5">
+            <div className="flex items-center gap-1 bg-surface-container-low/70 p-1 rounded-xl border border-surface-container-high/40 shrink-0">
+              <span className="text-[10px] uppercase font-bold text-on-surface-variant px-1.5 hidden 2xl:inline">
                 Persona:
               </span>
-              {rolesOrder.map((rKey) => {
-                const rInfo = ROLE_PROFILES[rKey];
-                const active = role === rKey;
-                return (
-                  <button
-                    key={rKey}
-                    type="button"
-                    onClick={() => setRole(rKey, true)}
-                    data-testid={`role-switch-${rKey}`}
-                    className={`flex items-center gap-1 px-2 py-1 rounded-lg text-[11px] font-semibold transition-all cursor-pointer ${
-                      active
-                        ? `${rInfo.accentChipClass} font-bold shadow-2xs`
-                        : 'text-on-surface-variant hover:text-on-surface'
-                    }`}
-                  >
-                    <span className="material-symbols-outlined text-[13px]">{rInfo.roleIcon}</span>
-                    <span>{rInfo.shortLabel}</span>
-                  </button>
-                );
-              })}
+              {/* Full persona pills on 2xl+ */}
+              <div className="hidden 2xl:flex items-center gap-1">
+                {rolesOrder.map((rKey) => {
+                  const rInfo = ROLE_PROFILES[rKey];
+                  const active = role === rKey;
+                  return (
+                    <button
+                      key={rKey}
+                      type="button"
+                      onClick={() => setRole(rKey, true)}
+                      data-testid={`role-switch-${rKey}`}
+                      className={`flex items-center gap-1 px-2 py-1 rounded-lg text-[11px] font-semibold transition-all cursor-pointer ${
+                        active
+                          ? `${rInfo.accentChipClass} font-bold shadow-2xs`
+                          : 'text-on-surface-variant hover:text-on-surface'
+                      }`}
+                    >
+                      <span className="material-symbols-outlined text-[13px]">{rInfo.roleIcon}</span>
+                      <span>{rInfo.shortLabel}</span>
+                    </button>
+                  );
+                })}
+              </div>
+              {/* Compact persona pills on lg to 2xl */}
+              <div className="flex 2xl:hidden items-center gap-1">
+                {rolesOrder.map((rKey) => {
+                  const rInfo = ROLE_PROFILES[rKey];
+                  const active = role === rKey;
+                  return (
+                    <button
+                      key={rKey}
+                      type="button"
+                      onClick={() => setRole(rKey, true)}
+                      title={rInfo.label}
+                      className={`flex items-center gap-1 px-1.5 py-1 rounded-lg text-[11px] font-semibold transition-all cursor-pointer ${
+                        active
+                          ? `${rInfo.accentChipClass} font-bold shadow-2xs`
+                          : 'text-on-surface-variant hover:text-on-surface'
+                      }`}
+                    >
+                      <span className="material-symbols-outlined text-[13px]">{rInfo.roleIcon}</span>
+                      <span className="hidden xl:inline text-[10px]">{rInfo.shortLabel}</span>
+                    </button>
+                  );
+                })}
+              </div>
             </div>
           )}
+        </div>
 
-          {/* User Auth Action */}
+        {/* Right Actions */}
+        <div className="flex items-center gap-1.5 sm:gap-2 shrink-0">
+          {/* User Sign In / Profile Action */}
           {firebaseUser ? (
-            <div className="flex items-center gap-1.5 bg-surface-container-low px-2 py-1 rounded-xl border border-surface-container-high/60">
-              <span className="text-[11px] font-bold text-on-surface">
+            <div className="flex items-center gap-1.5 bg-surface-container-low px-2 py-1 rounded-xl border border-surface-container-high/60 shrink-0">
+              <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse shrink-0" />
+              <span className="text-[11px] font-bold text-on-surface max-w-[80px] sm:max-w-[120px] truncate">
                 {firebaseUser.displayName || firebaseUser.email?.split('@')[0]}
               </span>
               <button
                 type="button"
                 onClick={() => signOutUser()}
                 title="Sign out of your live account"
-                className="px-2 py-0.5 rounded-md bg-surface hover:bg-surface-container text-on-surface-variant border border-outline-variant/40 text-[10px] font-semibold transition-colors cursor-pointer"
+                className="px-2 py-0.5 rounded-md bg-surface hover:bg-surface-container text-on-surface-variant border border-outline-variant/40 text-[10px] font-semibold transition-colors cursor-pointer shrink-0"
               >
                 Sign out
               </button>
@@ -449,23 +492,21 @@ export const Header: React.FC<HeaderProps> = ({
           ) : (
             <button
               type="button"
-              onClick={() => signInWithGoogle()}
-              className="px-3 py-1.5 rounded-xl bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-700 hover:to-indigo-700 text-white border border-blue-500/30 text-xs font-bold flex items-center gap-1.5 shadow-xs transition-all cursor-pointer"
+              onClick={() => navigate('/login')}
+              title="Go to dedicated Sign In / Registration page"
+              className="px-3.5 py-1.5 rounded-xl bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-700 hover:to-indigo-700 text-white font-label-md text-xs font-bold flex items-center gap-1.5 shadow-xs transition-all shrink-0 cursor-pointer"
             >
               <span className="material-symbols-outlined text-[15px]">login</span>
-              <span>Sign In with Google</span>
+              <span className="hidden sm:inline">Sign In</span>
             </button>
           )}
-        </div>
 
-        {/* Right Actions */}
-        <div className="flex items-center gap-1.5 sm:gap-2.5 shrink-0">
           {/* AI Copilot Trigger */}
           <button
             type="button"
             onClick={() => onOpenCopilot()}
             title="Ask AI Copilot"
-            className="flex items-center gap-1.5 px-2.5 sm:px-3 py-1.5 rounded-lg bg-gradient-to-r from-primary to-tertiary text-on-primary font-label-md text-xs font-semibold shadow-sm hover:opacity-95 transition-all active:scale-95 cursor-pointer"
+            className="flex items-center gap-1.5 px-2.5 sm:px-3 py-1.5 rounded-lg bg-gradient-to-r from-primary to-tertiary text-on-primary font-label-md text-xs font-semibold shadow-sm hover:opacity-95 transition-all active:scale-95 cursor-pointer shrink-0"
           >
             <span className="material-symbols-outlined text-[16px]">auto_awesome</span>
             <span className="hidden xl:inline">AI Copilot</span>
@@ -477,7 +518,7 @@ export const Header: React.FC<HeaderProps> = ({
               type="button"
               onClick={onOpenOnboarding}
               title="Launch Store Setup & AI Onboarding Wizard"
-              className="hidden lg:inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg border border-primary/20 bg-primary/10 text-primary font-label-md text-xs font-bold hover:bg-primary/20 transition-all cursor-pointer"
+              className="hidden 2xl:inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg border border-primary/20 bg-primary/10 text-primary font-label-md text-xs font-bold hover:bg-primary/20 transition-all cursor-pointer shrink-0"
             >
               <span className="material-symbols-outlined text-[16px]">rocket_launch</span>
               <span>Setup Store</span>
@@ -490,16 +531,16 @@ export const Header: React.FC<HeaderProps> = ({
             target="_blank"
             rel="noopener noreferrer"
             title="Open customer storefront in new window"
-            className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-emerald-500/30 bg-emerald-500/10 text-emerald-800 hover:bg-emerald-500/20 font-label-md text-xs font-bold transition-all shadow-2xs"
+            className="inline-flex items-center gap-1.5 px-2.5 sm:px-3 py-1.5 rounded-lg border border-emerald-500/30 bg-emerald-500/10 text-emerald-800 hover:bg-emerald-500/20 font-label-md text-xs font-bold transition-all shadow-2xs shrink-0"
           >
-            <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse" />
+            <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse shrink-0" />
             <span className="material-symbols-outlined text-[15px] text-emerald-700">storefront</span>
-            <span className="hidden sm:inline">Live Storefront</span>
-            <span className="material-symbols-outlined text-[13px]">open_in_new</span>
+            <span className="hidden md:inline">Storefront</span>
+            <span className="material-symbols-outlined text-[13px] hidden sm:inline">open_in_new</span>
           </a>
 
           {/* Notifications Popover Trigger */}
-          <div className="relative hidden sm:block">
+          <div className="relative hidden sm:block shrink-0">
             <button
               type="button"
               onClick={() => setShowNotifications((prev) => !prev)}
@@ -600,6 +641,162 @@ export const Header: React.FC<HeaderProps> = ({
           </div>
         </div>
       </div>
+
+      {/* Standalone Workspace Search Modal (for mobile, tablet, and laptop screens) */}
+      {showSearchModal && (
+        <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-sm flex items-start justify-center pt-16 p-4">
+          <div className="w-full max-w-xl bg-surface-container-lowest rounded-2xl shadow-2xl border border-surface-container-high/80 p-4 flex flex-col gap-3 max-h-[85vh] overflow-y-auto">
+            <div className="flex items-center gap-2 pb-2 border-b border-surface-container-low">
+              <span className="material-symbols-outlined text-primary text-[22px]">search</span>
+              <input
+                type="text"
+                autoFocus
+                value={searchQuery}
+                onChange={(e) => onSearchChange(e.target.value)}
+                placeholder="Search SKUs, invoices, orders, transactions..."
+                className="w-full bg-transparent text-sm text-on-surface placeholder:text-outline focus:outline-none font-body-md"
+              />
+              {searchQuery && (
+                <button
+                  type="button"
+                  onClick={() => onSearchChange('')}
+                  className="text-outline hover:text-on-surface p-1"
+                >
+                  <span className="material-symbols-outlined text-[16px]">close</span>
+                </button>
+              )}
+              <button
+                type="button"
+                onClick={() => setShowSearchModal(false)}
+                className="px-2.5 py-1 rounded-lg bg-surface-container-low hover:bg-surface-container text-xs font-semibold text-on-surface-variant transition-colors"
+              >
+                Done
+              </button>
+            </div>
+
+            {/* Results in Modal */}
+            {q.length > 0 ? (
+              <div className="flex flex-col gap-3">
+                <span className="font-label-sm text-[11px] uppercase tracking-wider text-secondary font-bold">
+                  Matches ({totalMatches}) for "{q}"
+                </span>
+                {totalMatches === 0 && (
+                  <div className="py-6 text-center text-xs text-secondary">
+                    No products, invoices, orders, or transactions match "{q}".
+                  </div>
+                )}
+                {matchedProducts.length > 0 && (
+                  <div className="flex flex-col gap-1">
+                    <span className="font-label-sm text-[10px] uppercase text-outline px-1 font-bold">
+                      Catalog Products ({matchedProducts.length})
+                    </span>
+                    {matchedProducts.map((prod) => (
+                      <button
+                        key={prod.id}
+                        type="button"
+                        onClick={() =>
+                          handleSelectResult(`/customer/product/${normalizeSkuForUrl(prod.sku)}`)
+                        }
+                        className="p-2.5 rounded-xl hover:bg-surface-container-low flex items-center justify-between text-left transition-colors cursor-pointer"
+                      >
+                        <div className="flex flex-col min-w-0 pr-2">
+                          <span className="text-xs font-bold text-on-surface truncate">
+                            {prod.name}
+                          </span>
+                          <span className="text-[11px] text-secondary font-mono">{prod.sku}</span>
+                        </div>
+                        <span className="text-xs font-bold text-primary font-tabular-nums shrink-0">
+                          {formatINR(prod.price)}
+                        </span>
+                      </button>
+                    ))}
+                  </div>
+                )}
+                {matchedInvoices.length > 0 && (
+                  <div className="flex flex-col gap-1">
+                    <span className="font-label-sm text-[10px] uppercase text-outline px-1 font-bold">
+                      Invoices ({matchedInvoices.length})
+                    </span>
+                    {matchedInvoices.map((inv) => (
+                      <button
+                        key={inv.id}
+                        type="button"
+                        onClick={() => handleSelectResult(`/seller/invoices/${inv.id}`)}
+                        className="p-2.5 rounded-xl hover:bg-surface-container-low flex items-center justify-between text-left transition-colors cursor-pointer"
+                      >
+                        <div className="flex flex-col min-w-0 pr-2">
+                          <span className="text-xs font-bold text-on-surface">
+                            {inv.invoiceNumber} • {inv.clientName}
+                          </span>
+                          <span className="text-[11px] text-secondary">
+                            Status: {inv.status.toUpperCase()}
+                          </span>
+                        </div>
+                        <span className="text-xs font-semibold text-primary">Inspect →</span>
+                      </button>
+                    ))}
+                  </div>
+                )}
+                {matchedTransactions.length > 0 && (
+                  <div className="flex flex-col gap-1">
+                    <span className="font-label-sm text-[10px] uppercase text-outline px-1 font-bold">
+                      Transactions ({matchedTransactions.length})
+                    </span>
+                    {matchedTransactions.map((tx) => (
+                      <button
+                        key={tx.id}
+                        type="button"
+                        onClick={() => handleSelectResult('/finance/ledger')}
+                        className="p-2.5 rounded-xl hover:bg-surface-container-low flex items-center justify-between text-left transition-colors cursor-pointer"
+                      >
+                        <div className="flex flex-col min-w-0 pr-2">
+                          <span className="text-xs font-bold text-on-surface">
+                            {tx.orderId} • {tx.customerName}
+                          </span>
+                          <span className="text-[11px] text-secondary">{tx.status}</span>
+                        </div>
+                        <span className="text-xs font-bold text-on-surface font-tabular-nums">
+                          {formatINR(tx.grossAmount, true)}
+                        </span>
+                      </button>
+                    ))}
+                  </div>
+                )}
+                {matchedOrders.length > 0 && (
+                  <div className="flex flex-col gap-1">
+                    <span className="font-label-sm text-[10px] uppercase text-outline px-1 font-bold">
+                      Escrow Orders ({matchedOrders.length})
+                    </span>
+                    {matchedOrders.map((ord) => (
+                      <button
+                        key={ord.id}
+                        type="button"
+                        onClick={() => handleSelectResult('/seller/orders')}
+                        className="p-2.5 rounded-xl hover:bg-surface-container-low flex items-center justify-between text-left transition-colors cursor-pointer"
+                      >
+                        <div className="flex flex-col min-w-0 pr-2">
+                          <span className="text-xs font-bold text-on-surface">
+                            {ord.orderNumber} • {ord.buyerName}
+                          </span>
+                          <span className="text-[11px] text-secondary">{ord.escrowStatus}</span>
+                        </div>
+                        <span className="text-xs font-bold text-primary font-tabular-nums">
+                          {formatINR(ord.totalAmount)}
+                        </span>
+                      </button>
+                    ))}
+                  </div>
+                )}
+              </div>
+            ) : (
+              <div className="py-6 text-center text-xs text-secondary flex flex-col items-center gap-1">
+                <span className="material-symbols-outlined text-[28px] text-outline">search</span>
+                <span>Type to search catalog SKUs, invoices, or escrow orders...</span>
+              </div>
+            )}
+          </div>
+        </div>
+      )}
 
       {/* Mobile 375px Role Switcher & Primary Flow Strip (Discover → Cart → Pay) */}
       <div className="lg:hidden w-full bg-surface-container-low/90 border-t border-surface-container-high/60 px-3 py-1.5 flex flex-col gap-1.5">

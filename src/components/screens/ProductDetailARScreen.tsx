@@ -203,43 +203,61 @@ export const ProductDetailARScreen: React.FC<ProductDetailARScreenProps> = ({
     };
   }, [resolvedModelUrl, arPanelState, product.sku, showToast]);
 
+  const [currentAzimuth, setCurrentAzimuth] = useState<number>(0);
+
   const handleRotateLeft = () => {
-    setCameraOrbit('-45deg 70deg 105%');
-    if (modelViewerRef.current) {
-      modelViewerRef.current.cameraOrbit = '-45deg 70deg 105%';
-    }
+    setCurrentAzimuth((prev) => {
+      const next = (prev - 30) % 360;
+      const orbitStr = `${next}deg 70deg 105%`;
+      setCameraOrbit(orbitStr);
+      if (modelViewerRef.current) {
+        modelViewerRef.current.cameraOrbit = orbitStr;
+      }
+      return next;
+    });
+    window.dispatchEvent(new CustomEvent('ac-3d-control', { detail: { action: 'rotate_left' } }));
   };
 
   const handleRotateRight = () => {
-    setCameraOrbit('45deg 70deg 105%');
-    if (modelViewerRef.current) {
-      modelViewerRef.current.cameraOrbit = '45deg 70deg 105%';
-    }
+    setCurrentAzimuth((prev) => {
+      const next = (prev + 30) % 360;
+      const orbitStr = `${next}deg 70deg 105%`;
+      setCameraOrbit(orbitStr);
+      if (modelViewerRef.current) {
+        modelViewerRef.current.cameraOrbit = orbitStr;
+      }
+      return next;
+    });
+    window.dispatchEvent(new CustomEvent('ac-3d-control', { detail: { action: 'rotate_right' } }));
   };
 
   const handleZoomIn = () => {
-    const next = Math.max(18, fieldOfView - 5);
+    const next = Math.max(15, fieldOfView - 5);
     setFieldOfView(next);
     if (modelViewerRef.current) {
       modelViewerRef.current.fieldOfView = `${next}deg`;
     }
+    window.dispatchEvent(new CustomEvent('ac-3d-control', { detail: { action: 'zoom_in' } }));
   };
 
   const handleZoomOut = () => {
-    const next = Math.min(45, fieldOfView + 5);
+    const next = Math.min(50, fieldOfView + 5);
     setFieldOfView(next);
     if (modelViewerRef.current) {
       modelViewerRef.current.fieldOfView = `${next}deg`;
     }
+    window.dispatchEvent(new CustomEvent('ac-3d-control', { detail: { action: 'zoom_out' } }));
   };
 
   const handleResetView = () => {
+    setCurrentAzimuth(0);
     setCameraOrbit('0deg 75deg 105%');
     setFieldOfView(30);
     if (modelViewerRef.current) {
       modelViewerRef.current.cameraOrbit = '0deg 75deg 105%';
       modelViewerRef.current.fieldOfView = '30deg';
     }
+    window.dispatchEvent(new CustomEvent('ac-3d-control', { detail: { action: 'reset_view' } }));
     showToast?.('3D view reset to default angle.');
   };
 

@@ -127,6 +127,49 @@ export const WebXRStudioViewer: React.FC<WebXRStudioViewerProps> = ({
     return () => window.removeEventListener('keydown', handleKeyDown);
   }, []);
 
+  // External 3D Viewer bar controls listener (Rotate Left/Right, Zoom +/-, Reset)
+  useEffect(() => {
+    const handle3DControl = (e: Event) => {
+      const ce = e as CustomEvent<{ action: string; delta?: number; factor?: number }>;
+      if (!ce.detail) return;
+      const { action } = ce.detail;
+      const { camera, controls } = threeRefs.current;
+      if (!camera || !controls) return;
+
+      if (action === 'rotate_left' || action === 'rotate_right') {
+        const angle = action === 'rotate_left' ? -Math.PI / 8 : Math.PI / 8; // 22.5 deg steps
+        const offset = camera.position.clone().sub(controls.target);
+        offset.applyAxisAngle(new THREE.Vector3(0, 1, 0), angle);
+        camera.position.copy(controls.target).add(offset);
+        camera.lookAt(controls.target);
+        controls.update();
+      } else if (action === 'zoom_in') {
+        const offset = camera.position.clone().sub(controls.target);
+        const newLen = offset.length() * 0.82;
+        if (newLen >= controls.minDistance) {
+          offset.multiplyScalar(0.82);
+          camera.position.copy(controls.target).add(offset);
+          controls.update();
+        }
+      } else if (action === 'zoom_out') {
+        const offset = camera.position.clone().sub(controls.target);
+        const newLen = offset.length() * 1.22;
+        if (newLen <= controls.maxDistance) {
+          offset.multiplyScalar(1.22);
+          camera.position.copy(controls.target).add(offset);
+          controls.update();
+        }
+      } else if (action === 'reset_view') {
+        camera.position.set(2.4, 1.8, 3.2);
+        controls.target.set(0, 0.8, 0);
+        controls.update();
+      }
+    };
+
+    window.addEventListener('ac-3d-control', handle3DControl);
+    return () => window.removeEventListener('ac-3d-control', handle3DControl);
+  }, []);
+
   // Initialize Three.js WebXR Scene
   useEffect(() => {
     const container = containerRef.current;

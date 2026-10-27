@@ -81,6 +81,8 @@ export function PublicStorefrontApp({
   const [toastMessage, setToastMessage] = useState<string | null>(null);
   const [vrModalProduct, setVrModalProduct] = useState<StoreProduct | null>(null);
   const [qrModalProduct, setQrModalProduct] = useState<StoreProduct | null>(null);
+  const [isWhatsAppBotOpen, setIsWhatsAppBotOpen] = useState(false);
+  const [customWhatsAppMsg, setCustomWhatsAppMsg] = useState('');
 
   // Customer Checkout Form
   const [custName, setCustName] = useState('');
@@ -846,19 +848,184 @@ export function PublicStorefrontApp({
         </div>
       </footer>
 
-      {/* WHATSAPP FLOATING BUTTON */}
+      {/* WHATSAPP COMMERCE & SUPPORT BOT */}
       {config.whatsapp?.enabled && (
-        <a
-          href={`https://wa.me/${config.whatsapp.phoneNumber.replace(/[^0-9]/g, '')}?text=${encodeURIComponent(
-            config.whatsapp.defaultMessage || 'Hi, I would like to inquire about your products.'
-          )}`}
-          target="_blank"
-          rel="noopener noreferrer"
-          className="fixed bottom-6 right-6 z-40 w-12 h-12 rounded-full bg-emerald-500 text-white shadow-xl flex items-center justify-center hover:scale-110 transition-transform"
-          title="Chat with Store on WhatsApp"
-        >
-          <span className="material-symbols-outlined text-[24px]">chat</span>
-        </a>
+        <>
+          {/* Interactive Bot Drawer */}
+          {isWhatsAppBotOpen && (
+            <div
+              role="dialog"
+              aria-modal="true"
+              className="fixed bottom-22 right-4 sm:right-6 z-50 w-[320px] sm:w-[360px] rounded-2xl shadow-2xl border border-emerald-500/30 overflow-hidden bg-white text-slate-900 flex flex-col animate-fade-in"
+              style={{
+                boxShadow: '0 20px 40px -10px rgba(16, 185, 129, 0.25), 0 10px 25px -5px rgba(0, 0, 0, 0.15)',
+              }}
+            >
+              {/* WhatsApp Header */}
+              <div className="bg-[#075e54] text-white p-3.5 flex items-center justify-between shadow-xs">
+                <div className="flex items-center gap-2.5">
+                  <div className="relative">
+                    <div className="w-9 h-9 rounded-full bg-white/20 flex items-center justify-center font-bold text-sm">
+                      <span className="material-symbols-outlined text-[20px]">chat</span>
+                    </div>
+                    <span className="absolute bottom-0 right-0 w-2.5 h-2.5 rounded-full bg-emerald-400 border-2 border-[#075e54]" />
+                  </div>
+                  <div>
+                    <div className="text-xs font-black tracking-tight flex items-center gap-1">
+                      <span>{business.name}</span>
+                      <span className="material-symbols-outlined text-[14px] text-emerald-300">verified</span>
+                    </div>
+                    <span className="text-[10px] text-emerald-100 flex items-center gap-1 font-medium">
+                      <span>WhatsApp Commerce Bot</span>
+                      <span>•</span>
+                      <span className="text-emerald-300 font-bold">Online</span>
+                    </span>
+                  </div>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setIsWhatsAppBotOpen(false)}
+                  className="w-7 h-7 rounded-full bg-white/10 hover:bg-white/20 flex items-center justify-center transition-colors cursor-pointer"
+                  aria-label="Close WhatsApp chat drawer"
+                >
+                  <span className="material-symbols-outlined text-[16px]">close</span>
+                </button>
+              </div>
+
+              {/* Chat Message Body */}
+              <div
+                className="p-3.5 space-y-3 max-h-[340px] overflow-y-auto bg-[#efeae2]/50 text-xs"
+                style={{
+                  backgroundImage: 'radial-gradient(rgba(0,0,0,0.04) 1px, transparent 1px)',
+                  backgroundSize: '16px 16px',
+                }}
+              >
+                {/* Bot Message Bubble */}
+                <div className="flex items-start gap-2">
+                  <div className="w-6 h-6 rounded-full bg-[#128c7e] text-white flex items-center justify-center shrink-0 text-[10px] font-bold">
+                    AI
+                  </div>
+                  <div className="bg-white rounded-2xl rounded-tl-xs p-3 shadow-xs border border-black/5 text-slate-800 space-y-1.5 max-w-[85%]">
+                    <p className="font-medium leading-relaxed">
+                      {config.whatsapp.welcomeMessage ||
+                        `Welcome to ${business.name}! 🚀 I am your WhatsApp assistant. How can I help you today?`}
+                    </p>
+                    <span className="text-[9px] text-slate-400 block text-right font-mono">
+                      Just now
+                    </span>
+                  </div>
+                </div>
+
+                {/* Quick Action Chips */}
+                <div className="pt-1 space-y-1.5">
+                  <span className="text-[10px] font-bold uppercase tracking-wider text-slate-500 block px-1">
+                    Tap to ask via WhatsApp:
+                  </span>
+                  <div className="flex flex-col gap-1.5">
+                    {(
+                      config.whatsapp.quickActionChips || [
+                        '🔍 Best Deals & Catalog',
+                        '📦 Track Escrow Order',
+                        '🛡️ Buyer Protection Policy',
+                        '💬 Chat with Specialist',
+                      ]
+                    ).map((chip, idx) => {
+                      const msg = `Hi ${business.name}, ${chip}. Please assist me.`;
+                      const link = `https://wa.me/${config.whatsapp.phoneNumber.replace(
+                        /[^0-9]/g,
+                        ''
+                      )}?text=${encodeURIComponent(msg)}`;
+                      return (
+                        <a
+                          key={idx}
+                          href={link}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="px-3 py-2 rounded-xl bg-white hover:bg-emerald-50 border border-emerald-500/25 text-emerald-800 text-[11px] font-semibold flex items-center justify-between transition-colors shadow-2xs group cursor-pointer"
+                        >
+                          <span>{chip}</span>
+                          <span className="material-symbols-outlined text-[14px] text-emerald-600 group-hover:translate-x-0.5 transition-transform">
+                            arrow_forward
+                          </span>
+                        </a>
+                      );
+                    })}
+                  </div>
+                </div>
+              </div>
+
+              {/* Direct Custom Query Input */}
+              <div className="p-2.5 bg-white border-t border-slate-100 flex items-center gap-1.5">
+                <input
+                  type="text"
+                  value={customWhatsAppMsg}
+                  onChange={(e) => setCustomWhatsAppMsg(e.target.value)}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter' && customWhatsAppMsg.trim()) {
+                      window.open(
+                        `https://wa.me/${config.whatsapp.phoneNumber.replace(
+                          /[^0-9]/g,
+                          ''
+                        )}?text=${encodeURIComponent(customWhatsAppMsg.trim())}`,
+                        '_blank'
+                      );
+                      setCustomWhatsAppMsg('');
+                    }
+                  }}
+                  placeholder="Type a custom question..."
+                  className="flex-1 px-3 py-2 bg-slate-100 rounded-xl text-xs text-slate-800 placeholder:text-slate-400 focus:outline-none focus:ring-1 focus:ring-emerald-500"
+                />
+                <button
+                  type="button"
+                  onClick={() => {
+                    const text = customWhatsAppMsg.trim() || config.whatsapp.defaultMessage || 'Hi!';
+                    window.open(
+                      `https://wa.me/${config.whatsapp.phoneNumber.replace(
+                        /[^0-9]/g,
+                        ''
+                      )}?text=${encodeURIComponent(text)}`,
+                      '_blank'
+                    );
+                    setCustomWhatsAppMsg('');
+                  }}
+                  className="w-8 h-8 rounded-xl bg-emerald-500 hover:bg-emerald-600 text-white flex items-center justify-center transition-colors shadow-xs cursor-pointer"
+                  title="Send to WhatsApp"
+                >
+                  <span className="material-symbols-outlined text-[16px]">send</span>
+                </button>
+              </div>
+            </div>
+          )}
+
+          {/* Floating Action Button */}
+          <button
+            type="button"
+            onClick={() => {
+              if (config.whatsapp.botEnabled ?? true) {
+                setIsWhatsAppBotOpen((prev) => !prev);
+              } else {
+                window.open(
+                  `https://wa.me/${config.whatsapp.phoneNumber.replace(
+                    /[^0-9]/g,
+                    ''
+                  )}?text=${encodeURIComponent(
+                    config.whatsapp.defaultMessage || 'Hi, I would like to inquire about your products.'
+                  )}`,
+                  '_blank'
+                );
+              }
+            }}
+            className="fixed bottom-6 right-6 z-40 w-13 h-13 rounded-full bg-emerald-500 hover:bg-emerald-600 text-white shadow-xl flex items-center justify-center hover:scale-108 active:scale-95 transition-all cursor-pointer border-2 border-white/40"
+            title="Chat with WhatsApp Bot"
+            aria-label="Open WhatsApp Commerce Bot"
+          >
+            {isWhatsAppBotOpen ? (
+              <span className="material-symbols-outlined text-[24px]">close</span>
+            ) : (
+              <span className="material-symbols-outlined text-[24px]">chat</span>
+            )}
+          </button>
+        </>
       )}
 
       {/* PRODUCT DETAIL MODAL */}
