@@ -1015,7 +1015,7 @@ export function PublicStorefrontApp({
                 );
               }
             }}
-            className="fixed bottom-6 right-6 z-40 w-13 h-13 rounded-full bg-emerald-500 hover:bg-emerald-600 text-white shadow-xl flex items-center justify-center hover:scale-108 active:scale-95 transition-all cursor-pointer border-2 border-white/40"
+            className="fixed bottom-6 right-6 z-50 w-14 h-14 rounded-full bg-emerald-500 hover:bg-emerald-600 text-white shadow-xl flex items-center justify-center hover:scale-108 active:scale-95 transition-all cursor-pointer border-2 border-white/40"
             title="Chat with WhatsApp Bot"
             aria-label="Open WhatsApp Commerce Bot"
           >
