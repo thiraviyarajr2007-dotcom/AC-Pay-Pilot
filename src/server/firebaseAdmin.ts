@@ -29,9 +29,27 @@ export function getAdminApp(): App {
     if (existingApps.length > 0) {
       adminApp = existingApps[0];
     } else {
-      adminApp = initializeApp({
-        projectId: FIREBASE_PROJECT_ID,
-      });
+      const hasGoogleCredentials =
+        Boolean(process.env.GOOGLE_APPLICATION_CREDENTIALS) ||
+        Boolean(process.env.K_SERVICE) ||
+        Boolean(process.env.GAE_SERVICE);
+
+      if (!hasGoogleCredentials) {
+        // Prevents unhandled GoogleAuth metadata probe crashes when running outside GCP without service account
+        adminApp = initializeApp({
+          projectId: FIREBASE_PROJECT_ID,
+          credential: {
+            getAccessToken: async () => ({
+              access_token: 'local-dev-fallback-token',
+              expires_in: 3600,
+            }),
+          },
+        });
+      } else {
+        adminApp = initializeApp({
+          projectId: FIREBASE_PROJECT_ID,
+        });
+      }
     }
   }
   return adminApp;
@@ -181,6 +199,9 @@ export async function authenticateRequest(req: Request): Promise<AuthenticatedUs
  * Seeds default business, products, and storefront config into Firestore if absent.
  */
 export async function seedDefaultStorefrontInFirestore(bizId = DEFAULT_BIZ_ID): Promise<void> {
+  if (process.env.NODE_ENV === 'test') {
+    return;
+  }
   try {
     const db = getAdminDb();
     const bizRef = db.collection('businesses').doc(bizId);

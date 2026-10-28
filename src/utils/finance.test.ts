@@ -32,6 +32,7 @@ import {
   executeCopilotToolForActor,
   answerProductQaWithGemini,
   recommendEscrowWithGemini,
+  optimizeCartWithGemini,
 } from '../server/geminiService';
 import { CATALOG_PRODUCTS, INITIAL_CART_ITEMS } from '../data/mockData';
 
@@ -542,3 +543,39 @@ test('Legacy calculateInvoiceTotals and calculatePayPalFee remain backward-compa
   assert.equal(fee.fee, 361);
   assert.equal(fee.netPayout, 9639);
 });
+
+test('optimizeCartWithGemini validates SmartCartScreen payload, computes minor units, and respects alternatives', async () => {
+  const result = await optimizeCartWithGemini({
+    budgetInr: 38000,
+    items: [
+      { sku: '#FAN-BLDC-892', quantity: 2 },
+      { sku: '#SPO-YNX-99P', quantity: 1 },
+    ],
+  });
+
+  assert.equal(result.ok, true);
+  assert.ok(result.source === 'live' || result.source === 'fallback');
+  assert.equal(result.currency, 'INR');
+  assert.equal(result.budgetMinor, 3800000);
+  assert.equal(result.cartSubtotalMinor, 2710800);
+  assert.equal(result.cartTaxMinor, 488000); // 18% of 2710800
+  assert.equal(result.cartTotalMinor, 3198800);
+  assert.equal(result.withinBudget, true);
+
+  // Ranked items contract
+  assert.equal(result.rankedItems.length, 2);
+  assert.equal(result.rankedItems[0].sku, '#FAN-BLDC-892');
+  assert.equal(result.rankedItems[0].priorityRank, 1);
+  assert.ok(['Must-Have', 'Recommended', 'Deferrable'].includes(result.rankedItems[0].priorityLabel));
+  assert.ok(result.rankedItems[0].explanation.length > 0);
+
+  // Suggested alternatives contract
+  assert.ok(result.suggestedAlternatives.length > 0);
+  const alt = result.suggestedAlternatives[0];
+  assert.ok(alt.replacesSku.length > 0);
+  assert.ok(alt.alternativeSku.length > 0);
+  assert.equal(alt.autoAdded, false);
+  assert.ok(alt.unitPriceMinor > 0);
+  assert.ok(alt.estimatedSavingMinor >= 0);
+});
+

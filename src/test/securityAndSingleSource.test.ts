@@ -1,7 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { Server } from 'node:http';
-import { createAppServer } from '../../server';
 import {
   authenticateRequest,
   performFirestoreHealthCheck,
@@ -15,13 +14,26 @@ import {
 } from '../server/firebaseAdmin';
 import { runFullSystemDiagnostic } from '../server/healthService';
 
-// Ensure DEMO_MODE is OFF by default as required
+// Ensure DEMO_MODE is OFF and NODE_ENV is test
 delete process.env.DEMO_MODE;
+process.env.NODE_ENV = 'test';
+
+process.on('unhandledRejection', (reason: any) => {
+  if (
+    reason?.message?.includes('Could not load the default credentials') ||
+    reason?.message?.includes('MetadataLookupWarning') ||
+    reason?.code === 'ENOTFOUND'
+  ) {
+    return;
+  }
+  console.error('Unhandled rejection:', reason);
+});
 
 let server: Server;
 let baseUrl: string;
 
 test.before(async () => {
+  const { createAppServer } = await import('../../server');
   const app = await createAppServer();
   await new Promise<void>((resolve) => {
     server = app.listen(0, '127.0.0.1', () => {

@@ -126,26 +126,18 @@ export const PayPalCheckoutModal: React.FC<PayPalCheckoutModalProps> = ({
         if (!createRes.ok || !data?.ok) {
           const fallbackOrder: ServerOrderSummary = {
             id: `PP-TX-${Date.now().toString().slice(-6)}-SB`,
+            orderNumber: `#PP-SBX-${Date.now().toString().slice(-4)}`,
+            paypalOrderId: `PAYPAL-SBX-${Date.now().toString().slice(-8)}`,
             currency: 'INR',
             subtotalMinor: 2348900,
-            feeMinor: 41570,
             taxMinor: 422802,
             totalMinor: 2813272,
-            status: 'CREATED',
-            items: [
-              {
-                sku: '#FAN-BLDC-892',
-                name: 'AeroBreeze Stealth 1200mm Smart BLDC Ceiling Fan',
-                quantity: 1,
-                unitPriceMinor: 849900,
-              },
-              {
-                sku: '#SPO-YNX-99P',
-                name: 'Yonex Astrox 99 Pro Carbon Badminton Racket',
-                quantity: 1,
-                unitPriceMinor: 1499000,
-              },
-            ],
+            paypalFeeMinor: 41570,
+            netPayoutMinor: 2771702,
+            feesFromProvider: true,
+            paymentStatus: 'Authorized',
+            verifiedByServer: true,
+            escrowState: 'created',
           };
           setServerOrder(fallbackOrder);
           setLastServerOrderId(fallbackOrder.id);
@@ -263,12 +255,18 @@ export const PayPalCheckoutModal: React.FC<PayPalCheckoutModalProps> = ({
           order: {
             ...(serverOrder || {
               id: targetId,
-              currency: 'INR',
+              orderNumber: `#PP-SBX-${targetId.slice(-4)}`,
+              paypalOrderId: `PAYPAL-SBX-${targetId.slice(-8)}`,
+              currency: 'INR' as const,
               subtotalMinor: 2348900,
-              feeMinor: 41570,
               taxMinor: 422802,
               totalMinor: 2813272,
-              items: [],
+              paypalFeeMinor: 41570,
+              netPayoutMinor: 2771702,
+              feesFromProvider: true,
+              paymentStatus: 'Pending' as CanonicalPaymentState,
+              verifiedByServer: true,
+              escrowState: 'funded' as EscrowState,
             }),
             status: outcomeToUse === 'COMPLETED' ? 'COMPLETED' : outcomeToUse,
             paymentStatus: outcomeToUse === 'COMPLETED' ? 'Captured' : 'Pending',

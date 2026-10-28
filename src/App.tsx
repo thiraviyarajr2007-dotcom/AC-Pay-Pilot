@@ -431,7 +431,7 @@ export default function App() {
   const effectiveOrders = React.useMemo<OrderRecord[]>(() => {
     if (dataSource === 'live') {
       return liveStoreOrders.map((o) => {
-        const firstItem = o.items?.[0] || { productId: 'ITEM-1', name: 'Storefront Product', quantity: 1 };
+        const firstItem = o.items?.[0] || { sku: 'ITEM-1', name: 'Storefront Product', quantity: 1 };
         const paymentState =
           o.escrowStatus === 'Delivered — Escrow Released'
             ? 'Captured'
@@ -444,13 +444,13 @@ export default function App() {
           invoiceId: `INV-${o.orderNumber || o.id}`,
           buyerName: o.customerName || 'Verified Buyer',
           buyerGstin: '29ABCDE1234F1Z5',
-          productSku: firstItem.productId,
+          productSku: firstItem.sku,
           productName: firstItem.name,
           qty: firstItem.quantity || 1,
           amount: o.total || 0,
           paymentState,
           date: o.createdAt ? new Date(o.createdAt).toISOString().split('T')[0] : '2026-10-27',
-          trackingId: o.trackingNumber || `AWB-${o.orderNumber || o.id}`,
+          trackingId: o.trackingId || `AWB-${o.orderNumber || o.id}`,
         };
       });
     }

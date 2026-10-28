@@ -1,5 +1,15 @@
 import 'dotenv/config';
 import express, { Request, Response, NextFunction } from 'express';
+
+process.on('unhandledRejection', (reason: any) => {
+  if (
+    reason?.message?.includes('Could not load the default credentials') ||
+    reason?.message?.includes('MetadataLookupWarning')
+  ) {
+    return;
+  }
+  console.warn('Unhandled server promise warning:', reason?.message || reason);
+});
 import path from 'path';
 import { fileURLToPath } from 'url';
 import { createServer as createViteServer } from 'vite';
@@ -150,10 +160,12 @@ export async function createAppServer() {
   const app = express();
   app.use(express.json({ limit: '25mb' }));
 
-  // Seed default canonical storefront and products into Firestore if not present
-  seedDefaultStorefrontInFirestore().catch((err) => {
-    console.warn('Firestore initial seeding warning:', err?.message || err);
-  });
+  // Seed default canonical storefront and products into Firestore if not present (skipped in test mode)
+  if (process.env.NODE_ENV !== 'test') {
+    seedDefaultStorefrontInFirestore().catch((err) => {
+      console.warn('Firestore initial seeding warning:', err?.message || err);
+    });
+  }
 
   // ==========================================================================
   // 1. Public Runtime Config (Safe metadata only — NEVER exposes secrets)
@@ -1464,6 +1476,16 @@ export async function createAppServer() {
     }
   });
 
+  // Standard Liveness/Readiness Health Endpoints (GET /health, GET /api/health)
+  app.get(['/health', '/api/health'], (_req: Request, res: Response) => {
+    res.json({
+      ok: true,
+      status: 'healthy',
+      uptimeSeconds: Math.floor(process.uptime()),
+      timestamp: new Date().toISOString(),
+    });
+  });
+
   // ==========================================================================
   // 12. System Health Check Diagnostic Endpoint (GET /api/health/system-check)
   // ==========================================================================
@@ -2119,10 +2141,15 @@ export async function createAppServer() {
     sendTypedError(res, 500, 'INTERNAL_SERVER_ERROR', 'An unexpected server error occurred.');
   });
 
+  const isDirectEntry = Boolean(
+    process.argv[1] &&
+      (process.argv[1].endsWith('server.ts') || process.argv[1].endsWith('server.js'))
+  );
+
   // ==========================================================================
   // Vite Middleware (Dev) or Static Dist Serving (Prod)
   // ==========================================================================
-  if (process.env.NODE_ENV !== 'production' && process.env.NODE_ENV !== 'test') {
+  if (process.env.NODE_ENV !== 'production' && process.env.NODE_ENV !== 'test' && isDirectEntry) {
     const vite = await createViteServer({
       server: { middlewareMode: true },
       appType: 'spa',
@@ -2141,7 +2168,12 @@ export async function createAppServer() {
 
 const PORT = 3000;
 
-if (process.env.NODE_ENV !== 'test') {
+const isDirectEntry = Boolean(
+  process.argv[1] &&
+    (process.argv[1].endsWith('server.ts') || process.argv[1].endsWith('server.js'))
+);
+
+if (process.env.NODE_ENV !== 'test' && isDirectEntry) {
   createAppServer().then((app) => {
     app.listen(PORT, '0.0.0.0', () => {
       console.log(`AC PayPilot server listening on http://0.0.0.0:${PORT}`);

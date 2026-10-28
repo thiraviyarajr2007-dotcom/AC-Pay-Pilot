@@ -133,18 +133,21 @@ export const InvoiceAnalyzeRequestSchema = z.object({
 });
 
 export const CartOptimizeRequestSchema = z.object({
-  budgetCeiling: z.number().positive().default(100000),
+  budgetCeiling: z.number().positive().optional(),
+  budgetInr: z.number().positive().optional(),
+  budgetMinor: z.number().int().positive().optional(),
   currency: z.enum(['INR', 'USD']).default('INR'),
   items: z
     .array(
       z.object({
-        id: z.string().default('cart-1'),
+        id: z.string().optional(),
         sku: z.string().min(1),
-        name: z.string().min(1),
-        category: z.string().default('Hardware'),
-        specs: z.string().default(''),
-        price: z.number().nonnegative(),
-        gstPercent: z.number().min(0).max(28).default(18),
+        name: z.string().optional(),
+        category: z.string().optional(),
+        specs: z.string().optional(),
+        price: z.number().nonnegative().optional(),
+        priceMinor: z.number().nonnegative().optional(),
+        gstPercent: z.number().min(0).max(28).optional().default(18),
         quantity: z.number().int().positive().default(1),
         isDeferred: z.boolean().optional().default(false),
       })
@@ -775,15 +778,57 @@ export async function analyzeInvoiceWithGemini(rawInput: unknown) {
 export async function optimizeCartWithGemini(rawInput: unknown) {
   const input = CartOptimizeRequestSchema.parse(rawInput);
 
+  const budgetCeiling =
+    input.budgetCeiling ??
+    input.budgetInr ??
+    (input.budgetMinor ? fromMinorUnits(input.budgetMinor) : 38000);
+  const budgetMinor = toMinorUnits(budgetCeiling);
+
+  // Resolve item attributes against CATALOG_PRODUCTS if omitted
+  const resolvedItems = input.items.map((item, idx) => {
+    const catalogMatch = CATALOG_PRODUCTS.find(
+      (cat) => cat.sku.replace(/^#/, '').toLowerCase() === item.sku.replace(/^#/, '').toLowerCase()
+    );
+    const unitPrice =
+      item.price ??
+      (item.priceMinor ? fromMinorUnits(item.priceMinor) : (catalogMatch?.price ?? 1000));
+    const name = item.name || catalogMatch?.name || `Product ${item.sku}`;
+    const category = item.category || catalogMatch?.category || 'General';
+    const specs =
+      item.specs ||
+      (catalogMatch?.specs
+        ? Object.entries(catalogMatch.specs)
+            .map(([k, v]) => `${k}: ${v}`)
+            .join(', ')
+        : '');
+    const quantity = item.quantity || 1;
+    const unitPriceMinor = toMinorUnits(unitPrice);
+    const lineTotalMinor = unitPriceMinor * quantity;
+    const gstPercent = item.gstPercent ?? 18;
+
+    return {
+      ...item,
+      id: item.id || `cart-${idx + 1}`,
+      name,
+      category,
+      specs,
+      quantity,
+      unitPrice,
+      unitPriceMinor,
+      lineTotalMinor,
+      gstPercent,
+    };
+  });
+
   // All money math comes strictly from finance.ts
-  const purchaseItems = input.items.map((item, idx) => ({
-    id: item.id || `cart-${idx + 1}`,
+  const purchaseItems = resolvedItems.map((item, idx) => ({
+    id: item.id,
     rank: idx + 1,
     name: item.name,
     sku: item.sku,
     category: item.category,
     specs: item.specs,
-    price: item.price * item.quantity,
+    price: item.unitPrice * item.quantity,
     gstPercent: item.gstPercent,
     image: '',
     priorityScore: Math.max(60, 98 - idx * 6),
@@ -794,12 +839,16 @@ export async function optimizeCartWithGemini(rawInput: unknown) {
     isDeferred: Boolean(item.isDeferred),
   }));
 
-  const cartMetrics = calculateCartMetrics(purchaseItems, input.budgetCeiling);
+  const cartMetrics = calculateCartMetrics(purchaseItems, budgetCeiling);
+  const cartSubtotalMinor = toMinorUnits(cartMetrics.selectedSubtotal);
+  const cartTaxMinor = toMinorUnits(cartMetrics.integratedGst);
+  const cartTotalMinor = toMinorUnits(cartMetrics.allocatedTotal);
+  const withinBudget = !cartMetrics.isOverBudget;
 
   // Build separate suggested alternatives from CATALOG_PRODUCTS without touching real cart items
-  const suggestedAlternatives = input.items
+  const suggestedAlternatives = resolvedItems
     .map((item) => {
-      const currentMinor = toMinorUnits(item.price);
+      const currentMinor = item.unitPriceMinor;
       const cheaperCatalogMatch = CATALOG_PRODUCTS.find(
         (cat) =>
           cat.sku.replace(/^#/, '').toLowerCase() !== item.sku.replace(/^#/, '').toLowerCase() &&
@@ -809,10 +858,22 @@ export async function optimizeCartWithGemini(rawInput: unknown) {
       const altMinor = toMinorUnits(cheaperCatalogMatch.price);
       const savingsMinor = (currentMinor - altMinor) * item.quantity;
       return {
-        forSku: item.sku,
-        forName: item.name,
+        // Properties required by SmartCartScreen.tsx:
+        replacesSku: item.sku,
         alternativeSku: cheaperCatalogMatch.sku,
         alternativeName: cheaperCatalogMatch.name,
+        unitPriceMinor: altMinor,
+        estimatedSavingMinor: savingsMinor,
+        reason: `Optional alternative in catalog (${cheaperCatalogMatch.name} at ${formatINR(
+          cheaperCatalogMatch.price
+        )}) reduces allocation by ${formatMinorUnits(
+          savingsMinor,
+          input.currency
+        )}. Separate from your active cart until you click Swap Item.`,
+        autoAdded: false as const,
+        // Legacy properties for backwards compatibility:
+        forSku: item.sku,
+        forName: item.name,
         alternativeUnitPriceInr: cheaperCatalogMatch.price,
         alternativeUnitPriceMinor: altMinor,
         savingsInr: fromMinorUnits(savingsMinor),
@@ -827,19 +888,42 @@ export async function optimizeCartWithGemini(rawInput: unknown) {
     })
     .filter((x): x is NonNullable<typeof x> => x !== null);
 
-  const defaultRankings = input.items.map((it, idx) => ({
+  const defaultRankedItems = resolvedItems.map((it, idx) => {
+    const priorityRank = idx + 1;
+    const priorityLabel: 'Must-Have' | 'Recommended' | 'Deferrable' =
+      idx === 0
+        ? 'Must-Have'
+        : idx < resolvedItems.length - 1
+        ? 'Recommended'
+        : withinBudget
+        ? 'Recommended'
+        : 'Deferrable';
+
+    return {
+      sku: it.sku,
+      name: it.name,
+      quantity: it.quantity,
+      unitPriceMinor: it.unitPriceMinor,
+      lineTotalMinor: it.lineTotalMinor,
+      priorityRank,
+      priorityLabel,
+      explanation:
+        !withinBudget && idx === resolvedItems.length - 1
+          ? `Cart total exceeds budget by ${formatINR(
+              Math.abs(cartMetrics.remainingHeadroom)
+            )}. Consider deferring or swapping with an alternative.`
+          : `Core procurement item (${formatINR(it.unitPrice)} incl. ${it.gstPercent}% GST).`,
+    };
+  });
+
+  const defaultRankings = defaultRankedItems.map((it) => ({
     sku: it.sku,
     name: it.name,
-    recommendedRank: idx + 1,
-    priorityScore: Math.max(65, 96 - idx * 7),
-    actionRecommendation:
-      cartMetrics.isOverBudget && idx === input.items.length - 1 ? 'defer_optional' : 'keep_active',
-    explanation:
-      cartMetrics.isOverBudget && idx === input.items.length - 1
-        ? `Cart exceeds ceiling of ${formatINR(input.budgetCeiling)} by ${formatINR(
-            Math.abs(cartMetrics.remainingHeadroom)
-          )}. Consider deferring ${it.name} (${formatINR(it.price)}) to next cycle.`
-        : `Core procurement line item (${formatINR(it.price)} incl. ${it.gstPercent}% GST).`,
+    recommendedRank: it.priorityRank,
+    priorityScore:
+      it.priorityLabel === 'Must-Have' ? 95 : it.priorityLabel === 'Recommended' ? 80 : 60,
+    actionRecommendation: it.priorityLabel === 'Deferrable' ? 'defer_optional' : 'keep_active',
+    explanation: it.explanation,
   }));
 
   const ai = getLiveGeminiClient();
@@ -847,10 +931,10 @@ export async function optimizeCartWithGemini(rawInput: unknown) {
     try {
       const prompt = [
         `Rank and explain the following B2B SmartCart items against a budget ceiling of ${formatINR(
-          input.budgetCeiling
+          budgetCeiling
         )}.`,
         `Authoritative finance.ts metrics (DO NOT invent numbers): ${JSON.stringify(cartMetrics)}`,
-        `Items: ${JSON.stringify(input.items)}`,
+        `Items: ${JSON.stringify(resolvedItems)}`,
         `Provide ranking explanations and an overall optimization summary.`,
       ].join('\n');
 
@@ -897,6 +981,26 @@ export async function optimizeCartWithGemini(rawInput: unknown) {
           }>;
         };
 
+        const mergedRankedItems = defaultRankedItems.map((item) => {
+          const match = parsed.rankings?.find(
+            (r) =>
+              r.sku.replace(/^#/, '').toLowerCase() === item.sku.replace(/^#/, '').toLowerCase()
+          );
+          if (!match) return item;
+          const priorityLabel: 'Must-Have' | 'Recommended' | 'Deferrable' =
+            match.priorityScore >= 85
+              ? 'Must-Have'
+              : match.priorityScore >= 70
+              ? 'Recommended'
+              : 'Deferrable';
+          return {
+            ...item,
+            priorityRank: match.recommendedRank,
+            priorityLabel,
+            explanation: match.explanation,
+          };
+        });
+
         const mergedRankings = defaultRankings.map((def) => {
           const match = parsed.rankings?.find(
             (r) => r.sku.replace(/^#/, '').toLowerCase() === def.sku.replace(/^#/, '').toLowerCase()
@@ -914,11 +1018,18 @@ export async function optimizeCartWithGemini(rawInput: unknown) {
         return {
           ok: true,
           source: 'live' as const,
-          financeMetrics: cartMetrics,
-          summaryExplanation: parsed.summaryExplanation,
-          whyThis: parsed.whyThis,
-          rankings: mergedRankings,
+          currency: 'INR' as const,
+          budgetMinor,
+          cartSubtotalMinor,
+          cartTaxMinor,
+          cartTotalMinor,
+          withinBudget,
+          rankedItems: mergedRankedItems,
           suggestedAlternatives,
+          whyThis: parsed.whyThis,
+          summaryExplanation: parsed.summaryExplanation,
+          financeMetrics: cartMetrics,
+          rankings: mergedRankings,
           mutationNote:
             'No items were bought, removed, or reordered automatically. Review and click Apply to change your cart.',
         };
@@ -931,23 +1042,30 @@ export async function optimizeCartWithGemini(rawInput: unknown) {
   return {
     ok: true,
     source: 'fallback' as const,
-    financeMetrics: cartMetrics,
-    summaryExplanation: cartMetrics.isOverBudget
-      ? `Active cart (${formatINR(cartMetrics.allocatedTotal)}) exceeds your ${formatINR(
-          input.budgetCeiling
-        )} budget ceiling by ${formatINR(
-          Math.abs(cartMetrics.remainingHeadroom)
-        )}. Deferring the lowest-priority item or choosing a catalog alternative brings spend within headroom.`
-      : `Active cart (${formatINR(cartMetrics.allocatedTotal)}) is within your ${formatINR(
-          input.budgetCeiling
-        )} ceiling with ${formatINR(cartMetrics.remainingHeadroom)} remaining headroom.`,
+    currency: 'INR' as const,
+    budgetMinor,
+    cartSubtotalMinor,
+    cartTaxMinor,
+    cartTotalMinor,
+    withinBudget,
+    rankedItems: defaultRankedItems,
+    suggestedAlternatives,
     whyThis: `All monetary totals (Subtotal: ${formatINR(
       cartMetrics.selectedSubtotal
     )}, GST: ${formatINR(cartMetrics.integratedGst)}, Total: ${formatINR(
       cartMetrics.allocatedTotal
     )}) are computed deterministically by src/utils/finance.ts.`,
+    summaryExplanation: cartMetrics.isOverBudget
+      ? `Active cart (${formatINR(cartMetrics.allocatedTotal)}) exceeds your ${formatINR(
+          budgetCeiling
+        )} budget ceiling by ${formatINR(
+          Math.abs(cartMetrics.remainingHeadroom)
+        )}. Deferring the lowest-priority item or choosing a catalog alternative brings spend within headroom.`
+      : `Active cart (${formatINR(cartMetrics.allocatedTotal)}) is within your ${formatINR(
+          budgetCeiling
+        )} ceiling with ${formatINR(cartMetrics.remainingHeadroom)} remaining headroom.`,
+    financeMetrics: cartMetrics,
     rankings: defaultRankings,
-    suggestedAlternatives,
     mutationNote:
       'No items were bought, removed, or reordered automatically. Review and click Apply to change your cart.',
   };
