@@ -187,7 +187,22 @@ export function calculateAuthoritativeOrderTotalsMinor(
       throw new Error(`Unknown SKU '${reqItem.sku}' not found in server catalog.`);
     }
 
-    const unitPriceMinor = toMinorUnits(product.price);
+    let unitPrice: number;
+    if (currency === 'USD') {
+      const pAny = product as any;
+      if (typeof pAny.priceUsd === 'number') {
+        unitPrice = pAny.priceUsd;
+      } else if (pAny.currency === 'USD' && typeof pAny.price === 'number') {
+        unitPrice = pAny.price;
+      } else {
+        throw new Error(
+          `Product '${product.name}' (${product.sku}) does not have valid pricing for currency 'USD'.`
+        );
+      }
+    } else {
+      unitPrice = product.price;
+    }
+    const unitPriceMinor = toMinorUnits(unitPrice);
     const gstRatePercent = 18;
     const lineTotalMinor = unitPriceMinor * qty;
     const lineSubtotalMinor = Math.round((lineTotalMinor * 100) / (100 + gstRatePercent));

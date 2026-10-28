@@ -21,6 +21,21 @@ import {
   evaluateRoleAccess,
 } from '../utils/rbac';
 
+export const PAYPAL_SUPPORTED_CURRENCIES = [
+  'USD',
+  'EUR',
+  'GBP',
+  'CAD',
+  'AUD',
+  'JPY',
+  'SGD',
+  'CHF',
+  'NZD',
+  'SEK',
+] as const;
+
+export type PayPalSupportedCurrency = (typeof PAYPAL_SUPPORTED_CURRENCIES)[number];
+
 // ============================================================================
 // Zod Request Validation Schemas (Step 1 & Step 3)
 // ============================================================================
@@ -55,6 +70,9 @@ export const CreatePayPalOrderSchema = z.object({
   sellerId: z.string().min(1).default('seller-demo-1'),
   // Optional client total passed by untrusted browser — strictly ignored!
   clientUntrustedTotalMinor: z.number().optional(),
+  isGuestCheckout: z.boolean().optional(),
+  guestCheckoutToken: z.string().optional(),
+  guestExpiresAt: z.string().optional(),
 });
 
 export const CapturePayPalOrderSchema = z.object({
@@ -64,11 +82,13 @@ export const CapturePayPalOrderSchema = z.object({
     .optional(),
   actorId: z.string().min(1).default('cust-demo-1'),
   actorRole: z.enum(['customer', 'seller', 'finance', 'business_head']).default('customer'),
+  guestCheckoutToken: z.string().optional(),
 });
 
 export const CancelPayPalOrderSchema = z.object({
   reason: z.string().min(1).default('Buyer cancelled checkout on PayPal modal'),
   actorId: z.string().min(1).default('cust-demo-1'),
+  guestCheckoutToken: z.string().optional(),
 });
 
 export const EscrowTransitionBodySchema = z.object({
@@ -152,6 +172,9 @@ export interface ServerOrderRecord {
     lineTaxMinor: number;
     lineTotalMinor: number;
   }>;
+  isGuestCheckout?: boolean;
+  guestCheckoutToken?: string;
+  guestExpiresAt?: string;
   createdAt: string;
   updatedAt: string;
 }

@@ -331,6 +331,7 @@ export async function createAppServer() {
         name: p.name,
         price: p.price ?? ((p.priceMinor || 0) / 100),
         priceMinor: p.priceMinor || Math.round((p.price || 0) * 100),
+        priceUsd: p.priceUsd ?? (typeof p.price === 'number' ? Math.round(p.price * Number(process.env.INR_TO_USD_EXCHANGE_RATE || 0.012) * 100) / 100 : undefined),
         currency: p.currency || 'INR',
         gstRatePercent: p.gstRate || 18,
         hsnCode: p.hsCode || '8414',

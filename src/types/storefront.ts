@@ -157,6 +157,8 @@ export interface StoreProduct {
   category: string;
   price: number;
   mrp: number;
+  priceUsd?: number;
+  mrpUsd?: number;
   stock: number;
   rating: number;
   reviewCount: number;

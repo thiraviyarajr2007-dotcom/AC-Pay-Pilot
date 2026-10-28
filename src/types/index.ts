@@ -124,6 +124,9 @@ export interface CatalogProduct {
   sku: string;
   price: number;
   originalPrice: number;
+  priceUsd?: number;
+  originalPriceUsd?: number;
+  currency?: 'INR' | 'USD';
   discountPercent: number;
   stock: number;
   category: string;
