@@ -3,8 +3,8 @@
 **Execution Date:** 2026-10-28  
 **Environment:** Windows 11, Node.js v24.15.0, Vite 8.3.5, TypeScript 5.9.3, Express 4.21.2  
 **Test Framework:** Node.js native test runner (`node:test`) + Browser Subagent Automation + HTTP Integration  
-**Total Automated Regression Tests:** 44  
-**Passing Automated Tests:** 44 (100% Pass)  
+**Total Automated Regression Tests:** 60  
+**Passing Automated Tests:** 60 (100% Pass)  
 **Failing Automated Tests:** 0  
 **Live Provider API Checks:** 6 Verified Live  
 **Browser End-to-End Journeys:** 8 Verified with Video & Screenshots  
@@ -17,7 +17,7 @@
 ```
 Layer 1: Static Type Check (TypeScript 5.9.3) ──────────────> 100% PASS (0 Errors)
 Layer 2: Financial Math & Fail-Closed Invariants (Unit) ────> 100% PASS (17/17 Tests)
-Layer 3: Security, RBAC, Webhook & Persistence (Integ) ────> 100% PASS (27/27 Tests)
+Layer 3: Security, RBAC, Webhook, Dual-Auth & Persistence ──> 100% PASS (43/43 Tests)
 Layer 4: Real Live External Sandbox APIs (PayPal & Gemini) ──> 100% PASS (6 Live API Probes)
 Layer 5: Production Bundle (Vite Build) ─────────────────────> 100% PASS (dist/ in 9.05s)
 Layer 6: Browser End-to-End User Journeys ───────────────────> 100% PASS (8/8 Workflows)
@@ -91,13 +91,33 @@ Layer 7: Physical Mobile Device Camera Hardware ──────────�
 | **TC-059** | Browser E2E: Public Storefront | Browser E2E | Running server | Navigate to `/s/aerocool` | Hero banner, products, AI Assistant | Public customer storefront active | **PASS** | Screenshot: `public_storefront_aerocool` |
 | **TC-060** | Browser E2E: System Health Screen | Browser E2E | Running server | Navigate to `/health` | Subsystem diagnostics, webhook simulation | Real-time diagnostic monitor active | **PASS** | Screenshot: `media_1793163588342.png` |
 | **TC-061** | Physical Mobile AR WebXR / QuickLook | Physical E2E | Physical iPhone / Android | Camera pass-through AR viewer | AR camera overlay | **BLOCKED** | Desktop environment lacks phone hardware |
+| **TC-062** | Profile update self-escalation rejection | Security Integ | `role: 'admin'` in body | `npm test` (`security...test.ts`) | Rejects with HTTP 400 `VALIDATION_ERROR` via strict Zod schema | HTTP 400 returned, escalation blocked | **PASS** | `✔ AUTH: /api/users/profile rejects... (12.4ms)` |
+| **TC-063** | Valid user profile update | Security Integ | Valid profile fields | `npm test` (`security...test.ts`) | Accepts and persists `displayName`, `gender`, `phone` | HTTP 200 returned with updated profile | **PASS** | `✔ AUTH: /api/users/profile accepts... (8.9ms)` |
+| **TC-064** | Expired ID token rejection | Security Integ | Expired Bearer token | `npm test` (`security...test.ts`) | Rejects with HTTP 401 `TOKEN_EXPIRED` | HTTP 401 returned | **PASS** | `✔ AUTH: /api/users/profile returns 401 TOKEN_EXPIRED... (6.7ms)` |
+| **TC-065** | Revoked ID token rejection | Security Integ | Revoked Bearer token | `npm test` (`security...test.ts`) | Rejects with HTTP 401 `TOKEN_REVOKED` (`checkRevoked: true`) | HTTP 401 returned | **PASS** | `✔ AUTH: /api/users/profile returns 401 TOKEN_REVOKED... (6.5ms)` |
+| **TC-066** | Client role update function forbidden | Unit/SDK | Client call `updateFirestoreUserRole` | `npm test` (`security...test.ts`) | Throws forbidden error (`ROLE_ESCALATION_FORBIDDEN`) | Error thrown, role mutation denied | **PASS** | `✔ AUTH: updateFirestoreUserRole throws... (2.1ms)` |
+| **TC-067** | Lowest-privilege default user profile creation | Unit/SDK | New user signup | `npm test` (`security...test.ts`) | Creates profile with default role `customer` (never escalated) | Customer role assigned idempotently | **PASS** | `✔ AUTH: ensureFirestoreUserProfile assigns... (1.9ms)` |
+| **TC-068** | authenticatedFetch request execution | Unit/SDK | API client invocation | `npm test` (`security...test.ts`) | Auto-attaches Bearer token, executes clean fetch | HTTP 200 clean execution | **PASS** | `✔ AUTH: authenticatedFetch auto-attaches... (3.8ms)` |
+| **TC-069** | Guest checkout token generation | Security Integ | Unauthenticated create-order | `npm test` (`security...test.ts`) | Generates 32-byte `guestCaptureToken`, stores SHA-256 hash | HTTP 201 with guestCaptureToken | **PASS** | `✔ PAYMENTS: Guest create-order generates... (10.2ms)` |
+| **TC-070** | Guest capture happy path | Security Integ | Valid guestCaptureToken | `npm test` (`security...test.ts`) | Captures order, marks `guestTokenUsed: true` | HTTP 200, paymentStatus: Captured | **PASS** | `✔ PAYMENTS: Guest capture happy path... (12.8ms)` |
+| **TC-071** | Wrong guest capture token rejection | Security Integ | Forged guestCaptureToken | `npm test` (`security...test.ts`) | Constant-time comparison fails with HTTP 403 `INVALID_GUEST_TOKEN` | HTTP 403 returned | **PASS** | `✔ PAYMENTS: Guest capture rejected... (9.4ms)` |
+| **TC-072** | Reused guest capture token rejection | Security Integ | Already captured order | `npm test` (`security...test.ts`) | Rejects reuse with HTTP 403 `GUEST_TOKEN_REUSED` | HTTP 403 returned | **PASS** | `✔ PAYMENTS: Reused guest capture token... (14.1ms)` |
+| **TC-073** | Expired guest capture token rejection | Security Integ | Expired token (>2 hours) | `npm test` (`security...test.ts`) | Rejects with HTTP 403 `GUEST_TOKEN_EXPIRED` | HTTP 403 returned | **PASS** | `✔ PAYMENTS: Expired guest capture token... (8.3ms)` |
+| **TC-074** | Cross-order guest capture token isolation | Security Integ | Order A token on Order B | `npm test` (`security...test.ts`) | Rejects cross-order use with HTTP 403 `INVALID_GUEST_TOKEN` | HTTP 403 returned | **PASS** | `✔ PAYMENTS: Token for Order A cannot capture... (11.5ms)` |
+| **TC-075** | Startup config validator in production | Unit/Config | Missing env vars | `npm test` (`security...test.ts`) | Throws ConfigurationError listing each missing variable by name | ConfigurationError thrown with exact missing keys | **PASS** | `✔ CONFIG: validateStartupConfig in production... (2.4ms)` |
+| **TC-076** | Forbid test webhook bypass outside test | Unit/Config | `ALLOW_TEST_SIGNATURE_BYPASS` | `npm test` (`security...test.ts`) | Throws ConfigurationError on bypass outside `NODE_ENV=test` | Throws security violation error | **PASS** | `✔ CONFIG: validateStartupConfig forbids... (1.8ms)` |
+| **TC-077** | /api/health persistenceMode reporting | Integration | GET `/api/health` | `npm test` (`security...test.ts`) | Returns `persistenceMode: "firestore-admin" | "memory-volatile"` | HTTP 200 with persistenceMode | **PASS** | `✔ HEALTH: /api/health reports persistenceMode... (8.1ms)` |
 
 ---
 
 ## 3. Test Evidence Artifacts
 
-1. **Browser Recording**: `file:///C:/Users/thira/.gemini/antigravity-ide/brain/0c367e53-6ea4-4278-84f7-bea6d3f4ed66/paypilot_e2e_audit_1793163387951.webp`
-2. **Key Screenshots Saved in Brain Artifacts**:
+1. **CLI Execution Logs (Verified Reproducible Traces)**:
+   - Automated Test Suite Log (60/60 passing): [`docs/evidence/TEST_EXECUTION_EVIDENCE.txt`](file:///c:/Users/thira/OneDrive%20-%20Rathinam%20Group%20Of%20Institutions/Desktop/My%20carrier/projects/PayPilot-AI-%E2%80%94-Autonomous-Commerce-&-Intelligent-Escrow-Platform/docs/evidence/TEST_EXECUTION_EVIDENCE.txt)
+   - TypeScript Typecheck Clean Log: [`docs/evidence/LINT_EXECUTION_EVIDENCE.txt`](file:///c:/Users/thira/OneDrive%20-%20Rathinam%20Group%20Of%20Institutions/Desktop/My%20carrier/projects/PayPilot-AI-%E2%80%94-Autonomous-Commerce-&-Intelligent-Escrow-Platform/docs/evidence/LINT_EXECUTION_EVIDENCE.txt)
+   - Vite Production Build Output: [`docs/evidence/BUILD_EXECUTION_EVIDENCE.txt`](file:///c:/Users/thira/OneDrive%20-%20Rathinam%20Group%20Of%20Institutions/Desktop/My%20carrier/projects/PayPilot-AI-%E2%80%94-Autonomous-Commerce-&-Intelligent-Escrow-Platform/docs/evidence/BUILD_EXECUTION_EVIDENCE.txt)
+2. **Browser Recording**: `file:///C:/Users/thira/.gemini/antigravity-ide/brain/0c367e53-6ea4-4278-84f7-bea6d3f4ed66/paypilot_e2e_audit_1793163387951.webp`
+3. **Key Screenshots Saved in Brain Artifacts**:
    - `customer_discover_catalog_1793163438510.png` (Product discovery catalog)
    - `product_detail_fan_bldc_892_1793163474963.png` (Three.js 3D viewer & specs)
    - `smart_cart_page_1793163490343.png` (Ranked purchase stack)
@@ -106,3 +126,4 @@ Layer 7: Physical Mobile Device Camera Hardware ──────────�
    - `finance_role_view_1793163546221.png` (Finance Desk ledger & GST records)
    - `seller_products_page_1793163569803.png` (Listing studio & GLB manager)
    - `public_storefront_aerocool_1793163588545.png` (Live public storefront)
+

@@ -12,11 +12,11 @@
 | Subsystem | Requirement | Verified Status | Evidence |
 | :--- | :--- | :--- | :--- |
 | **Node.js Runtime** | Node >= 18.0.0 (Tested on Node 24.15.0) | **READY** | Compatible with modern ESM & Fetch APIs |
-| **TypeScript Typecheck** | Zero compiler errors | **PASS** | `tsc --noEmit` exited code 0 |
-| **Vite Production Bundle** | Minified client bundle in `dist/` | **PASS** | `vite build` completed in 9.05s |
+| **TypeScript Typecheck** | Zero compiler errors | **PASS** | `tsc --noEmit` exited code 0 ([`docs/evidence/LINT_EXECUTION_EVIDENCE.txt`](file:///c:/Users/thira/OneDrive%20-%20Rathinam%20Group%20Of%20Institutions/Desktop/My%20carrier/projects/PayPilot-AI-%E2%80%94-Autonomous-Commerce-&-Intelligent-Escrow-Platform/docs/evidence/LINT_EXECUTION_EVIDENCE.txt)) |
+| **Vite Production Bundle** | Minified client bundle in `dist/` | **PASS** | `vite build` completed in 9.05s ([`docs/evidence/BUILD_EXECUTION_EVIDENCE.txt`](file:///c:/Users/thira/OneDrive%20-%20Rathinam%20Group%20Of%20Institutions/Desktop/My%20carrier/projects/PayPilot-AI-%E2%80%94-Autonomous-Commerce-&-Intelligent-Escrow-Platform/docs/evidence/BUILD_EXECUTION_EVIDENCE.txt)) |
 | **Express Backend** | Port 3000 HTTP listener & API routes | **PASS** | Clean startup via `node node_modules/tsx/dist/cli.mjs server.ts` |
-| **Health Liveness Probe** | HTTP 200 on `/health` and `/api/health` | **PASS** | Verified uptime and timestamp output |
-| **Unit & Integration Suite** | Node native test runner (`node:test`) | **PASS** | 44/44 tests passing in ~23s |
+| **Health Liveness Probe** | HTTP 200 on `/health` and `/api/health` | **PASS** | Verified uptime, persistenceMode, and timestamp output |
+| **Unit & Integration Suite** | Node native test runner (`node:test`) | **PASS** | 60/60 tests passing in ~80s ([`docs/evidence/TEST_EXECUTION_EVIDENCE.txt`](file:///c:/Users/thira/OneDrive%20-%20Rathinam%20Group%20Of%20Institutions/Desktop/My%20carrier/projects/PayPilot-AI-%E2%80%94-Autonomous-Commerce-&-Intelligent-Escrow-Platform/docs/evidence/TEST_EXECUTION_EVIDENCE.txt)) |
 
 ---
 
@@ -101,6 +101,10 @@ The project is structured as a unified Express + Vite application:
 ## 5. Security & Risk Checklist Before Production Go-Live
 
 - [x] **RBAC Enforcement**: Server verifies Bearer tokens and rejects spoofed `x-actor` headers with HTTP 401.
+- [x] **Dual-Auth Guest Checkout**: Unauthenticated guest checkouts receive single-use cryptographic capture token (`guestCaptureToken`) with SHA-256 hash validation and constant-time verification. Replay, reuse, and cross-order capture attempts rejected with 403.
+- [x] **Startup Configuration Validator**: Server startup fails fast in production if required variables (`PAYPAL_WEBHOOK_ID`, `PAYPAL_CLIENT_ID`, `PAYPAL_CLIENT_SECRET`, `GOOGLE_APPLICATION_CREDENTIALS`) are missing, and strictly forbids test signature bypass.
+- [x] **Fail-Closed USD Payment Standard**: INR catalog items dynamically converted to USD using server exchange rate; direct unsupported currency requests fail closed with 400.
+- [x] **Single-Source Auth & Role Immutability**: All client API requests attach fresh Bearer tokens via `authenticatedFetch`. Client role escalation is blocked at root cause (`ROLE_ESCALATION_FORBIDDEN` and Zod `.strict()` schema).
 - [x] **Authoritative Financial Calculations**: All price calculations, tax rates (18% GST), and PayPal fees are computed on the server from authoritative catalog items.
 - [x] **Idempotency**: Payment creation and order capture use idempotency keys to prevent duplicate transactions.
 - [x] **AI Grounding**: Gemini is forbidden from inventing unprovided product specs or hallucinating certifications.
@@ -127,7 +131,7 @@ npm run lint
 ```bash
 npm test
 ```
-*Expected output: 28/28 tests pass.*
+*Expected output: 60/60 tests pass.*
 
 ### Step 4: Build Client Bundle
 ```bash

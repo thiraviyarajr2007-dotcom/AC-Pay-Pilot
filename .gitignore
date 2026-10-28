@@ -9,3 +9,9 @@ coverage/
 !.env.example
 .antigravity/
 .firebase/
+service-account*.json
+*credentials*.json
+*.pem
+*.key
+*.p12
+

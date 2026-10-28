@@ -1,0 +1,20 @@
+================================================================================
+AC PayPilot — Production Build Execution Evidence (npm run build)
+Date: 2026-10-28
+Command: node node_modules/vite/bin/vite.js build
+Environment: Vite v8.3.5, Production Environment
+Result: Clean build in 11.55s, exit code 0
+================================================================================
+
+vite v8.3.5 building client environment for production...
+transforming...
+✓ 1038 modules transformed.
+rendering chunks...
+computing gzip size...
+dist/index.html                                  2.15 kB │ gzip:     0.89 kB
+dist/assets/index-D_gEygfD.css                 140.04 kB │ gzip:    20.12 kB
+dist/assets/PublicStorefrontApp-2O5uJ8p2.js     45.47 kB │ gzip:    10.85 kB
+dist/assets/vendor-firebase-C5XStwI6.js        562.93 kB │ gzip:   169.00 kB
+dist/assets/vendor-three-BFYq0GLg.js           602.71 kB │ gzip:   151.11 kB
+dist/assets/index-BwPQJTc1.js                6,648.70 kB │ gzip: 1,831.58 kB
+✓ built in 11.55s

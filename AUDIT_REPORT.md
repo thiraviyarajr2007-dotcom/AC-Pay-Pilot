@@ -3,7 +3,7 @@
 **Date:** 2026-10-28  
 **Auditor:** Principal Full-Stack, Payment Security & Systems Reliability Engineer  
 **Repository:** `AC-Pay-Pilot` (`PayPilot-AI-—-Autonomous-Commerce-&-Intelligent-Escrow-Platform`)  
-**Status:** **Security Remediation Complete & Verified** (44/44 Automated Tests Pass, 0 Lint Errors, Clean Production Build, Live PayPal Sandbox Orders & OAuth Verified, Gemini AI Live Verified, Cloud Firestore REST Health Live Verified)
+**Status:** **Security Remediation Complete & Verified** (60/60 Automated Tests Pass, 0 Lint Errors, Clean Production Build, Live PayPal Sandbox Orders & OAuth Verified, Gemini AI Live Verified, Cloud Firestore REST Health Live Verified)
 
 ---
 
@@ -179,12 +179,12 @@ When establishing the project baseline, four distinct blockers were discovered:
 
 | Test Category | Before Fixes | After Fixes | Evidence |
 | :--- | :--- | :--- | :--- |
-| **TypeScript Typecheck** | 3 Compiler Errors | **0 Errors (100% Pass)** | `tsc --noEmit` exited code 0 |
-| **Automated Regression Tests** | 0 Passing (Hanging >72s) | **44/44 Passing (~23s)** | `node:test` runner (`finance.test.ts` + `securityAndSingleSource.test.ts`) |
-| **Live API Checks** | Unverified | **6 Endpoints Verified Live** | Real PayPal Sandbox order creation (`USD`), live Gemini AI calls |
-| **Production Build** | Broken by `.cmd` issue | **Clean Build (9.05s)** | Vite generated `dist/` |
-| **Subsystem Health Check** | Unverified | **All 4 Subsystems LIVE** | `GET /api/health/system-check` (Firestore REST write/read/delete tested) |
-| **Browser E2E Audit** | Unverified | **All 8 Workflows PASS** | Playwright WebP Video & Screenshots |
+| **TypeScript Typecheck** | 3 Compiler Errors | **0 Errors (100% Pass)** | `tsc --noEmit` exited code 0 (`docs/evidence/LINT_EXECUTION_EVIDENCE.txt`) |
+| **Automated Regression Tests** | 0 Passing (Hanging >72s) | **60/60 Passing (~80s)** | `node:test` runner (`finance.test.ts` + `securityAndSingleSource.test.ts`, logs in `docs/evidence/TEST_EXECUTION_EVIDENCE.txt`) |
+| **Live API Checks** | Unverified | **6 Endpoints Verified Live** | Real PayPal Sandbox order creation (`USD`), live Gemini AI calls, verified in `docs/evidence/TEST_EXECUTION_EVIDENCE.txt` |
+| **Production Build** | Broken by `.cmd` issue | **Clean Build (11.55s)** | Vite generated `dist/` (`docs/evidence/BUILD_EXECUTION_EVIDENCE.txt`) |
+| **Subsystem Health Check** | Unverified | **All Subsystems Verified** | `GET /api/health` reports status and `persistenceMode` |
+| **Browser E2E Verification** | Unverified | **Component & Unit Verified** | React component tests and route guard checks pass. Automated headless browser E2E (e.g. Playwright) is not configured; previous claims of automated 8-journey browser tests have been removed. |
 
 ---
 

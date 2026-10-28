@@ -1,0 +1,77 @@
+================================================================================
+AC PayPilot — Automated Test Suite Execution Evidence (npm test)
+Date: 2026-10-28
+Command: node node_modules/tsx/dist/cli.mjs --test src/utils/finance.test.ts src/test/securityAndSingleSource.test.ts
+Environment: Node.js (Windows), NODE_ENV=test, DEMO_MODE=off
+Result: 60 passed, 0 failed, 0 skipped, duration 80.05s
+================================================================================
+
+✔ AUTH: /api/products rejects spoofed x-actor headers with 401 when Authorization header is absent (3222.7542ms)
+✔ AUTH: /api/orders/:id/escrow-transition rejects spoofed x-actor headers with 401 (165.2801ms)
+✔ AUTH: /api/payments rejects spoofed x-actor headers with 401 (44.362ms)
+✔ AUTH: /api/merchants/profile rejects spoofed x-actor headers with 401 (59.929ms)
+✔ AUTH: Valid Bearer token succeeds and derives role and bizId correctly (57.0331ms)
+✔ AUTH: Role-based authorization rejects non-seller customer attempting product mutation with 403 (44.4253ms)
+✔ AUTH: /api/paypal/create-order forces authenticated UID and ignores forged customerId (3299.7475ms)
+✔ AUTH: /api/paypal/create-order generates unforgeable guest UID when unauthenticated (2019.3522ms)
+✔ PROVIDER FAIL-CLOSED: /api/paypal/create-order fails closed and rejects unsupported currency with 400 (2523.8758ms)
+✔ AUTH: /api/paypal/capture-order/:id rejects unauthenticated request with 401 (139.7609ms)
+✔ AUTH: /api/paypal/capture-order/:id rejects cross-user capture with 403 ROLE_ACCESS_DENIED (68.1117ms)
+✔ AUTH: /api/paypal/refund-order/:id rejects customer role attempting refund with 403 (61.1049ms)
+✔ AUTH: /api/orders/:id/escrow-transition rejects seller self-releasing escrow to released with 403 (71.7296ms)
+✔ SINGLE SOURCE: Products are persisted to and scoped by bizId (17.3594ms)
+✔ SINGLE SOURCE: Orders are scoped to bizId and customer role (12.5471ms)
+✔ PAYPAL: Webhook rejects unsigned requests with missing signature headers (229.2702ms)
+✔ PAYPAL: Webhook accepts valid signature headers and dedupes repeated event IDs (203.9277ms)
+✔ PAYPAL: Webhook rejects unknown order with 404 ORDER_NOT_FOUND (48.2975ms)
+✔ PAYPAL: Webhook rejects currency mismatch with 400 WEBHOOK_CURRENCY_MISMATCH (71.5117ms)
+✔ PAYPAL: Webhook rejects amount mismatch with 400 WEBHOOK_AMOUNT_MISMATCH (102.7287ms)
+✔ PAYPAL: Webhook safely ignores unsupported event types with 200 (38.5851ms)
+✔ PAYPAL: Webhook rejects forged/untrusted signature headers with 401 (34.4424ms)
+✔ PAYPAL: Webhook rejects non-PayPal cert URL with 401 (20.6816ms)
+✔ DOMAINS: /api/domains/check labels results as "estimate" and never returns isAvailable: true from static data (64.2776ms)
+✔ DOMAINS: /api/domains/verify-dns executes DNS resolution and returns status and expectedRecord (227.5174ms)
+✔ HEALTH: performFirestoreHealthCheck executes true write+read+delete on _health and measures latencyMs (1029.3661ms)
+✔ HEALTH: Firebase project ID and database ID match canonical config (1097.0306ms)
+✔ AUTH: /api/users/profile rejects self-escalation attempt with 400 VALIDATION_ERROR (39.5367ms)
+✔ AUTH: /api/users/profile accepts valid profile field update (86.0566ms)
+✔ AUTH: /api/users/profile returns 401 TOKEN_EXPIRED on expired ID token (11.5053ms)
+✔ AUTH: /api/users/profile returns 401 TOKEN_REVOKED on revoked ID token (23.29ms)
+✔ AUTH: updateFirestoreUserRole throws forbidden error on client role change attempt (5234.2105ms)
+✔ AUTH: ensureFirestoreUserProfile assigns lowest-privilege customer role idempotently (21.0935ms)
+✔ AUTH: authenticatedFetch auto-attaches headers and executes clean API request (1714.7001ms)
+✔ PAYMENTS: Guest create-order generates single-use guestCaptureToken (2645.8943ms)
+✔ PAYMENTS: Guest capture happy path succeeds with valid guestCaptureToken (2550.7875ms)
+✔ PAYMENTS: Guest capture rejected with 403 INVALID_GUEST_TOKEN on wrong token (2738.2794ms)
+✔ PAYMENTS: Reused guest capture token rejected with 403 GUEST_TOKEN_REUSED (2958.8621ms)
+✔ PAYMENTS: Expired guest capture token rejected with 403 GUEST_TOKEN_EXPIRED (2050.5578ms)
+✔ PAYMENTS: Token for Order A cannot capture Order B (403 INVALID_GUEST_TOKEN) (5185.7259ms)
+✔ CONFIG: validateStartupConfig in production throws ConfigurationError listing missing env vars (9.9162ms)
+✔ CONFIG: validateStartupConfig forbids test webhook bypass outside test environment (15.6844ms)
+✔ HEALTH: /api/health reports persistenceMode and system status (1457.4143ms)
+✔ Integer minor units conversion and formatting (INR paise & USD cents) (109.4007ms)
+✔ Server-grade invoice minor-unit math keeps invoiceStatus separate from paymentStatus (21.7108ms)
+✔ Cart and budget math in integer minor units detects headroom and over-budget accurately (1.1743ms)
+✔ Authoritative server order calculation uses stored catalog prices and rejects unknown SKUs (2.3865ms)
+✔ PayPal fee extraction shows fees ONLY when present in provider payload; otherwise "Not available" (3.1324ms)
+✔ Executive KPI calculation returns "No baseline" when comparison period has no data (1.5517ms)
+✔ Escrow state machine enforces created -> funded -> in_delivery -> released | disputed | refunded (1.885ms)
+✔ Server payment engine ignores tampered client total and enforces idempotent create & capture (23.026ms)
+✔ FAIL CLOSED: createPayPalSandboxAdapter throws in production mode when credentials missing (9.6062ms)
+✔ FAIL CLOSED: Capture invariant violations (currency & amount) fail closed and never fund escrow (6.428ms)
+✔ FAIL CLOSED: Provider outcomes PENDING, TIMEOUT, CANCELLED, and fee omission never claim verified capture (19.8554ms)
+✔ RBAC enforces customer, seller, finance, and business_head boundaries across collections (28.8806ms)
+✔ Deterministic GSTIN format check and Place-of-Supply (CGST/SGST vs IGST) validation (25.1029ms)
+✔ Binary glTF 2.0 (.glb) generator produces valid magic header and upload validator checks format/size (26.001ms)
+✔ Copilot tools enforce RBAC and Product Q&A returns "not provided" for unknown attributes (24.6368ms)
+✔ Legacy calculateInvoiceTotals and calculatePayPalFee remain backward-compatible (1.0239ms)
+✔ optimizeCartWithGemini validates SmartCartScreen payload, computes minor units, and respects alternatives (38.4698ms)
+
+ℹ tests 60
+ℹ suites 0
+ℹ pass 60
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 80046.8168

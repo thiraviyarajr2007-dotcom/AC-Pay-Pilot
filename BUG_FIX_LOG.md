@@ -275,3 +275,148 @@
 - **Files Modified:** `AUDIT_REPORT.md`, `DEPLOYMENT_READINESS.md`, `TEST_RESULTS.md`
 - **Retest Result:** Config alignment verified by automated test in `src/test/securityAndSingleSource.test.ts` (`FIREBASE_PROJECT_ID` and `FIRESTORE_DATABASE_ID` match).
 
+---
+
+### [BF-012] Single-Source Auth & User Profile Provider with Real-Time Snapshot Sync
+- **Priority:** **P0** (State Consistency & Identity Integrity)
+- **Status:** **Resolved & Verified**
+- **Symptom:**
+  - Multiple sources of truth existed for user role and identity (Firebase Auth user, Firestore `users/{uid}`, local state, `localStorage`, server headers).
+  - Race conditions occurred where protected screens rendered before Firestore profile documents loaded, resulting in flash of wrong role or unauthenticated state.
+  - Profile updates in one window or tab failed to reflect in other tabs without a full browser reload.
+- **Root Cause:**
+  `RoleContext.tsx` maintained disconnected state variables and accepted client-side `setRole` mutations without synchronizing to backend Firestore documents.
+- **Corrective Action:**
+  1. Refactored `RoleContext.tsx` into a single-source auth & profile state machine with 5 explicit states: `loading | unauthenticated | authenticated-profile-loading | ready | error`.
+  2. Subscribed to Firebase Auth `onAuthStateChanged` chained with a real-time Firestore `onSnapshot` listener on `users/{uid}`, automatically unsubscribing on logout or unmount.
+  3. Updated `RoleRouteGuard.tsx` so protected views never render before the auth state is strictly `ready`.
+  4. Added `authFetch` wrapping `authenticatedFetch` with Bearer token attachment and 401 retry on token refresh.
+- **Files Modified:** `src/context/RoleContext.tsx`, `src/components/RoleRouteGuard.tsx`, `src/services/apiClient.ts`
+- **Regression Test Added:** Automated tests verifying ready-state gating, error state recovery, and Bearer token transmission.
+- **Retest Result:** All auth lifecycle tests pass.
+
+---
+
+### [BF-013] Client-Side Role Escalation & Safe Lowest-Privilege Default Profile Creation
+- **Priority:** **P0** (Privilege Escalation & Access Control)
+- **Status:** **Resolved & Verified**
+- **Symptom:**
+  - Clients could modify their own role in Firestore or through login dropdowns.
+  - New user signups lacked atomic profile creation, risking missing-profile states or arbitrary role assignment.
+- **Root Cause:**
+  `updateFirestoreUserRole` did not enforce server-side validation; login and signup modal screens called `setRole` based on local selection.
+- **Corrective Action:**
+  1. Updated `ensureFirestoreUserProfile` to atomically initialize profiles with lowest-privilege default role (`customer`), ignoring client-requested roles.
+  2. Modified `updateFirestoreUserRole` to explicitly throw `ROLE_ESCALATION_FORBIDDEN` if invoked from client code.
+  3. Removed client role override selectors from `LoginScreen.tsx` and `AuthModal.tsx`.
+- **Files Modified:** `src/firebase.ts`, `src/components/screens/LoginScreen.tsx`, `src/components/modals/AuthModal.tsx`
+- **Regression Test Added:** `AUTH: updateFirestoreUserRole throws forbidden error on client role change attempt` in `src/test/securityAndSingleSource.test.ts`.
+- **Retest Result:** Passing.
+
+---
+
+### [BF-014] Server-Side Profile Mutation Protection & Token Revocation Verification
+- **Priority:** **P0** (Backend Security & Server Authority)
+- **Status:** **Resolved & Verified**
+- **Symptom:**
+  - Server endpoints lacked a single authoritative handler for user profile updates.
+  - Expired or revoked Firebase ID tokens were not explicitly rejected with 401.
+- **Root Cause:**
+  `authenticateRequest` did not pass `checkRevoked: true` to `verifyIdToken`, and no dedicated profile update route with strict validation existed.
+- **Corrective Action:**
+  1. Added `checkRevoked: true` in `verifyIdToken` in `firebaseAdmin.ts`, mapping expired and revoked errors to `TOKEN_EXPIRED` (401) and `TOKEN_REVOKED` (401).
+  2. Implemented `GET /api/users/profile` and `PATCH /api/users/profile` in `server.ts` validated with `.strict()` Zod schema that forbids mutating `role`, `bizId`, or verification status.
+  3. Added `getUserProfileFromDb` and `saveUserProfileToDb` with partitioned volatile memory fallback in `firebaseAdmin.ts`.
+- **Files Modified:** `src/server/firebaseAdmin.ts`, `server.ts`
+- **Regression Test Added:** `AUTH: /api/users/profile rejects self-escalation attempt with 400 VALIDATION_ERROR`, `AUTH: /api/users/profile returns 401 TOKEN_EXPIRED`, `AUTH: /api/users/profile returns 401 TOKEN_REVOKED`.
+- **Retest Result:** Passing.
+
+---
+
+### [BF-015] Dual-Authentication Model for Payment Capture & Guest Single-Use Tokens
+- **Priority:** **P0** (Payment Security & Guest Checkout)
+- **Status:** **Resolved & Verified**
+- **Symptom:**
+  - `POST /api/paypal/create-order` allowed unauthenticated guest checkouts, but `POST /api/paypal/capture-order/:id` required a Bearer token, causing guest captures to always fail with HTTP 401.
+- **Root Cause:**
+  Mismatched authentication requirements between order creation and capture.
+- **Corrective Action:**
+  1. Implemented a dual-auth model on `POST /api/paypal/capture-order/:id` and `POST /api/paypal/cancel-order/:id`.
+  2. When an unauthenticated guest creates an order, the server generates a 32-byte cryptographic token (`crypto.randomBytes(32)`), stores only its SHA-256 hash on the order with a 2-hour expiry, and returns the raw token in the response.
+  3. Capture accepts either (a) verified Bearer token with buyer ownership or (b) valid guest capture token for that exact order verified via constant-time comparison (`crypto.timingSafeEqual`).
+  4. The guest token is marked `guestTokenUsed: true` immediately upon capture and permanently invalidated.
+- **Files Modified:** `server.ts`, `src/server/paymentEngine.ts`, `src/components/modals/PayPalCheckoutModal.tsx`
+- **Regression Test Added:** Added tests in `src/test/securityAndSingleSource.test.ts` for guest happy path, wrong token (403), reused token (403), expired token (403), and cross-order token misuse (403).
+- **Retest Result:** All 5 payment token tests pass.
+
+---
+
+### [BF-016] Authoritative Checkout Currency Standardization to USD with Honest Frontend UI
+- **Priority:** **P1** (PayPal Orders v2 Compatibility)
+- **Status:** **Resolved & Verified**
+- **Symptom:**
+  - PayPal Orders v2 strictly rejects direct INR checkouts with HTTP 422 `CURRENCY_NOT_SUPPORTED`.
+- **Root Cause:**
+  Client checkout modal requested `currency: 'INR'` from PayPal JS SDK and backend create-order.
+- **Corrective Action:**
+  1. Standardized PayPal Sandbox checkout currency to `USD`.
+  2. Mapped catalog prices from INR to USD on the server using authoritative exchange rate (`INR_TO_USD_EXCHANGE_RATE`).
+  3. Retained fail-closed HTTP 400 for unsupported direct currency requests (`INR`).
+  4. Updated `PayPalCheckoutModal.tsx` to display "Charged in USD" honestly with display-only INR conversion reference.
+- **Files Modified:** `server.ts`, `src/server/paymentEngine.ts`, `src/components/modals/PayPalCheckoutModal.tsx`
+- **Regression Test Added:** `PROVIDER FAIL-CLOSED: /api/paypal/create-order fails closed and rejects unsupported currency with 400`.
+- **Retest Result:** Passing.
+
+---
+
+### [BF-017] Startup Environment Configuration Validator & Persistence Mode Probe
+- **Priority:** **P1** (Deployment Reliability & Security Auditing)
+- **Status:** **Resolved & Verified**
+- **Symptom:**
+  - Missing production secrets or credentials silently fell back to volatile in-memory storage without warning or startup failure.
+- **Root Cause:**
+  Lack of strict startup environment assertion and persistence diagnostics.
+- **Corrective Action:**
+  1. Created `src/server/configValidator.ts` with `validateStartupConfig`. In production, requires `PAYPAL_WEBHOOK_ID`, `PAYPAL_CLIENT_ID`, `PAYPAL_CLIENT_SECRET`, and `GOOGLE_APPLICATION_CREDENTIALS`, throwing `ConfigurationError` if any is missing.
+  2. Boot check asserts test webhook signature bypass is unreachable when `NODE_ENV !== 'test'`.
+  3. Added `/health` and `/api/health` endpoints returning `persistenceMode: "firestore-admin" | "memory-volatile"`.
+  4. Added `persistenceCheckMiddleware` refusing payment routes in production with 503 if persistence is volatile.
+- **Files Modified:** `src/server/configValidator.ts`, `src/server/firebaseAdmin.ts`, `src/server/healthService.ts`, `server.ts`
+- **Regression Test Added:** Tests for production config validator failure, test bypass lockdown, and `/api/health` persistence mode reporting.
+- **Retest Result:** All 3 config & health tests pass.
+
+---
+
+### [BF-018] Elimination of Synthetic Fallbacks & Complete State Cleanup on Logout
+- **Priority:** **P1** (Clean State Lifecycle & Leak Prevention)
+- **Status:** **Resolved & Verified**
+- **Symptom:**
+  - Logout left stale profile and cart state in storage; synthetic mock users were fabricated in production paths when auth failed.
+- **Root Cause:**
+  Over-reliance on fallback objects and partial storage removal in `signOut`.
+- **Corrective Action:**
+  1. Removed synthetic mock user fallbacks (`mockFbUser`, `emailUser`, `newUser`) from production paths. Gated demo user state behind `VITE_DEMO_MODE=true` (off by default).
+  2. Hardened `signOut` in `RoleContext.tsx` to unsubscribe real-time Firestore listeners, clear all local and session storage keys, and redirect cleanly to `/login`.
+- **Files Modified:** `src/context/RoleContext.tsx`, `src/services/apiClient.ts`
+- **Regression Test Added:** Component state cleanup verified.
+- **Retest Result:** Passing.
+
+---
+
+### [BF-019] Secret Scanning, Git History Verification & Evidence Documentation
+- **Priority:** **P2** (Compliance & Documentation Hygiene)
+- **Status:** **Resolved & Verified**
+- **Symptom:**
+  - Documentation made unverified claims ("No commits were pushed", "8 browser journeys").
+- **Root Cause:**
+  Stale statements from previous assessment phases.
+- **Corrective Action:**
+  1. Performed thorough git log and git grep scans confirming no `.env` files, private keys, or service account credentials were committed.
+  2. Hardened `.gitignore` to explicitly ignore `service-account*.json`, `*credentials*.json`, `*.pem`, `*.key`.
+  3. Created `.env.example` with all required variables without secrets.
+  4. Created `docs/evidence/` with full console execution logs for tests, build, and linting.
+  5. Corrected `AUDIT_REPORT.md` and `DEPLOYMENT_READINESS.md` to reflect honest evidence.
+- **Files Modified:** `AUDIT_REPORT.md`, `DEPLOYMENT_READINESS.md`, `TEST_RESULTS.md`, `BUG_FIX_LOG.md`, `.gitignore`, `.env.example`, `docs/evidence/*`
+- **Retest Result:** All documentation synchronized with current reality.
+
+
