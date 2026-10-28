@@ -1,9 +1,9 @@
 # AC PayPilot — Complete Engineering Audit & Verification Report
 
 **Date:** 2026-10-28  
-**Auditor:** Principal Full-Stack & Systems Reliability Engineer  
+**Auditor:** Principal Full-Stack, Payment Security & Systems Reliability Engineer  
 **Repository:** `AC-Pay-Pilot` (`PayPilot-AI-—-Autonomous-Commerce-&-Intelligent-Escrow-Platform`)  
-**Status:** **Fully Verified Locally & Live Sandbox Verified** (28/28 Automated Tests Pass, 0 Lint Errors, Clean Production Build, Real PayPal Sandbox & Gemini API Verified)
+**Status:** **Security Remediation Complete & Verified** (44/44 Automated Tests Pass, 0 Lint Errors, Clean Production Build, Live PayPal Sandbox Orders & OAuth Verified, Gemini AI Live Verified, Cloud Firestore REST Health Live Verified)
 
 ---
 
@@ -17,9 +17,19 @@ AC PayPilot is an AI-powered commerce, payments, escrow, financial operations, a
 5. **Multi-Persona Role-Based Access Control (RBAC)**: Fine-grained permissions across `customer`, `seller`, `finance`, and `business_head` personas.
 6. **Multi-Storefront Architecture**: Firestore-persisted merchant stores and isolated sub-collections scoped to business identifiers.
 
-Prior to this engineering mission, the repository suffered from baseline execution failures on Windows due to unquoted path characters (`&`), ESM module resolution mismatches during `npm start`, top-level process event loop leaks in `server.ts` that hung test runners, and schema contract mismatches in the SmartCart AI endpoint.
+Prior to this targeted security remediation mission, the repository contained critical vulnerabilities and configuration anomalies:
+- A client-side fallback in `PayPalCheckoutModal.tsx` and `CheckoutResultScreen.tsx` that synthesized orders with `verifiedByServer: true` and fake `Captured` statuses when backend calls failed.
+- A payment provider adapter in `src/server/paymentEngine.ts` that silently fell through to synthetic capture completions and hardcoded fee estimates on API errors.
+- Insecure webhook signature verification in `server.ts` that accepted a sample signature string and unvalidated cert URLs in standard execution.
+- Permissive authorization fallbacks allowing customer ID overrides and missing customer ownership checks on capture routes.
+- An unresolved discrepancy in deployment documentation referencing project `paypilot-e3a1f` while the canonical configuration specifies `ai-studio-applet-webapp-4bdcd` with custom database `ai-studio-paypilotaiautono-5cf5c897-94de-4d92-83f5-3c2d5e3761dd`.
 
-Through systematic root-cause remediation, all static checks (`tsc --noEmit`), unit and integration test suites (`node:test`), production bundling (`vite build`), live subsystem health checks (`/api/health/system-check`), and end-to-end browser workflows were executed and brought to **100% green status** without altering or redesigning the existing UI.
+Through rigorous, root-cause remediation:
+- All fake client-side fallbacks were removed; errors are surfaced honestly with explicit retry states.
+- The payment engine was made strictly fail-closed; invalid currencies (`INR`) and invariant mismatches are rejected. Real live order creation was verified with PayPal Sandbox using `USD` (returning real order `4WR58417FF312423E`).
+- Webhook signature verification enforces HTTPS PayPal domain certificates, isolates test signatures strictly to `NODE_ENV === 'test'`, validates order identity (rejecting unknown orders with 404), and checks currency/amount invariants.
+- Payment routes require valid Bearer tokens and enforce customer ownership and persona role limits on the server.
+- The test suite was expanded to **44 automated regression tests (100% passing)**, static analysis (`tsc --noEmit`) passes with 0 errors, and the production build completes cleanly.
 
 ---
 
@@ -170,9 +180,10 @@ When establishing the project baseline, four distinct blockers were discovered:
 | Test Category | Before Fixes | After Fixes | Evidence |
 | :--- | :--- | :--- | :--- |
 | **TypeScript Typecheck** | 3 Compiler Errors | **0 Errors (100% Pass)** | `tsc --noEmit` exited code 0 |
-| **Unit & Integration Tests** | 0 Passing (Hanging >72s) | **28/28 Passing (9.84s)** | `node:test` reporter |
-| **Production Build** | Broken by `.cmd` issue | **Clean Build (6.33s)** | Vite generated `dist/` |
-| **Subsystem Health Check** | Unverified | **All 4 Subsystems LIVE** | `GET /api/health/system-check` |
+| **Automated Regression Tests** | 0 Passing (Hanging >72s) | **44/44 Passing (~23s)** | `node:test` runner (`finance.test.ts` + `securityAndSingleSource.test.ts`) |
+| **Live API Checks** | Unverified | **6 Endpoints Verified Live** | Real PayPal Sandbox order creation (`USD`), live Gemini AI calls |
+| **Production Build** | Broken by `.cmd` issue | **Clean Build (9.05s)** | Vite generated `dist/` |
+| **Subsystem Health Check** | Unverified | **All 4 Subsystems LIVE** | `GET /api/health/system-check` (Firestore REST write/read/delete tested) |
 | **Browser E2E Audit** | Unverified | **All 8 Workflows PASS** | Playwright WebP Video & Screenshots |
 
 ---
@@ -182,9 +193,11 @@ When establishing the project baseline, four distinct blockers were discovered:
 1. **Native Mobile WebXR / Scene Viewer**:
    - The desktop browser environment tested Three.js WebXR canvas rendering and PBR lighting accurately.
    - Physical Android Scene Viewer and iOS AR Quick Look pass-through cameras cannot be simulated in desktop browser environments without physical mobile hardware.
-2. **PayPal Live Charges**:
+2. **PayPal Live Charges & Currency Restrictions**:
    - All tests used PayPal Sandbox OAuth2 credentials (`https://api-m.sandbox.paypal.com`).
    - Production credit card transactions were intentionally not run, in compliance with testing safety rules.
-3. **Cloud Firestore Write Permissions**:
-   - The production Firebase project `paypilot-e3a1f` rejects unauthenticated admin writes (`firestore/invalid-credential`).
-   - Live integration was verified via the Firestore REST health probe and local memory stores. Deploying live rules requires configuring `GOOGLE_APPLICATION_CREDENTIALS`.
+   - PayPal Sandbox Orders v2 API does not support `INR` for direct checkout; orders must use supported currencies (e.g., `USD`). Attempting `INR` checkout correctly fails closed with HTTP 400 `ORDER_CREATION_FAILED` (422 `CURRENCY_NOT_SUPPORTED`).
+3. **Cloud Firestore Admin SDK Persistence vs REST Health Check**:
+   - Canonical project is `ai-studio-applet-webapp-4bdcd` with custom database `ai-studio-paypilotaiautono-5cf5c897-94de-4d92-83f5-3c2d5e3761dd`.
+   - The health probe performs true live write+read+delete operations on `_health` using the Web API key.
+   - Privileged server-side Admin SDK operations require `GOOGLE_APPLICATION_CREDENTIALS` (Service Account JSON). In local dev/test environments without credentials, `firebaseAdmin.ts` uses partitioned in-memory storage fallback. **Production readiness claim for durable cloud persistence requires provisioning `GOOGLE_APPLICATION_CREDENTIALS`.** In-memory storage will not survive process restarts or multi-instance deployments.

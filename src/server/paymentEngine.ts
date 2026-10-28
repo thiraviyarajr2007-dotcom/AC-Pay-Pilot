@@ -220,12 +220,18 @@ export interface PayPalProviderAdapter {
 export function createPayPalSandboxAdapter(): PayPalProviderAdapter {
   const clientId = process.env.PAYPAL_CLIENT_ID || '';
   const clientSecret = process.env.PAYPAL_CLIENT_SECRET || '';
+  const isExplicitDemo = process.env.DEMO_MODE === 'true';
+  const isTestMode = process.env.NODE_ENV === 'test';
   const hasRealCredentials =
     Boolean(clientId && clientSecret) &&
     clientId !== 'MY_PAYPAL_CLIENT_ID' &&
-    clientSecret !== 'MY_PAYPAL_CLIENT_SECRET';
+    clientSecret !== 'MY_PAYPAL_CLIENT_SECRET' &&
+    !clientId.startsWith('sb-placeholder');
 
   async function getSandboxAccessToken(): Promise<string> {
+    if (!hasRealCredentials) {
+      throw new Error('PAYPAL_CONFIG_MISSING: PayPal Sandbox credentials are not configured on the server.');
+    }
     const auth = Buffer.from(`${clientId}:${clientSecret}`).toString('base64');
     const res = await fetch('https://api-m.sandbox.paypal.com/v1/oauth2/token', {
       method: 'POST',
@@ -236,7 +242,8 @@ export function createPayPalSandboxAdapter(): PayPalProviderAdapter {
       body: 'grant_type=client_credentials',
     });
     if (!res.ok) {
-      throw new Error(`PayPal OAuth token request failed with status ${res.status}`);
+      const errBody = await res.text().catch(() => '');
+      throw new Error(`PAYPAL_AUTH_FAILED: PayPal OAuth token request failed with status ${res.status}: ${errBody}`);
     }
     const data = (await res.json()) as { access_token: string };
     return data.access_token;
@@ -276,24 +283,38 @@ export function createPayPalSandboxAdapter(): PayPalProviderAdapter {
               mode: 'paypal_sandbox_api',
             };
           }
-        } catch {
-          // Fall through to deterministic sandbox order creation if network/credentials fail
+          const errBody = await res.text().catch(() => '');
+          throw new Error(`PAYPAL_ORDER_CREATION_FAILED (HTTP ${res.status}): ${errBody}`);
+        } catch (err: any) {
+          // FAIL CLOSED: Do not convert failure into synthetic success!
+          throw new Error(`PayPal Order Creation Failed: ${err.message || String(err)}`);
         }
       }
 
-      const deterministicId = `PAYPAL-SBX-${params.idempotencyKey
-        .replace(/[^a-zA-Z0-9]/g, '')
-        .slice(-10)
-        .toUpperCase()}`;
+      // If credentials missing:
+      if (process.env.NODE_ENV === 'production') {
+        throw new Error('PAYPAL_CONFIG_ERROR: Production payments require valid PayPal credentials. Set PAYPAL_CLIENT_ID and PAYPAL_CLIENT_SECRET.');
+      }
 
-      return {
-        paypalOrderId: deterministicId,
-        status: 'CREATED',
-        mode: 'sandbox_deterministic_fallback',
-      };
+      // If in demo mode or test runner, provide synthetic test identifier clearly flagged:
+      if (isExplicitDemo || isTestMode) {
+        const deterministicId = `TEST-SBX-${params.idempotencyKey
+          .replace(/[^a-zA-Z0-9]/g, '')
+          .slice(-10)
+          .toUpperCase()}`;
+
+        return {
+          paypalOrderId: deterministicId,
+          status: 'CREATED',
+          mode: 'sandbox_deterministic_fallback',
+        };
+      }
+
+      throw new Error('PAYPAL_CREDENTIALS_REQUIRED: PayPal credentials not configured. Configure credentials or enable DEMO_MODE for local testing.');
     },
 
     async captureOrder(params) {
+      // 1. Simulation outcomes (when explicitly requested for testing decline, pending, timeout, cancelled)
       if (params.simulateOutcome && params.simulateOutcome !== 'COMPLETED') {
         switch (params.simulateOutcome) {
           case 'DECLINED':
@@ -328,7 +349,8 @@ export function createPayPalSandboxAdapter(): PayPalProviderAdapter {
         }
       }
 
-      if (hasRealCredentials && !params.paypalOrderId.startsWith('PAYPAL-SBX-')) {
+      // 2. Real PayPal API call
+      if (hasRealCredentials && !params.paypalOrderId.startsWith('TEST-SBX-') && !params.paypalOrderId.startsWith('PAYPAL-SBX-')) {
         try {
           const token = await getSandboxAccessToken();
           const res = await fetch(
@@ -345,62 +367,72 @@ export function createPayPalSandboxAdapter(): PayPalProviderAdapter {
             }
           );
           if (res.ok) {
-            const data = (await res.json()) as {
-              id: string;
-              status: string;
-              purchase_units?: Array<{
-                payments?: {
-                  captures?: Array<{
-                    id: string;
-                    status: string;
-                    seller_receivable_breakdown?: {
-                      gross_amount: { currency_code: string; value: string };
-                      paypal_fee: { currency_code: string; value: string };
-                      net_amount: { currency_code: string; value: string };
-                    };
-                  }>;
-                };
-              }>;
-            };
+            const data = (await res.json()) as any;
             const capture = data.purchase_units?.[0]?.payments?.captures?.[0];
+
+            // Invariant verification
+            const capturedCurrency = capture?.amount?.currency_code || data.purchase_units?.[0]?.amount?.currency_code;
+            const capturedValue = capture?.amount?.value || data.purchase_units?.[0]?.amount?.value;
+            const capturedMinor = capturedValue ? toMinorUnits(parseFloat(capturedValue)) : params.expectedTotalMinor;
+
+            if (capturedCurrency && capturedCurrency !== params.currency) {
+              throw new Error(`INVARIANT_VIOLATION: Currency mismatch: PayPal captured ${capturedCurrency}, expected ${params.currency}`);
+            }
+
+            if (Math.abs(capturedMinor - params.expectedTotalMinor) > 100) {
+              throw new Error(`INVARIANT_VIOLATION: Amount mismatch: PayPal captured minor ${capturedMinor}, expected ${params.expectedTotalMinor}`);
+            }
+
+            const isCompleted = data.status === 'COMPLETED' || capture?.status === 'COMPLETED';
+
             return {
-              paypalOrderId: data.id,
-              captureId: capture?.id || `CAP-${Date.now()}`,
-              providerStatus: data.status === 'COMPLETED' ? 'COMPLETED' : 'PENDING',
+              paypalOrderId: data.id || params.paypalOrderId,
+              captureId: capture?.id,
+              providerStatus: isCompleted ? 'COMPLETED' : (capture?.status || data.status || 'PENDING'),
               seller_receivable_breakdown: capture?.seller_receivable_breakdown,
               mode: 'paypal_sandbox_api',
             };
+          } else {
+            const errText = await res.text().catch(() => '');
+            let parsedErr: any;
+            try { parsedErr = JSON.parse(errText); } catch (_) {}
+            const issueName = parsedErr?.details?.[0]?.issue || parsedErr?.name || 'CAPTURE_FAILED';
+            const errorMsg = parsedErr?.details?.[0]?.description || parsedErr?.message || `PayPal capture failed with status ${res.status}`;
+
+            if (issueName === 'INSTRUMENT_DECLINED') {
+              return {
+                paypalOrderId: params.paypalOrderId,
+                providerStatus: 'DECLINED',
+                errorMessage: errorMsg,
+                mode: 'paypal_sandbox_api',
+              };
+            }
+
+            // FAIL CLOSED: Do NOT convert failure into synthetic success!
+            throw new Error(`PayPal capture error (HTTP ${res.status}): ${errorMsg}`);
           }
-        } catch {
-          // Fall through to sandbox deterministic response
+        } catch (err: any) {
+          throw new Error(`PayPal Capture Failed: ${err.message || String(err)}`);
         }
       }
 
-      // Compute provider fee breakdown: 3.49% + ₹12 (or $0.30 USD)
-      const fixedMinor = params.currency === 'USD' ? 30 : 1200;
-      const feeMinor = Math.round((params.expectedTotalMinor * 3.49) / 100) + fixedMinor;
-      const netMinor = Math.max(0, params.expectedTotalMinor - feeMinor);
+      // If credentials missing:
+      if (process.env.NODE_ENV === 'production') {
+        throw new Error('PAYPAL_CONFIG_ERROR: Production capture requires valid PayPal credentials.');
+      }
 
-      return {
-        paypalOrderId: params.paypalOrderId,
-        captureId: `CAP-SBX-${params.paypalOrderId.slice(-8)}`,
-        providerStatus: 'COMPLETED',
-        seller_receivable_breakdown: {
-          gross_amount: {
-            currency_code: params.currency,
-            value: fromMinorUnits(params.expectedTotalMinor).toFixed(2),
-          },
-          paypal_fee: {
-            currency_code: params.currency,
-            value: fromMinorUnits(feeMinor).toFixed(2),
-          },
-          net_amount: {
-            currency_code: params.currency,
-            value: fromMinorUnits(netMinor).toFixed(2),
-          },
-        },
-        mode: 'sandbox_deterministic_fallback',
-      };
+      // In explicit demo or test mode with synthetic order:
+      if (isExplicitDemo || isTestMode) {
+        return {
+          paypalOrderId: params.paypalOrderId,
+          captureId: `CAP-TEST-${params.paypalOrderId.slice(-8)}`,
+          providerStatus: 'COMPLETED',
+          seller_receivable_breakdown: undefined, // Do not claim verified provider fees!
+          mode: 'sandbox_deterministic_fallback',
+        };
+      }
+
+      throw new Error('PAYPAL_CREDENTIALS_REQUIRED: PayPal credentials not configured for capture.');
     },
   };
 }
@@ -710,13 +742,23 @@ export class ServerPaymentLedger {
     }
 
     // 4. Invoke PayPal Sandbox provider capture
-    const providerCapture = await this.provider.captureOrder({
-      paypalOrderId: order.paypalOrderId,
-      idempotencyKey: input.idempotencyKey,
-      currency: order.currency,
-      expectedTotalMinor: order.totalMinor,
-      simulateOutcome: input.simulateOutcome,
-    });
+    let providerCapture;
+    try {
+      providerCapture = await this.provider.captureOrder({
+        paypalOrderId: order.paypalOrderId,
+        idempotencyKey: input.idempotencyKey,
+        currency: order.currency,
+        expectedTotalMinor: order.totalMinor,
+        simulateOutcome: input.simulateOutcome,
+      });
+    } catch (err: any) {
+      const now = new Date().toISOString();
+      order.paymentStatus = 'Failed';
+      order.verifiedByServer = false;
+      order.failureReason = err.message || 'Payment provider capture exception';
+      order.updatedAt = now;
+      throw err;
+    }
 
     const now = new Date().toISOString();
     const feeBreakdown = extractProviderFeeBreakdown(providerCapture, order.currency);

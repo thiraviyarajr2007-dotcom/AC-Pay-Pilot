@@ -124,23 +124,9 @@ export const PayPalCheckoutModal: React.FC<PayPalCheckoutModalProps> = ({
         } catch (_) {}
 
         if (!createRes.ok || !data?.ok) {
-          const fallbackOrder: ServerOrderSummary = {
-            id: `PP-TX-${Date.now().toString().slice(-6)}-SB`,
-            orderNumber: `#PP-SBX-${Date.now().toString().slice(-4)}`,
-            paypalOrderId: `PAYPAL-SBX-${Date.now().toString().slice(-8)}`,
-            currency: 'INR',
-            subtotalMinor: 2348900,
-            taxMinor: 422802,
-            totalMinor: 2813272,
-            paypalFeeMinor: 41570,
-            netPayoutMinor: 2771702,
-            feesFromProvider: true,
-            paymentStatus: 'Authorized',
-            verifiedByServer: true,
-            escrowState: 'created',
-          };
-          setServerOrder(fallbackOrder);
-          setLastServerOrderId(fallbackOrder.id);
+          const errMsg = data?.error || `Server order creation failed (HTTP ${createRes.status})`;
+          setServerError(errMsg);
+          setServerOrder(null);
         } else {
           setServerOrder(data.order);
           setLastServerOrderId(data.order.id);
@@ -250,32 +236,18 @@ export const PayPalCheckoutModal: React.FC<PayPalCheckoutModalProps> = ({
       } catch (_) {}
 
       if (!data || !data.ok) {
-        data = {
-          ok: true,
-          order: {
-            ...(serverOrder || {
-              id: targetId,
-              orderNumber: `#PP-SBX-${targetId.slice(-4)}`,
-              paypalOrderId: `PAYPAL-SBX-${targetId.slice(-8)}`,
-              currency: 'INR' as const,
-              subtotalMinor: 2348900,
-              taxMinor: 422802,
-              totalMinor: 2813272,
-              paypalFeeMinor: 41570,
-              netPayoutMinor: 2771702,
-              feesFromProvider: true,
-              paymentStatus: 'Pending' as CanonicalPaymentState,
-              verifiedByServer: true,
-              escrowState: 'funded' as EscrowState,
-            }),
-            status: outcomeToUse === 'COMPLETED' ? 'COMPLETED' : outcomeToUse,
-            paymentStatus: outcomeToUse === 'COMPLETED' ? 'Captured' : 'Pending',
-            verifiedByServer: true,
-            feesFromProvider: true,
-          },
-          idempotentReplay: false,
-          retryAllowed: false,
-        };
+        const failureMessage =
+          data?.error || `Capture failed (HTTP ${res.status}). No payment was confirmed.`;
+        setServerError(failureMessage);
+        setServerConfirmed(false);
+        if (data?.order) {
+          setServerOrder(data.order);
+          setLastServerOrderId(data.order.id);
+        }
+        if (data?.retryAllowed) {
+          setCaptureIdempotencyKey(`idem-cap-retry-${Date.now()}`);
+        }
+        return;
       }
 
       setServerOrder(data.order);

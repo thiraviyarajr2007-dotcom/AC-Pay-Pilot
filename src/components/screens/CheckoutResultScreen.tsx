@@ -40,7 +40,7 @@ export const CheckoutResultScreen: React.FC<CheckoutResultScreenProps> = ({ stat
   const [searchParams] = useSearchParams();
   const { lastServerOrderId, getActorHeaders } = useRole();
 
-  const lookupId = searchParams.get('orderId') || lastServerOrderId || 'ord-1';
+  const lookupId = searchParams.get('orderId') || lastServerOrderId || null;
 
   const [loading, setLoading] = useState<boolean>(true);
   const [serverData, setServerData] = useState<ServerCheckoutStatusResponse['order'] | null>(null);
@@ -49,6 +49,12 @@ export const CheckoutResultScreen: React.FC<CheckoutResultScreenProps> = ({ stat
   useEffect(() => {
     let active = true;
     const fetchFromServer = async () => {
+      if (!lookupId) {
+        setLoading(false);
+        setError('No active order specified. Return to cart to complete checkout.');
+        return;
+      }
+
       setLoading(true);
       setError(null);
       try {
@@ -126,6 +132,10 @@ export const CheckoutResultScreen: React.FC<CheckoutResultScreenProps> = ({ stat
               <h1 className="text-xl font-bold font-headline text-on-surface">
                 {serverData.verifiedByServer && serverData.paymentStatus === 'Captured'
                   ? 'Payment Confirmed'
+                  : serverData.paymentStatus === 'Pending'
+                  ? 'Payment Pending Bank Confirmation'
+                  : serverData.paymentStatus === 'Failed'
+                  ? 'Payment Failed or Declined'
                   : `Order Status: ${serverData.paymentStatus}`}
               </h1>
               <p className="text-xs text-secondary leading-relaxed">

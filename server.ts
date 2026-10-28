@@ -28,9 +28,14 @@ import {
 import {
   computeExecutiveKpisForDateRange,
   calculateAuthoritativeOrderTotalsMinor,
+  toMinorUnits,
 } from './src/utils/finance';
 import { AuthenticatedActor, evaluateRoleAccess } from './src/utils/rbac';
-import { ESCROW_ARCHITECTURE_DECISION, transitionEscrowState } from './src/utils/escrow';
+import {
+  ESCROW_ARCHITECTURE_DECISION,
+  transitionEscrowState,
+  canTransitionEscrow,
+} from './src/utils/escrow';
 import {
   answerProductQaWithGemini,
   analyzeInvoiceWithGemini,
@@ -289,13 +294,25 @@ export async function createAppServer() {
   // 2. PayPal Sandbox Orders v2 — Create Order (POST /api/paypal/create-order)
   // ==========================================================================
   app.post('/api/paypal/create-order', async (req: Request, res: Response) => {
-    const actor = (await authenticateRequest(req).catch(() => null)) || resolveActorFromRequest(req);
+    let actor: AuthenticatedActor;
+    try {
+      const userActor = await authenticateRequest(req);
+      actor = userActor;
+    } catch {
+      // Unauthenticated checkout: generate unique unforgeable guest actor
+      actor = {
+        uid: `guest-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+        email: 'guest@paypilot.in',
+        role: 'customer',
+        bizId: DEFAULT_BIZ_ID,
+      };
+    }
     const bizId = actor.bizId || DEFAULT_BIZ_ID;
 
     try {
       const parsedBody = CreatePayPalOrderSchema.parse({
         ...req.body,
-        customerId: req.body?.customerId || actor.uid,
+        customerId: actor.uid, // Strictly enforce verified actor.uid, never trust body customerId
         sellerId: req.body?.sellerId || bizId,
       });
 
@@ -368,15 +385,17 @@ export async function createAppServer() {
   // 3. PayPal Sandbox Orders v2 — Capture Order (POST /api/paypal/capture-order/:id)
   // ==========================================================================
   app.post('/api/paypal/capture-order/:id', async (req: Request, res: Response) => {
-    const actor = (await authenticateRequest(req).catch(() => null)) || resolveActorFromRequest(req);
+    // Require verified Bearer token authentication for payment capture
+    const actor = await requireAuth(req, res);
+    if (!actor) return;
     const bizId = actor.bizId || DEFAULT_BIZ_ID;
 
     try {
       const orderOrPaypalId = req.params.id;
       const parsedBody = CapturePayPalOrderSchema.parse({
         ...req.body,
-        actorId: req.body?.actorId || actor.uid,
-        actorRole: req.body?.actorRole || actor.role,
+        actorId: actor.uid, // Strictly bound to verified token
+        actorRole: actor.role, // Strictly bound to verified token
       });
 
       let existing = defaultServerLedger.getOrderWithEvents(orderOrPaypalId);
@@ -683,8 +702,8 @@ export async function createAppServer() {
       const orderId = req.params.id;
       const parsedBody = EscrowTransitionBodySchema.parse({
         ...req.body,
-        actorId: req.body?.actorId || actor.uid,
-        actorRole: req.body?.actorRole || actor.role,
+        actorId: actor.uid, // Strictly bound to verified token
+        actorRole: actor.role, // Strictly bound to verified token
       });
 
       if (parsedBody.isAiAutomated) {
@@ -1526,9 +1545,26 @@ export async function createAppServer() {
       return false;
     }
 
-    if (transmissionSig === 'SAMPLE_HMAC_SHA256_TRANSMISSION_SIGNATURE_PAYPAL') {
-      const isPayPalCert = certUrl.startsWith('https://') && certUrl.includes('paypal.com');
-      return Boolean(isPayPalCert);
+    // Verify certUrl is valid HTTPS and strictly hosted on a PayPal domain
+    try {
+      const parsedCert = new URL(certUrl);
+      if (parsedCert.protocol !== 'https:' || !parsedCert.hostname.endsWith('.paypal.com')) {
+        return false;
+      }
+    } catch {
+      return false;
+    }
+
+    // Isolated test hook: Gated strictly by NODE_ENV === 'test'.
+    // In production, this branch is unreachable.
+    if (process.env.NODE_ENV === 'test') {
+      const testSecret = process.env.PAYPAL_TEST_WEBHOOK_SECRET || 'test-sandbox-webhook-token';
+      if (
+        req.headers['x-paypal-test-signature'] === testSecret ||
+        (transmissionSig === 'SAMPLE_HMAC_SHA256_TRANSMISSION_SIGNATURE_PAYPAL' && !process.env.PAYPAL_WEBHOOK_ID)
+      ) {
+        return true;
+      }
     }
 
     const clientId = process.env.PAYPAL_CLIENT_ID;
@@ -1537,13 +1573,11 @@ export async function createAppServer() {
       Boolean(clientId && clientSecret) &&
       clientId !== 'MY_PAYPAL_CLIENT_ID' &&
       clientSecret !== 'MY_PAYPAL_CLIENT_SECRET' &&
-      !clientId?.startsWith('sb-placeholder') &&
-      process.env.NODE_ENV !== 'test';
+      !clientId?.startsWith('sb-placeholder');
 
-    if (!hasRealCredentials) {
-      // In sandbox/test mode without live PayPal credentials, verify header structure and legitimate PayPal cert URL
-      const isPayPalCert = certUrl.startsWith('https://') && certUrl.includes('paypal.com');
-      return Boolean(isPayPalCert && transmissionSig.length > 10);
+    if (!hasRealCredentials || !webhookId || webhookId === 'WH-LOCAL-SANDBOX') {
+      // Fail closed: Webhook verification requires valid PayPal credentials and webhook ID
+      return false;
     }
 
     try {
@@ -1556,6 +1590,7 @@ export async function createAppServer() {
         },
         body: 'grant_type=client_credentials',
       });
+      if (!tokenRes.ok) return false;
       const tokenData = (await tokenRes.json()) as any;
       const accessToken = tokenData.access_token;
       if (!accessToken) return false;
@@ -1579,6 +1614,7 @@ export async function createAppServer() {
           }),
         }
       );
+      if (!verifyRes.ok) return false;
       const verifyData = (await verifyRes.json()) as any;
       return verifyData.verification_status === 'SUCCESS';
     } catch (err) {
@@ -1633,16 +1669,68 @@ export async function createAppServer() {
         processedWebhookEventIds.add(parsed.id);
       }
 
-      // 3. Process webhook event and update Firestore order & ledger
+      // Check for supported event types
+      const supportedEvents = [
+        'PAYMENT.CAPTURE.COMPLETED',
+        'PAYMENT.CAPTURE.DENIED',
+        'PAYMENT.CAPTURE.REFUNDED',
+      ];
+      if (!supportedEvents.includes(eventType)) {
+        return res.status(200).json({
+          ok: true,
+          status: 'EVENT_IGNORED_UNSUPPORTED_TYPE',
+          eventId: parsed.id,
+          receivedEventType: eventType,
+        });
+      }
+
+      // 3. Process webhook event and validate referenced order
       if (paypalOrderId) {
         const existingOrder = await getOrderByIdForBiz(DEFAULT_BIZ_ID, paypalOrderId);
+        const existingLedger = defaultServerLedger.getOrderWithEvents(paypalOrderId);
+        const targetOrder = existingOrder || existingLedger?.order;
+
+        if (!targetOrder) {
+          return sendTypedError(
+            res,
+            404,
+            'ORDER_NOT_FOUND',
+            `Order '${paypalOrderId}' referenced in webhook does not exist.`
+          );
+        }
+
+        // Amount & currency verification if included in resource
+        if (resource.amount) {
+          const resCurrency = resource.amount.currency_code;
+          const resValue = resource.amount.value;
+          if (resCurrency && resCurrency !== targetOrder.currency) {
+            return sendTypedError(
+              res,
+              400,
+              'WEBHOOK_CURRENCY_MISMATCH',
+              `Webhook currency '${resCurrency}' does not match order currency '${targetOrder.currency}'.`
+            );
+          }
+          if (resValue) {
+            const resMinor = toMinorUnits(parseFloat(resValue));
+            if (Math.abs(resMinor - targetOrder.totalMinor) > 100) {
+              return sendTypedError(
+                res,
+                400,
+                'WEBHOOK_AMOUNT_MISMATCH',
+                `Webhook amount '${resMinor}' does not match order total '${targetOrder.totalMinor}'.`
+              );
+            }
+          }
+        }
+
         if (existingOrder) {
           let nextState = existingOrder.escrowState;
           if (eventType === 'PAYMENT.CAPTURE.COMPLETED') nextState = 'funded';
           else if (eventType === 'PAYMENT.CAPTURE.DENIED') nextState = 'disputed';
           else if (eventType === 'PAYMENT.CAPTURE.REFUNDED') nextState = 'refunded';
 
-          if (nextState !== existingOrder.escrowState) {
+          if (nextState !== existingOrder.escrowState && canTransitionEscrow(existingOrder.escrowState, nextState)) {
             await saveOrderForBiz(DEFAULT_BIZ_ID, {
               ...existingOrder,
               escrowState: nextState,
@@ -1660,29 +1748,32 @@ export async function createAppServer() {
           }
         }
 
-        const existingLedger = defaultServerLedger.getOrderWithEvents(paypalOrderId);
         if (existingLedger) {
-          if (eventType === 'PAYMENT.CAPTURE.COMPLETED') {
-            defaultServerLedger.transitionOrderEscrow(existingLedger.order.id, {
-              nextState: 'funded',
-              reason: `PayPal Webhook: ${eventType} confirmed`,
-              actorId: 'paypal-webhook-service',
-              actorRole: 'finance',
-            });
-          } else if (eventType === 'PAYMENT.CAPTURE.DENIED') {
-            defaultServerLedger.transitionOrderEscrow(existingLedger.order.id, {
-              nextState: 'disputed',
-              reason: 'PayPal Webhook: Capture denied by processor',
-              actorId: 'paypal-webhook-service',
-              actorRole: 'finance',
-            });
-          } else if (eventType === 'PAYMENT.CAPTURE.REFUNDED') {
-            defaultServerLedger.transitionOrderEscrow(existingLedger.order.id, {
-              nextState: 'refunded',
-              reason: 'PayPal Webhook: Refund recorded by provider',
-              actorId: 'paypal-webhook-service',
-              actorRole: 'finance',
-            });
+          try {
+            if (eventType === 'PAYMENT.CAPTURE.COMPLETED' && canTransitionEscrow(existingLedger.order.escrowState, 'funded')) {
+              defaultServerLedger.transitionOrderEscrow(existingLedger.order.id, {
+                nextState: 'funded',
+                reason: `PayPal Webhook: ${eventType} confirmed`,
+                actorId: 'paypal-webhook-service',
+                actorRole: 'finance',
+              });
+            } else if (eventType === 'PAYMENT.CAPTURE.DENIED' && canTransitionEscrow(existingLedger.order.escrowState, 'disputed')) {
+              defaultServerLedger.transitionOrderEscrow(existingLedger.order.id, {
+                nextState: 'disputed',
+                reason: 'PayPal Webhook: Capture denied by processor',
+                actorId: 'paypal-webhook-service',
+                actorRole: 'finance',
+              });
+            } else if (eventType === 'PAYMENT.CAPTURE.REFUNDED' && canTransitionEscrow(existingLedger.order.escrowState, 'refunded')) {
+              defaultServerLedger.transitionOrderEscrow(existingLedger.order.id, {
+                nextState: 'refunded',
+                reason: 'PayPal Webhook: Refund recorded by provider',
+                actorId: 'paypal-webhook-service',
+                actorRole: 'finance',
+              });
+            }
+          } catch (ledgerErr) {
+            console.warn('Webhook escrow transition notice:', ledgerErr);
           }
         }
       }

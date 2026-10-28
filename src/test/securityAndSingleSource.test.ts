@@ -162,6 +162,155 @@ test('AUTH: Role-based authorization rejects non-seller customer attempting prod
   assert.equal(body.code, 'ROLE_ACCESS_DENIED');
 });
 
+test('AUTH: /api/paypal/create-order forces authenticated UID and ignores forged customerId', async () => {
+  const customerToken = 'mock-token-customer-realUser88-biz-aerocool';
+  const res = await fetch(`${baseUrl}/api/paypal/create-order`, {
+    method: 'POST',
+    headers: {
+      Authorization: `Bearer ${customerToken}`,
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({
+      idempotencyKey: `idem-auth-test-${Date.now()}`,
+      currency: 'USD',
+      items: [{ sku: '#FAN-BLDC-892', quantity: 1 }],
+      customerId: 'ATTACKER-FORGED-CUSTOMER-ID', // Forged ID in body must be ignored!
+      sellerId: 'biz-aerocool',
+      buyerName: 'Real User',
+      buyerEmail: 'real@aerocool.in',
+      shippingAddress: '123 Main St, Bengaluru',
+    }),
+  });
+
+  assert.equal(res.status, 201);
+  const body = (await res.json()) as any;
+  assert.equal(body.ok, true);
+  assert.equal(body.order.customerId, 'realUser88', 'Server must strictly force customerId to actor.uid');
+});
+
+test('AUTH: /api/paypal/create-order generates unforgeable guest UID when unauthenticated', async () => {
+  const res = await fetch(`${baseUrl}/api/paypal/create-order`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({
+      idempotencyKey: `idem-guest-test-${Date.now()}`,
+      currency: 'USD',
+      items: [{ sku: '#FAN-BLDC-892', quantity: 1 }],
+      customerId: 'ATTACKER-FORGED-GUEST-ID', // Must be ignored
+      sellerId: 'biz-aerocool',
+      buyerName: 'Guest Buyer',
+      buyerEmail: 'guest@buyer.in',
+      shippingAddress: '456 Guest Way',
+    }),
+  });
+
+  assert.equal(res.status, 201);
+  const body = (await res.json()) as any;
+  assert.equal(body.ok, true);
+  assert.notEqual(body.order.customerId, 'ATTACKER-FORGED-GUEST-ID');
+  assert.ok(body.order.customerId.startsWith('guest-'));
+});
+
+test('PROVIDER FAIL-CLOSED: /api/paypal/create-order fails closed and rejects unsupported currency with 400', async () => {
+  // Real PayPal Sandbox rejects INR for direct orders with 422 CURRENCY_NOT_SUPPORTED
+  const res = await fetch(`${baseUrl}/api/paypal/create-order`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({
+      idempotencyKey: `idem-inr-fail-${Date.now()}`,
+      currency: 'INR',
+      items: [{ sku: '#FAN-BLDC-892', quantity: 1 }],
+      sellerId: 'biz-aerocool',
+      buyerName: 'INR Buyer',
+      buyerEmail: 'buyer@inr.in',
+      shippingAddress: '456 MG Road',
+    }),
+  });
+
+  // Must fail closed with 400 ORDER_CREATION_FAILED, never fabricating synthetic success!
+  assert.equal(res.status, 400);
+  const body = (await res.json()) as any;
+  assert.equal(body.ok, false);
+  assert.equal(body.code, 'ORDER_CREATION_FAILED');
+  assert.ok(body.error.includes('CURRENCY_NOT_SUPPORTED') || body.error.includes('failed'));
+});
+
+test('AUTH: /api/paypal/capture-order/:id rejects unauthenticated request with 401', async () => {
+  const res = await fetch(`${baseUrl}/api/paypal/capture-order/ord-1`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({
+      idempotencyKey: `idem-unauth-cap-${Date.now()}`,
+    }),
+  });
+
+  assert.equal(res.status, 401);
+  const body = (await res.json()) as any;
+  assert.equal(body.code, 'MISSING_AUTH_TOKEN');
+});
+
+test('AUTH: /api/paypal/capture-order/:id rejects cross-user capture with 403 ROLE_ACCESS_DENIED', async () => {
+  // ord-1 is owned by cust-demo-1; cust-stranger-99 attempts to capture it
+  const attackerToken = 'mock-token-customer-cust-stranger-99-biz-aerocool';
+  const res = await fetch(`${baseUrl}/api/paypal/capture-order/ord-1`, {
+    method: 'POST',
+    headers: {
+      Authorization: `Bearer ${attackerToken}`,
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({
+      idempotencyKey: `idem-cross-user-${Date.now()}`,
+    }),
+  });
+
+  assert.equal(res.status, 403);
+  const body = (await res.json()) as any;
+  assert.equal(body.code, 'ROLE_ACCESS_DENIED');
+});
+
+test('AUTH: /api/paypal/refund-order/:id rejects customer role attempting refund with 403', async () => {
+  const customerToken = 'mock-token-customer-cust-demo-1-biz-aerocool';
+  const res = await fetch(`${baseUrl}/api/paypal/refund-order/ord-1`, {
+    method: 'POST',
+    headers: {
+      Authorization: `Bearer ${customerToken}`,
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({
+      reason: 'Customer trying to trigger refund directly',
+    }),
+  });
+
+  assert.equal(res.status, 403);
+  const body = (await res.json()) as any;
+  assert.equal(body.code, 'ROLE_ACCESS_DENIED');
+});
+
+test('AUTH: /api/orders/:id/escrow-transition rejects seller self-releasing escrow to released with 403', async () => {
+  const sellerToken = 'mock-token-seller-seller-demo-1-biz-aerocool';
+  const res = await fetch(`${baseUrl}/api/orders/ord-2/escrow-transition`, {
+    method: 'POST',
+    headers: {
+      Authorization: `Bearer ${sellerToken}`,
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({
+      nextState: 'released',
+      reason: 'Seller attempting self-release of escrow funds',
+    }),
+  });
+
+  assert.equal(res.status, 403);
+  const body = (await res.json()) as any;
+  assert.equal(body.code, 'UNAUTHORIZED_ROLE_FOR_TRANSITION');
+});
+
 // ============================================================================
 // 2. SINGLE SOURCE OF TRUTH: Firestore Scoping by bizId
 // ============================================================================
@@ -272,7 +421,7 @@ test('PAYPAL: Webhook accepts valid signature headers and dedupes repeated event
     event_type: 'PAYMENT.CAPTURE.COMPLETED',
     summary: 'Payment capture completed in sandbox',
     resource: {
-      id: 'PAYPAL-ORD-TEST-123',
+      id: 'PAYPAL-SBX-884120A',
     },
   };
 
@@ -301,6 +450,158 @@ test('PAYPAL: Webhook accepts valid signature headers and dedupes repeated event
   assert.equal(body2.ok, true);
   assert.equal(body2.duplicate, true);
   assert.equal(body2.status, 'DUPLICATE_IGNORED');
+});
+
+test('PAYPAL: Webhook rejects unknown order with 404 ORDER_NOT_FOUND', async () => {
+  const res = await fetch(`${baseUrl}/api/paypal/webhook`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      'paypal-transmission-id': 'trans-unknown-order',
+      'paypal-transmission-time': new Date().toISOString(),
+      'paypal-transmission-sig': 'SAMPLE_HMAC_SHA256_TRANSMISSION_SIGNATURE_PAYPAL',
+      'paypal-cert-url': 'https://api.sandbox.paypal.com/v1/notifications/certs/CERT-1234.pem',
+      'paypal-auth-algo': 'SHA256withRSA',
+    },
+    body: JSON.stringify({
+      id: `WH-UNKNOWN-ORD-${Date.now()}`,
+      event_type: 'PAYMENT.CAPTURE.COMPLETED',
+      resource: {
+        id: 'NON-EXISTENT-PAYPAL-ORDER-999',
+      },
+    }),
+  });
+
+  assert.equal(res.status, 404);
+  const body = (await res.json()) as any;
+  assert.equal(body.code, 'ORDER_NOT_FOUND');
+});
+
+test('PAYPAL: Webhook rejects currency mismatch with 400 WEBHOOK_CURRENCY_MISMATCH', async () => {
+  const res = await fetch(`${baseUrl}/api/paypal/webhook`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      'paypal-transmission-id': 'trans-currency-mismatch',
+      'paypal-transmission-time': new Date().toISOString(),
+      'paypal-transmission-sig': 'SAMPLE_HMAC_SHA256_TRANSMISSION_SIGNATURE_PAYPAL',
+      'paypal-cert-url': 'https://api.sandbox.paypal.com/v1/notifications/certs/CERT-1234.pem',
+      'paypal-auth-algo': 'SHA256withRSA',
+    },
+    body: JSON.stringify({
+      id: `WH-CURR-MISMATCH-${Date.now()}`,
+      event_type: 'PAYMENT.CAPTURE.COMPLETED',
+      resource: {
+        id: 'PAYPAL-SBX-884120A',
+        amount: {
+          currency_code: 'USD', // Seed order is INR
+          value: '16998.00',
+        },
+      },
+    }),
+  });
+
+  assert.equal(res.status, 400);
+  const body = (await res.json()) as any;
+  assert.equal(body.code, 'WEBHOOK_CURRENCY_MISMATCH');
+});
+
+test('PAYPAL: Webhook rejects amount mismatch with 400 WEBHOOK_AMOUNT_MISMATCH', async () => {
+  const res = await fetch(`${baseUrl}/api/paypal/webhook`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      'paypal-transmission-id': 'trans-amount-mismatch',
+      'paypal-transmission-time': new Date().toISOString(),
+      'paypal-transmission-sig': 'SAMPLE_HMAC_SHA256_TRANSMISSION_SIGNATURE_PAYPAL',
+      'paypal-cert-url': 'https://api.sandbox.paypal.com/v1/notifications/certs/CERT-1234.pem',
+      'paypal-auth-algo': 'SHA256withRSA',
+    },
+    body: JSON.stringify({
+      id: `WH-AMT-MISMATCH-${Date.now()}`,
+      event_type: 'PAYMENT.CAPTURE.COMPLETED',
+      resource: {
+        id: 'PAYPAL-SBX-884120A',
+        amount: {
+          currency_code: 'INR',
+          value: '1.00', // Actual total is 16998.00 INR
+        },
+      },
+    }),
+  });
+
+  assert.equal(res.status, 400);
+  const body = (await res.json()) as any;
+  assert.equal(body.code, 'WEBHOOK_AMOUNT_MISMATCH');
+});
+
+test('PAYPAL: Webhook safely ignores unsupported event types with 200', async () => {
+  const res = await fetch(`${baseUrl}/api/paypal/webhook`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      'paypal-transmission-id': 'trans-unsupported-type',
+      'paypal-transmission-time': new Date().toISOString(),
+      'paypal-transmission-sig': 'SAMPLE_HMAC_SHA256_TRANSMISSION_SIGNATURE_PAYPAL',
+      'paypal-cert-url': 'https://api.sandbox.paypal.com/v1/notifications/certs/CERT-1234.pem',
+      'paypal-auth-algo': 'SHA256withRSA',
+    },
+    body: JSON.stringify({
+      id: `WH-UNSUPPORTED-${Date.now()}`,
+      event_type: 'CUSTOMER.DISPUTE.CREATED',
+      resource: { id: 'DISPUTE-123' },
+    }),
+  });
+
+  assert.equal(res.status, 200);
+  const body = (await res.json()) as any;
+  assert.equal(body.status, 'EVENT_IGNORED_UNSUPPORTED_TYPE');
+});
+
+test('PAYPAL: Webhook rejects forged/untrusted signature headers with 401', async () => {
+  const res = await fetch(`${baseUrl}/api/paypal/webhook`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      'paypal-transmission-id': 'trans-forged-sig',
+      'paypal-transmission-time': new Date().toISOString(),
+      'paypal-transmission-sig': 'FORGED_INVALID_SIGNATURE_STRING',
+      'paypal-cert-url': 'https://api.sandbox.paypal.com/v1/notifications/certs/CERT-1234.pem',
+      'paypal-auth-algo': 'SHA256withRSA',
+    },
+    body: JSON.stringify({
+      id: `WH-FORGED-${Date.now()}`,
+      event_type: 'PAYMENT.CAPTURE.COMPLETED',
+      resource: { id: 'PAYPAL-SBX-884120A' },
+    }),
+  });
+
+  assert.equal(res.status, 401);
+  const body = (await res.json()) as any;
+  assert.equal(body.code, 'INVALID_WEBHOOK_SIGNATURE');
+});
+
+test('PAYPAL: Webhook rejects non-PayPal cert URL with 401', async () => {
+  const res = await fetch(`${baseUrl}/api/paypal/webhook`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      'paypal-transmission-id': 'trans-evil-cert',
+      'paypal-transmission-time': new Date().toISOString(),
+      'paypal-transmission-sig': 'SAMPLE_HMAC_SHA256_TRANSMISSION_SIGNATURE_PAYPAL',
+      'paypal-cert-url': 'https://attacker.com/fake-cert.pem',
+      'paypal-auth-algo': 'SHA256withRSA',
+    },
+    body: JSON.stringify({
+      id: `WH-EVIL-CERT-${Date.now()}`,
+      event_type: 'PAYMENT.CAPTURE.COMPLETED',
+      resource: { id: 'PAYPAL-SBX-884120A' },
+    }),
+  });
+
+  assert.equal(res.status, 401);
+  const body = (await res.json()) as any;
+  assert.equal(body.code, 'INVALID_WEBHOOK_SIGNATURE');
 });
 
 // ============================================================================

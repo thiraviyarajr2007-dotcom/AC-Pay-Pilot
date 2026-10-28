@@ -22,6 +22,7 @@ import { evaluateRoleAccess } from './rbac';
 import {
   ServerPaymentLedger,
   PayPalProviderAdapter,
+  createPayPalSandboxAdapter,
   calculateInvoiceOnServer,
 } from '../server/paymentEngine';
 import {
@@ -351,6 +352,154 @@ test('Server payment engine ignores tampered client total and enforces idempoten
   });
   assert.equal(replayDifferentKey.idempotentReplay, true);
   assert.equal(providerCaptureCalls, 2);
+});
+
+test('FAIL CLOSED: createPayPalSandboxAdapter throws in production mode when credentials missing', async () => {
+  const origEnv = process.env.NODE_ENV;
+  const origClientId = process.env.PAYPAL_CLIENT_ID;
+  const origSecret = process.env.PAYPAL_CLIENT_SECRET;
+
+  try {
+    process.env.NODE_ENV = 'production';
+    delete process.env.PAYPAL_CLIENT_ID;
+    delete process.env.PAYPAL_CLIENT_SECRET;
+
+    const adapter = createPayPalSandboxAdapter();
+    await assert.rejects(
+      () =>
+        adapter.createOrder({
+          currency: 'INR',
+          totalMinor: 100000,
+          subtotalMinor: 80000,
+          taxMinor: 20000,
+          shippingMinor: 0,
+          idempotencyKey: 'idem-test-prod-fail',
+          referenceId: 'ref-prod-fail',
+        }),
+      /PAYPAL_CONFIG_ERROR/
+    );
+
+    await assert.rejects(
+      () =>
+        adapter.captureOrder({
+          paypalOrderId: 'TEST-ORD-PROD',
+          idempotencyKey: 'idem-cap-prod-fail',
+          currency: 'INR',
+          expectedTotalMinor: 100000,
+        }),
+      /PAYPAL_CONFIG_ERROR/
+    );
+  } finally {
+    process.env.NODE_ENV = origEnv;
+    if (origClientId) process.env.PAYPAL_CLIENT_ID = origClientId;
+    if (origSecret) process.env.PAYPAL_CLIENT_SECRET = origSecret;
+  }
+});
+
+test('FAIL CLOSED: Capture invariant violations (currency & amount) fail closed and never fund escrow', async () => {
+  let mode: 'currency_mismatch' | 'amount_mismatch' = 'currency_mismatch';
+  const badAdapter: PayPalProviderAdapter = {
+    async createOrder() {
+      return { paypalOrderId: 'BAD-PP-001', status: 'CREATED', mode: 'sandbox_deterministic_fallback' };
+    },
+    async captureOrder() {
+      if (mode === 'currency_mismatch') {
+        throw new Error('INVARIANT_VIOLATION: Currency mismatch: PayPal captured USD, expected INR');
+      } else {
+        throw new Error('INVARIANT_VIOLATION: Amount mismatch: PayPal captured minor 5000, expected 849900');
+      }
+    },
+  };
+
+  const ledger = new ServerPaymentLedger(badAdapter);
+  const created = await ledger.createOrder({
+    idempotencyKey: 'idem-bad-inv-001',
+    currency: 'INR',
+    items: [{ sku: '#FAN-BLDC-892', quantity: 1 }],
+  });
+
+  // 1. Currency mismatch
+  mode = 'currency_mismatch';
+  await assert.rejects(
+    () =>
+      ledger.captureOrder(created.order.id, {
+        idempotencyKey: 'idem-cap-curr-err',
+      }),
+    /Currency mismatch/
+  );
+  const orderAfterCurr = ledger.getOrderWithEvents(created.order.id)!.order;
+  assert.equal(orderAfterCurr.paymentStatus, 'Failed');
+  assert.equal(orderAfterCurr.verifiedByServer, false);
+  assert.equal(orderAfterCurr.escrowState, 'created', 'Escrow must remain created, never funded on error');
+
+  // 2. Amount mismatch
+  mode = 'amount_mismatch';
+  await assert.rejects(
+    () =>
+      ledger.captureOrder(created.order.id, {
+        idempotencyKey: 'idem-cap-amt-err',
+      }),
+    /Amount mismatch/
+  );
+  const orderAfterAmt = ledger.getOrderWithEvents(created.order.id)!.order;
+  assert.equal(orderAfterAmt.paymentStatus, 'Failed');
+  assert.equal(orderAfterAmt.verifiedByServer, false);
+  assert.equal(orderAfterAmt.escrowState, 'created', 'Escrow must remain created, never funded on error');
+});
+
+test('FAIL CLOSED: Provider outcomes PENDING, TIMEOUT, CANCELLED, and fee omission never claim verified capture', async () => {
+  let outcomeSim: 'PENDING' | 'TIMEOUT' | 'CANCELLED' = 'PENDING';
+  const simAdapter: PayPalProviderAdapter = {
+    async createOrder() {
+      return { paypalOrderId: 'SIM-ORD-99', status: 'CREATED', mode: 'sandbox_deterministic_fallback' };
+    },
+    async captureOrder(params) {
+      return {
+        paypalOrderId: params.paypalOrderId,
+        providerStatus: outcomeSim,
+        mode: 'sandbox_deterministic_fallback',
+      };
+    },
+  };
+
+  const ledger = new ServerPaymentLedger(simAdapter);
+  const created = await ledger.createOrder({
+    idempotencyKey: 'idem-sim-outcomes-001',
+    currency: 'INR',
+    items: [{ sku: '#FAN-BLDC-892', quantity: 1 }],
+  });
+
+  // PENDING outcome
+  outcomeSim = 'PENDING';
+  const pendingCap = await ledger.captureOrder(created.order.id, {
+    idempotencyKey: 'idem-cap-pending',
+  });
+  assert.equal(pendingCap.order.paymentStatus, 'Pending');
+  assert.equal(pendingCap.order.verifiedByServer, false);
+  assert.equal(pendingCap.order.escrowState, 'created');
+  assert.equal(pendingCap.retryAllowed, true);
+  assert.equal(pendingCap.order.feesFromProvider, false);
+  assert.equal(pendingCap.order.paypalFeeMinor, null);
+
+  // TIMEOUT outcome (retryAllowed: true)
+  outcomeSim = 'TIMEOUT';
+  const timeoutCap = await ledger.captureOrder(created.order.id, {
+    idempotencyKey: 'idem-cap-timeout',
+  });
+  assert.equal(timeoutCap.order.paymentStatus, 'Pending');
+  assert.equal(timeoutCap.order.verifiedByServer, false);
+  assert.equal(timeoutCap.order.escrowState, 'created');
+  assert.equal(timeoutCap.retryAllowed, true);
+
+  // CANCELLED outcome (retryAllowed: false)
+  outcomeSim = 'CANCELLED';
+  const cancelCap = await ledger.captureOrder(created.order.id, {
+    idempotencyKey: 'idem-cap-cancelled',
+  });
+  assert.equal(cancelCap.order.paymentStatus, 'Cancelled');
+  assert.equal(cancelCap.order.verifiedByServer, false);
+  assert.equal(cancelCap.order.escrowState, 'created');
+  assert.equal(cancelCap.retryAllowed, false);
 });
 
 // ============================================================================

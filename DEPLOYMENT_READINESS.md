@@ -13,10 +13,10 @@
 | :--- | :--- | :--- | :--- |
 | **Node.js Runtime** | Node >= 18.0.0 (Tested on Node 24.15.0) | **READY** | Compatible with modern ESM & Fetch APIs |
 | **TypeScript Typecheck** | Zero compiler errors | **PASS** | `tsc --noEmit` exited code 0 |
-| **Vite Production Bundle** | Minified client bundle in `dist/` | **PASS** | `vite build` completed in 6.33s |
+| **Vite Production Bundle** | Minified client bundle in `dist/` | **PASS** | `vite build` completed in 9.05s |
 | **Express Backend** | Port 3000 HTTP listener & API routes | **PASS** | Clean startup via `node node_modules/tsx/dist/cli.mjs server.ts` |
 | **Health Liveness Probe** | HTTP 200 on `/health` and `/api/health` | **PASS** | Verified uptime and timestamp output |
-| **Unit & Integration Suite** | Node native test runner (`node:test`) | **PASS** | 28/28 tests passing in 9.84s |
+| **Unit & Integration Suite** | Node native test runner (`node:test`) | **PASS** | 44/44 tests passing in ~23s |
 
 ---
 
@@ -28,11 +28,12 @@
 ### Public Client Configuration (Vite-Exposed)
 These variables are bundled into the client bundle at build time:
 - `VITE_FIREBASE_API_KEY`: Firebase web client API key.
-- `VITE_FIREBASE_AUTH_DOMAIN`: Firebase authentication domain (e.g. `paypilot-e3a1f.firebaseapp.com`).
-- `VITE_FIREBASE_PROJECT_ID`: Canonical project identifier (`paypilot-e3a1f`).
-- `VITE_FIREBASE_STORAGE_BUCKET`: Firebase storage bucket URI (`paypilot-e3a1f.firebasestorage.app`).
-- `VITE_FIREBASE_MESSAGING_SENDER_ID`: Cloud Messaging sender ID.
-- `VITE_FIREBASE_APP_ID`: Firebase web app client ID.
+- `VITE_FIREBASE_AUTH_DOMAIN`: Firebase authentication domain (`ai-studio-applet-webapp-4bdcd.firebaseapp.com`).
+- `VITE_FIREBASE_PROJECT_ID`: Canonical project identifier (`ai-studio-applet-webapp-4bdcd`).
+- `VITE_FIREBASE_DATABASE_ID`: Custom database identifier (`ai-studio-paypilotaiautono-5cf5c897-94de-4d92-83f5-3c2d5e3761dd`).
+- `VITE_FIREBASE_STORAGE_BUCKET`: Firebase storage bucket URI (`ai-studio-applet-webapp-4bdcd.firebasestorage.app`).
+- `VITE_FIREBASE_MESSAGING_SENDER_ID`: Cloud Messaging sender ID (`920798490531`).
+- `VITE_FIREBASE_APP_ID`: Firebase web app client ID (`1:920798490531:web:0308268700ebe8a272f416`).
 - `VITE_PAYPAL_CLIENT_ID`: PayPal Sandbox client identifier for rendering standard buttons.
 
 ### Server-Only Secrets (Protected Backend)
@@ -52,8 +53,10 @@ These variables are strictly consumed by `server.ts` and must **never** be expos
 
 ### A. PayPal Sandbox v2
 - **OAuth2 Token Exchange:** **VERIFIED LIVE** (`https://api-m.sandbox.paypal.com/v1/oauth2/token`).
-- **Order Creation & Capture:** Verified with authoritative integer minor units; client-supplied tampering is rejected.
-- **Webhook Signature Checking:** Verifies headers `PAYPAL-AUTH-ALGO`, `PAYPAL-CERT-URL`, `PAYPAL-TRANSMISSION-ID`, `PAYPAL-TRANSMISSION-SIG`, and `PAYPAL-TRANSMISSION-TIME`. Rejects unsigned requests.
+- **Live Order Creation:** **VERIFIED LIVE** with real PayPal Sandbox API (`POST /v2/checkout/orders` returning HTTP 201 with real order IDs e.g. `4WR58417FF312423E` using supported currency `USD`).
+- **Fail-Closed Currency Invariant:** Verified that unsupported currencies (such as `INR` on PayPal Orders v2 API) correctly fail closed with HTTP 400 `ORDER_CREATION_FAILED` (422 `CURRENCY_NOT_SUPPORTED`), never manufacturing fake successes.
+- **Fail-Closed Capture & Invariants:** Captures verify status `COMPLETED`, currency match, and minor unit amount match. Mismatches or bank declines reject capture and prevent escrow funding.
+- **Webhook Signature Checking:** Verifies headers `PAYPAL-AUTH-ALGO`, `PAYPAL-CERT-URL`, `PAYPAL-TRANSMISSION-ID`, `PAYPAL-TRANSMISSION-SIG`, and `PAYPAL-TRANSMISSION-TIME`. Rejects unsigned or forged requests, enforces PayPal cert domain validation, validates order identity, and dedupes repeat event IDs.
 
 ### B. Google Gemini AI Engine
 - **Model Selected:** `gemini-3.8-flash`.
@@ -66,9 +69,9 @@ These variables are strictly consumed by `server.ts` and must **never** be expos
   - `POST /api/product/qa`: Grounded Q&A returning `not_provided` when specs are unknown.
 
 ### C. Cloud Firestore Database
-- **Configuration:** Project `paypilot-e3a1f`, standard database `(default)`.
-- **Production Credentials Status:** Unauthenticated admin writes fail with `firestore/invalid-credential` until `GOOGLE_APPLICATION_CREDENTIALS` is provided. The server gracefully falls back to local in-memory storage, ensuring zero downtime for development and staging tests.
-- **Health Verification:** Read/write/delete latency tested on `_health` collection.
+- **Configuration:** Project `ai-studio-applet-webapp-4bdcd`, custom database `ai-studio-paypilotaiautono-5cf5c897-94de-4d92-83f5-3c2d5e3761dd`.
+- **Health Verification:** True live Cloud Firestore write + read + delete REST operations verified on `_health` collection with latency measurement (~1000ms).
+- **Durable Server Persistence Status:** Privileged Admin SDK gRPC writes require `GOOGLE_APPLICATION_CREDENTIALS` (Service Account JSON). In local development and test environments without service account credentials, `firebaseAdmin.ts` uses partitioned in-memory storage fallback. **Production readiness claim for durable cloud persistence requires provisioning `GOOGLE_APPLICATION_CREDENTIALS`.** Data stored in local memory maps will not survive process restarts.
 
 ### D. Three.js & Binary glTF 2.0 Spatial Engine
 - **MIME Type:** `model/gltf-binary`.
