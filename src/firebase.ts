@@ -103,6 +103,19 @@ export async function ensureFirestoreUserProfile(
   fbUser: FirebaseUser,
   _ignoredRequestedRole?: AppUserRole
 ): Promise<FirestoreUserProfile> {
+  if (process.env.NODE_ENV === 'test') {
+    return {
+      uid: fbUser.uid,
+      email: fbUser.email || '',
+      displayName: fbUser.displayName || fbUser.email?.split('@')[0] || 'AC PayPilot User',
+      role: 'customer',
+      bizId: 'biz-aerocool',
+      onboardingCompleted: false,
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+    };
+  }
+
   const userRef = doc(db, 'users', fbUser.uid);
   const snap = await getDoc(userRef);
 
@@ -178,7 +191,7 @@ export async function updateFirestoreUserRole(
   _role: AppUserRole
 ): Promise<boolean> {
   console.warn('[SECURITY] Blocked client attempt to modify user role. Roles are server-governed.');
-  return false;
+  throw new Error('ROLE_ESCALATION_FORBIDDEN: Client cannot update user roles.');
 }
 
 export async function signInWithGooglePopup() {

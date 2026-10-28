@@ -58,6 +58,7 @@ export const PayPalCheckoutModal: React.FC<PayPalCheckoutModalProps> = ({
 }) => {
   const {
     dataSource,
+    authFetch,
     getActorHeaders,
     setServerConfirmed,
     setFeesVerified,
@@ -75,6 +76,7 @@ export const PayPalCheckoutModal: React.FC<PayPalCheckoutModalProps> = ({
   );
 
   const [serverOrder, setServerOrder] = useState<ServerOrderSummary | null>(null);
+  const [guestCaptureToken, setGuestCaptureToken] = useState<string | null>(null);
   const [loadingServerOrder, setLoadingServerOrder] = useState<boolean>(false);
   const [capturingOnServer, setCapturingOnServer] = useState<boolean>(false);
   const [idempotentReplayNotice, setIdempotentReplayNotice] = useState<string | null>(null);
@@ -94,6 +96,7 @@ export const PayPalCheckoutModal: React.FC<PayPalCheckoutModalProps> = ({
     setCaptureIdempotencyKey(freshCaptureKey);
     setIdempotentReplayNotice(null);
     setServerError(null);
+    setGuestCaptureToken(null);
 
     const initServerCheckout = async () => {
       setLoadingServerOrder(true);
@@ -104,12 +107,11 @@ export const PayPalCheckoutModal: React.FC<PayPalCheckoutModalProps> = ({
           setPaypalClientId(cfg.paypalClientId || 'sb');
         }
 
-        const createRes = await fetch('/api/paypal/create-order', {
+        const createRes = await authFetch('/api/paypal/create-order', {
           method: 'POST',
-          headers: getActorHeaders(),
           body: JSON.stringify({
             idempotencyKey: freshCreateKey,
-            currency: 'INR',
+            currency: 'USD',
             items: [
               { sku: '#FAN-BLDC-892', quantity: 1, clientPriceIgnored: 1 },
               { sku: '#SPO-YNX-99P', quantity: 1, clientPriceIgnored: 1 },
@@ -129,6 +131,9 @@ export const PayPalCheckoutModal: React.FC<PayPalCheckoutModalProps> = ({
           setServerOrder(null);
         } else {
           setServerOrder(data.order);
+          if (data.guestCaptureToken) {
+            setGuestCaptureToken(data.guestCaptureToken);
+          }
           setLastServerOrderId(data.order.id);
         }
       } catch (err) {
@@ -161,7 +166,7 @@ export const PayPalCheckoutModal: React.FC<PayPalCheckoutModalProps> = ({
     script.id = 'paypal-js-sdk-script';
     script.src = `https://www.paypal.com/sdk/js?client-id=${encodeURIComponent(
       paypalClientId
-    )}&currency=INR&intent=capture`;
+    )}&currency=USD&intent=capture`;
     script.async = true;
     script.onload = () => setSdkReady(true);
     script.onerror = () => setSdkReady(false);
@@ -219,12 +224,12 @@ export const PayPalCheckoutModal: React.FC<PayPalCheckoutModalProps> = ({
     const outcomeToUse = outcomeOverride || simulatedOutcome;
 
     try {
-      const res = await fetch(`/api/paypal/capture-order/${encodeURIComponent(targetId)}`, {
+      const res = await authFetch(`/api/paypal/capture-order/${encodeURIComponent(targetId)}`, {
         method: 'POST',
-        headers: getActorHeaders(),
         body: JSON.stringify({
           idempotencyKey: captureIdempotencyKey,
           simulateOutcome: outcomeToUse,
+          ...(guestCaptureToken ? { guestCaptureToken } : {}),
         }),
       });
 
@@ -289,11 +294,11 @@ export const PayPalCheckoutModal: React.FC<PayPalCheckoutModalProps> = ({
       return;
     }
     try {
-      const res = await fetch(`/api/paypal/cancel-order/${encodeURIComponent(serverOrder.id)}`, {
+      const res = await authFetch(`/api/paypal/cancel-order/${encodeURIComponent(serverOrder.id)}`, {
         method: 'POST',
-        headers: getActorHeaders(),
         body: JSON.stringify({
           reason: 'Buyer cancelled checkout',
+          ...(guestCaptureToken ? { guestCaptureToken } : {}),
         }),
       });
       if (res.ok) {
@@ -366,6 +371,17 @@ export const PayPalCheckoutModal: React.FC<PayPalCheckoutModalProps> = ({
               state={serverOrder ? serverOrder.paymentStatus : 'Pending'}
               serverConfirmed={Boolean(serverOrder?.verifiedByServer)}
             />
+          </div>
+
+          {/* Honest Currency Notice */}
+          <div className="p-3 rounded-xl bg-surface-container-low border border-surface-container-high flex items-center justify-between text-xs">
+            <span className="font-semibold text-on-surface flex items-center gap-1.5">
+              <i className="fa-solid fa-dollar-sign text-primary"></i>
+              Charged in USD
+            </span>
+            <span className="text-[11px] text-secondary font-tabular-nums">
+              Catalog converted at fixed rate (1 USD ≈ 83.33 INR)
+            </span>
           </div>
 
           <div className="p-3 rounded-xl bg-primary-fixed/30 border border-primary-fixed-dim text-xs text-on-surface leading-relaxed">

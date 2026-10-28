@@ -23,6 +23,14 @@ let adminApp: App;
 let adminAuth: Auth;
 let adminDb: Firestore;
 
+export function getPersistenceMode(): 'firestore-admin' | 'memory-volatile' {
+  const hasGoogleCredentials =
+    Boolean(process.env.GOOGLE_APPLICATION_CREDENTIALS) ||
+    Boolean(process.env.K_SERVICE) ||
+    Boolean(process.env.GAE_SERVICE);
+  return hasGoogleCredentials ? 'firestore-admin' : 'memory-volatile';
+}
+
 export function getAdminApp(): App {
   if (!adminApp) {
     const existingApps = getApps();
@@ -105,6 +113,20 @@ export async function authenticateRequest(req: Request): Promise<AuthenticatedUs
   // 2. Handle Synthetic / Mock test tokens strictly in test or non-production environment
   if (token.startsWith('mock-token-') || token.startsWith('demo-token-')) {
     if (process.env.NODE_ENV === 'test' || process.env.NODE_ENV !== 'production') {
+      if (token === 'mock-token-expired') {
+        throw new AuthenticationError(
+          'Firebase ID token has expired. Please refresh your session.',
+          'TOKEN_EXPIRED',
+          401
+        );
+      }
+      if (token === 'mock-token-revoked') {
+        throw new AuthenticationError(
+          'Firebase ID token has been revoked.',
+          'TOKEN_REVOKED',
+          401
+        );
+      }
       const parts = token.split('-');
       // format: mock-token-{role}-{uid}-{bizId}
       const role = (parts[2] as AppUserRole) || 'customer';
@@ -733,3 +755,38 @@ export async function performFirestoreHealthCheck(): Promise<{
     };
   }
 }
+
+const tenantUsersStore = new Map<string, any>();
+
+export async function getUserProfileFromDb(uid: string): Promise<any | null> {
+  try {
+    const db = getAdminDb();
+    const doc = await db.collection('users').doc(uid).get();
+    if (doc.exists) {
+      return doc.data();
+    }
+  } catch {
+    // volatile memory fallback
+  }
+  return tenantUsersStore.get(uid) || null;
+}
+
+export async function saveUserProfileToDb(uid: string, profileData: any): Promise<any> {
+  const existing = tenantUsersStore.get(uid) || {};
+  const merged = {
+    ...existing,
+    ...profileData,
+    uid,
+    updatedAt: new Date().toISOString(),
+  };
+  tenantUsersStore.set(uid, merged);
+
+  try {
+    const db = getAdminDb();
+    await db.collection('users').doc(uid).set(merged, { merge: true });
+  } catch {
+    // volatile memory fallback
+  }
+  return merged;
+}
+

@@ -72,6 +72,7 @@ export const CreatePayPalOrderSchema = z.object({
   clientUntrustedTotalMinor: z.number().optional(),
   isGuestCheckout: z.boolean().optional(),
   guestCheckoutToken: z.string().optional(),
+  guestCaptureTokenHash: z.string().optional(),
   guestExpiresAt: z.string().optional(),
 });
 
@@ -83,6 +84,7 @@ export const CapturePayPalOrderSchema = z.object({
   actorId: z.string().min(1).default('cust-demo-1'),
   actorRole: z.enum(['customer', 'seller', 'finance', 'business_head']).default('customer'),
   guestCheckoutToken: z.string().optional(),
+  guestCaptureToken: z.string().optional(),
 });
 
 export const CancelPayPalOrderSchema = z.object({
@@ -174,7 +176,10 @@ export interface ServerOrderRecord {
   }>;
   isGuestCheckout?: boolean;
   guestCheckoutToken?: string;
+  guestCaptureTokenHash?: string;
   guestExpiresAt?: string;
+  guestTokenUsed?: boolean;
+  bizId?: string;
   createdAt: string;
   updatedAt: string;
 }
@@ -321,6 +326,10 @@ export function createPayPalSandboxAdapter(): PayPalProviderAdapter {
 
       // If in demo mode or test runner, provide synthetic test identifier clearly flagged:
       if (isExplicitDemo || isTestMode) {
+        if (params.currency === 'INR') {
+          throw new Error('CURRENCY_NOT_SUPPORTED: PayPal Orders v2 does not support INR direct checkout. All checkout orders must be charged in USD.');
+        }
+
         const deterministicId = `TEST-SBX-${params.idempotencyKey
           .replace(/[^a-zA-Z0-9]/g, '')
           .slice(-10)
@@ -337,8 +346,17 @@ export function createPayPalSandboxAdapter(): PayPalProviderAdapter {
     },
 
     async captureOrder(params) {
-      // 1. Simulation outcomes (when explicitly requested for testing decline, pending, timeout, cancelled)
-      if (params.simulateOutcome && params.simulateOutcome !== 'COMPLETED') {
+      // 1. Simulation outcomes (when explicitly requested for testing decline, pending, timeout, cancelled, completed)
+      if (params.simulateOutcome && (isExplicitDemo || isTestMode)) {
+        if (params.simulateOutcome === 'COMPLETED') {
+          return {
+            paypalOrderId: params.paypalOrderId,
+            captureId: `CAP-COMPL-${Date.now().toString(36).toUpperCase()}`,
+            providerStatus: 'COMPLETED',
+            feeAmount: '3.50',
+            mode: 'sandbox_deterministic_fallback',
+          };
+        }
         switch (params.simulateOutcome) {
           case 'DECLINED':
             return {
@@ -683,6 +701,12 @@ export class ServerPaymentLedger {
       escrowState: 'created',
       paypalIntent: ESCROW_ARCHITECTURE_DECISION.chosenPaypalIntent,
       items: calc.items,
+      bizId: input.sellerId,
+      isGuestCheckout: input.isGuestCheckout,
+      guestCheckoutToken: input.guestCheckoutToken,
+      guestCaptureTokenHash: input.guestCaptureTokenHash,
+      guestExpiresAt: input.guestExpiresAt,
+      guestTokenUsed: false,
       createdAt: now,
       updatedAt: now,
     };
@@ -826,6 +850,9 @@ export class ServerPaymentLedger {
     order.netPayoutMinor = feeBreakdown.netAmountMinor;
     order.feesFromProvider = feeBreakdown.feesFromProvider;
     order.failureReason = providerCapture.errorMessage;
+    if (order.isGuestCheckout) {
+      order.guestTokenUsed = true;
+    }
     order.updatedAt = now;
 
     // Transition escrow `created -> funded` ONLY when server verified COMPLETED capture

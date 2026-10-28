@@ -16,6 +16,7 @@ export interface HealthCheckItem {
 export interface SystemHealthReport {
   ok: boolean;
   status: 'healthy' | 'degraded' | 'error';
+  persistenceMode: 'firestore-admin' | 'memory-volatile';
   serverTime: string;
   nodeVersion: string;
   uptimeSeconds: number;
@@ -235,6 +236,7 @@ import {
   performFirestoreHealthCheck,
   FIREBASE_PROJECT_ID,
   FIRESTORE_DATABASE_ID,
+  getPersistenceMode,
 } from './firebaseAdmin';
 
 /**
@@ -293,10 +295,12 @@ export async function runFullSystemDiagnostic(): Promise<SystemHealthReport> {
   const checks = [dbCheck, paypalCheck, geminiCheck, storageCheck];
   const hasError = checks.some((c) => c.status === 'error');
   const hasDegraded = checks.some((c) => c.status === 'degraded');
+  const persistenceMode = getPersistenceMode();
 
   return {
     ok: !hasError,
     status: hasError ? 'error' : hasDegraded ? 'degraded' : 'healthy',
+    persistenceMode,
     serverTime: new Date().toISOString(),
     nodeVersion: process.version,
     uptimeSeconds: Math.floor(process.uptime()),

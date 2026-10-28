@@ -77,9 +77,14 @@ import {
   updateMerchantProfileForBiz,
   seedDefaultStorefrontInFirestore,
   getAdminDb,
+  getPersistenceMode,
   authMiddleware,
+  getUserProfileFromDb,
+  saveUserProfileToDb,
   DEFAULT_BIZ_ID,
 } from './src/server/firebaseAdmin';
+import crypto from 'node:crypto';
+import { validateStartupConfig } from './src/server/configValidator';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -164,8 +169,29 @@ const AiSuggestBodySchema = z.object({
 });
 
 export async function createAppServer() {
+  // Validate startup configuration and persistence requirements
+  const configStatus = validateStartupConfig(process.env);
+  if (configStatus.warnings.length > 0 && process.env.NODE_ENV !== 'test') {
+    for (const warn of configStatus.warnings) {
+      console.warn(`[CONFIG WARNING] ${warn}`);
+    }
+  }
+
   const app = express();
   app.use(express.json({ limit: '25mb' }));
+
+  // Refuse payment routes in production if persistence is volatile
+  const persistenceCheckMiddleware = (req: Request, res: Response, next: NextFunction) => {
+    if (process.env.NODE_ENV === 'production' && getPersistenceMode() === 'memory-volatile') {
+      return sendTypedError(
+        res,
+        503,
+        'PERSISTENCE_UNAVAILABLE',
+        'Persistent database is unavailable. Production payments are disabled in volatile memory mode.'
+      );
+    }
+    next();
+  };
 
   // Seed default canonical storefront and products into Firestore if not present (skipped in test mode)
   if (process.env.NODE_ENV !== 'test') {
@@ -173,6 +199,30 @@ export async function createAppServer() {
       console.warn('Firestore initial seeding warning:', err?.message || err);
     });
   }
+
+  // ==========================================================================
+  // 0. System Health & Persistence Mode Diagnostic (/health, /api/health)
+  // ==========================================================================
+  app.get(['/health', '/api/health'], async (_req: Request, res: Response) => {
+    try {
+      const diagnostic = await runFullSystemDiagnostic();
+      const persistenceMode = getPersistenceMode();
+      res.json({
+        ok: diagnostic.ok,
+        status: diagnostic.status,
+        persistenceMode,
+        serverTime: diagnostic.serverTime,
+        checks: diagnostic.checks,
+      });
+    } catch (err: any) {
+      res.status(500).json({
+        ok: false,
+        status: 'error',
+        persistenceMode: getPersistenceMode(),
+        error: err?.message || 'Health check failed',
+      });
+    }
+  });
 
   // ==========================================================================
   // 1. Public Runtime Config (Safe metadata only — NEVER exposes secrets)
@@ -295,19 +345,28 @@ export async function createAppServer() {
   // ==========================================================================
   // 2. PayPal Sandbox Orders v2 — Create Order (POST /api/paypal/create-order)
   // ==========================================================================
-  app.post('/api/paypal/create-order', async (req: Request, res: Response) => {
+  app.post('/api/paypal/create-order', persistenceCheckMiddleware, async (req: Request, res: Response) => {
     let actor: AuthenticatedActor;
+    let isGuest = false;
+    let guestCaptureToken: string | undefined;
+    let guestCaptureTokenHash: string | undefined;
+    let guestExpiresAt: string | undefined;
+
     try {
       const userActor = await authenticateRequest(req);
       actor = userActor;
     } catch {
-      // Unauthenticated checkout: generate unique unforgeable guest actor
+      // Unauthenticated checkout: generate unique unforgeable guest actor & high-entropy capture token
+      isGuest = true;
       actor = {
         uid: `guest-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
         email: 'guest@paypilot.in',
         role: 'customer',
         bizId: DEFAULT_BIZ_ID,
       };
+      guestCaptureToken = crypto.randomBytes(32).toString('hex');
+      guestCaptureTokenHash = crypto.createHash('sha256').update(guestCaptureToken).digest('hex');
+      guestExpiresAt = new Date(Date.now() + 2 * 60 * 60 * 1000).toISOString(); // 2 hour expiry
     }
     const bizId = actor.bizId || DEFAULT_BIZ_ID;
 
@@ -316,6 +375,9 @@ export async function createAppServer() {
         ...req.body,
         customerId: actor.uid, // Strictly enforce verified actor.uid, never trust body customerId
         sellerId: req.body?.sellerId || bizId,
+        isGuestCheckout: isGuest,
+        guestCaptureTokenHash,
+        guestExpiresAt,
       });
 
       const access = evaluateRoleAccess(actor, 'orders', 'create', {
@@ -354,6 +416,10 @@ export async function createAppServer() {
         bizId,
         items: calc.items,
         totalMinor: calc.totalMinor,
+        isGuestCheckout: isGuest,
+        guestCaptureTokenHash,
+        guestExpiresAt,
+        guestTokenUsed: false,
       });
       await recordEscrowEventForBiz(bizId, {
         orderId: result.order.id,
@@ -368,6 +434,7 @@ export async function createAppServer() {
       res.status(result.idempotentReplay ? 200 : 201).json({
         ok: true,
         ...result,
+        ...(isGuest && guestCaptureToken ? { guestCaptureToken } : {}),
       });
     } catch (err: any) {
       if (err instanceof ZodError) {
@@ -387,46 +454,53 @@ export async function createAppServer() {
   // ==========================================================================
   // 3. PayPal Sandbox Orders v2 — Capture Order (POST /api/paypal/capture-order/:id)
   // ==========================================================================
-  app.post('/api/paypal/capture-order/:id', async (req: Request, res: Response) => {
-    // Require verified Bearer token authentication for payment capture
-    const actor = await requireAuth(req, res);
-    if (!actor) return;
-    const bizId = actor.bizId || DEFAULT_BIZ_ID;
+  app.post('/api/paypal/capture-order/:id', persistenceCheckMiddleware, async (req: Request, res: Response) => {
+    let actor: AuthenticatedActor | null = null;
+    let isGuestCapture = false;
 
-    try {
-      const orderOrPaypalId = req.params.id;
-      const parsedBody = CapturePayPalOrderSchema.parse({
-        ...req.body,
-        actorId: actor.uid, // Strictly bound to verified token
-        actorRole: actor.role, // Strictly bound to verified token
-      });
-
-      let existing = defaultServerLedger.getOrderWithEvents(orderOrPaypalId);
-      if (!existing) {
-        const firestoreOrder = await getOrderByIdForBiz(bizId, orderOrPaypalId);
-        if (firestoreOrder) {
-          existing = {
-            order: firestoreOrder,
-            escrowEvents: [],
-            payments: [],
-          };
-        }
+    // Check if Bearer token is provided
+    const authHeader = req.headers.authorization;
+    if (authHeader?.startsWith('Bearer ')) {
+      try {
+        actor = await authenticateRequest(req);
+      } catch (err: any) {
+        const status = err instanceof AuthenticationError ? err.statusCode : 401;
+        const code = err instanceof AuthenticationError ? err.code : 'UNAUTHORIZED';
+        return sendTypedError(res, status, code, err.message || 'Invalid authentication token');
       }
+    }
 
-      if (!existing) {
-        return sendTypedError(
-          res,
-          404,
-          'ORDER_NOT_FOUND',
-          `Order '${orderOrPaypalId}' was not found in business '${bizId}'.`
-        );
+    const orderOrPaypalId = req.params.id;
+    let existing = defaultServerLedger.getOrderWithEvents(orderOrPaypalId);
+    if (!existing) {
+      const firestoreOrder = await getOrderByIdForBiz(DEFAULT_BIZ_ID, orderOrPaypalId);
+      if (firestoreOrder) {
+        existing = {
+          order: firestoreOrder,
+          escrowEvents: [],
+          payments: [],
+        };
       }
+    }
 
-      // Verify caller is either the owning customer or finance officer
+    if (!existing) {
+      return sendTypedError(
+        res,
+        404,
+        'ORDER_NOT_FOUND',
+        `Order '${orderOrPaypalId}' was not found.`
+      );
+    }
+
+    const order = existing.order;
+    const bizId = order.bizId || DEFAULT_BIZ_ID;
+
+    if (actor) {
+      // Authenticated via Bearer ID Token: Check role permissions
       if (
         actor.role !== 'finance' &&
         actor.role !== 'business_head' &&
-        !(actor.role === 'customer' && existing.order.customerId === actor.uid)
+        !(actor.role === 'customer' && order.customerId === actor.uid)
       ) {
         return sendTypedError(
           res,
@@ -435,13 +509,90 @@ export async function createAppServer() {
           'Only the order buyer or finance officer may capture this payment.'
         );
       }
+    } else {
+      // Guest Checkout: Require single-use high-entropy capture token
+      const guestToken = (req.body?.guestCaptureToken || req.headers['x-guest-capture-token']) as string | undefined;
+      if (!guestToken || typeof guestToken !== 'string' || guestToken.trim() === '') {
+        return sendTypedError(
+          res,
+          401,
+          'MISSING_AUTH_TOKEN',
+          'Authentication required: provide a valid Bearer token or guest capture token.'
+        );
+      }
+
+      if (!order.isGuestCheckout || !order.guestCaptureTokenHash) {
+        return sendTypedError(
+          res,
+          403,
+          'INVALID_GUEST_TOKEN',
+          'This order was not created as guest checkout.'
+        );
+      }
+
+      if (order.guestTokenUsed) {
+        return sendTypedError(
+          res,
+          403,
+          'GUEST_TOKEN_REUSED',
+          'Guest capture token has already been used and is invalidated.'
+        );
+      }
+
+      if (order.guestExpiresAt && new Date(order.guestExpiresAt).getTime() < Date.now()) {
+        return sendTypedError(
+          res,
+          403,
+          'GUEST_TOKEN_EXPIRED',
+          'Guest capture token has expired.'
+        );
+      }
+
+      // Constant-time comparison
+      const candidateHash = crypto.createHash('sha256').update(guestToken.trim()).digest('hex');
+      const storedHashBuf = Buffer.from(order.guestCaptureTokenHash, 'hex');
+      const candidateHashBuf = Buffer.from(candidateHash, 'hex');
+
+      if (
+        storedHashBuf.length !== candidateHashBuf.length ||
+        !crypto.timingSafeEqual(storedHashBuf, candidateHashBuf)
+      ) {
+        return sendTypedError(
+          res,
+          403,
+          'INVALID_GUEST_TOKEN',
+          'Invalid guest capture token for this order.'
+        );
+      }
+
+      isGuestCapture = true;
+      actor = {
+        uid: order.customerId,
+        email: order.buyerEmail || 'guest@paypilot.in',
+        role: 'customer',
+        bizId,
+      };
+    }
+
+    try {
+      const parsedBody = CapturePayPalOrderSchema.parse({
+        ...req.body,
+        actorId: actor.uid,
+        actorRole: actor.role,
+      });
 
       const result = await defaultServerLedger.captureOrder(orderOrPaypalId, parsedBody);
+
+      if (isGuestCapture || order.isGuestCheckout) {
+        order.guestTokenUsed = true;
+        result.order.guestTokenUsed = true;
+      }
 
       // Persist captured order & payment to Firestore businesses/{bizId}/...
       await saveOrderForBiz(bizId, {
         ...result.order,
         bizId,
+        guestTokenUsed: true,
       });
       if (result.payment) {
         await savePaymentForBiz(bizId, {
@@ -494,26 +645,72 @@ export async function createAppServer() {
   // ==========================================================================
   // 4. PayPal Sandbox Cancel Order (POST /api/paypal/cancel-order/:id)
   // ==========================================================================
-  app.post('/api/paypal/cancel-order/:id', async (req: Request, res: Response) => {
-    const actor = await requireAuth(req, res);
-    if (!actor) return;
+  app.post('/api/paypal/cancel-order/:id', persistenceCheckMiddleware, async (req: Request, res: Response) => {
+    let actor: AuthenticatedActor | null = null;
+    const authHeader = req.headers.authorization;
+    if (authHeader?.startsWith('Bearer ')) {
+      try {
+        actor = await authenticateRequest(req);
+      } catch {}
+    }
+
+    const orderOrPaypalId = req.params.id;
+    let existing = defaultServerLedger.getOrderWithEvents(orderOrPaypalId);
+    if (!existing) {
+      const firestoreOrder = await getOrderByIdForBiz(DEFAULT_BIZ_ID, orderOrPaypalId);
+      if (firestoreOrder) {
+        existing = {
+          order: firestoreOrder,
+          escrowEvents: [],
+          payments: [],
+        };
+      }
+    }
+
+    if (!existing) {
+      return sendTypedError(res, 404, 'ORDER_NOT_FOUND', `Order '${orderOrPaypalId}' not found.`);
+    }
+
+    const order = existing.order;
+    const bizId = order.bizId || DEFAULT_BIZ_ID;
+
+    if (!actor) {
+      const guestToken = (req.body?.guestCaptureToken || req.headers['x-guest-capture-token']) as string | undefined;
+      if (!guestToken || !order.guestCaptureTokenHash) {
+        return sendTypedError(res, 401, 'MISSING_AUTH_TOKEN', 'Authentication required to cancel order.');
+      }
+      const candidateHash = crypto.createHash('sha256').update(guestToken.trim()).digest('hex');
+      const storedHashBuf = Buffer.from(order.guestCaptureTokenHash, 'hex');
+      const candidateHashBuf = Buffer.from(candidateHash, 'hex');
+      if (
+        storedHashBuf.length !== candidateHashBuf.length ||
+        !crypto.timingSafeEqual(storedHashBuf, candidateHashBuf)
+      ) {
+        return sendTypedError(res, 403, 'INVALID_GUEST_TOKEN', 'Invalid guest capture token.');
+      }
+      actor = {
+        uid: order.customerId,
+        email: order.buyerEmail || 'guest@paypilot.in',
+        role: 'customer',
+        bizId,
+      };
+    }
 
     try {
-      const orderOrPaypalId = req.params.id;
       const parsedBody = CancelPayPalOrderSchema.parse({
         ...req.body,
         actorId: actor.uid,
       });
 
-      const order = defaultServerLedger.cancelOrder(orderOrPaypalId, parsedBody);
-      await saveOrderForBiz(actor.bizId, {
-        ...order,
-        bizId: actor.bizId,
+      const updatedOrder = defaultServerLedger.cancelOrder(orderOrPaypalId, parsedBody);
+      await saveOrderForBiz(bizId, {
+        ...updatedOrder,
+        bizId,
       });
 
       res.json({
         ok: true,
-        order,
+        order: updatedOrder,
       });
     } catch (err: any) {
       if (err instanceof ZodError) {
@@ -2034,14 +2231,13 @@ export async function createAppServer() {
       const actor = await requireAuth(req, res);
       if (!actor) return;
 
-      const db = getAdminDb();
-      const userDoc = await db.collection('users').doc(actor.uid).get();
-      if (!userDoc.exists) {
+      const profile = await getUserProfileFromDb(actor.uid);
+      if (!profile) {
         return sendTypedError(res, 404, 'USER_NOT_FOUND', 'User profile not found.');
       }
       return res.json({
         ok: true,
-        profile: userDoc.data(),
+        profile,
       });
     } catch (err: any) {
       return sendTypedError(res, 500, 'USER_PROFILE_FETCH_ERROR', err.message || 'Failed to fetch user profile');
@@ -2054,22 +2250,11 @@ export async function createAppServer() {
       if (!actor) return;
 
       const parsed = UserProfileUpdateSchema.parse(req.body);
-      const db = getAdminDb();
-      const userRef = db.collection('users').doc(actor.uid);
-
-      await userRef.set(
-        {
-          ...parsed,
-          updatedAt: new Date().toISOString(),
-        },
-        { merge: true }
-      );
-
-      const updatedSnap = await userRef.get();
+      const updatedProfile = await saveUserProfileToDb(actor.uid, parsed);
       return res.json({
         ok: true,
         message: 'Profile updated successfully',
-        profile: updatedSnap.data(),
+        profile: updatedProfile,
       });
     } catch (err: any) {
       if (err instanceof ZodError) {

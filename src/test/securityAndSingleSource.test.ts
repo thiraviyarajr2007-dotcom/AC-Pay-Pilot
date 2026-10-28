@@ -668,3 +668,391 @@ test('HEALTH: Firebase project ID and database ID match canonical config', async
   );
   assert.ok(dbCheck.latencyMs >= 0);
 });
+
+// ============================================================================
+// 6. PHASE 1 & 2: Auth, Single-Source Profile, Dual-Auth Guest Payments & Config Validator
+// ============================================================================
+
+test('AUTH: /api/users/profile rejects self-escalation attempt with 400 VALIDATION_ERROR', async () => {
+  const token = 'mock-token-customer-cust-hack-1-biz-aerocool';
+  const res = await fetch(`${baseUrl}/api/users/profile`, {
+    method: 'PATCH',
+    headers: {
+      Authorization: `Bearer ${token}`,
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({
+      role: 'admin', // Self-escalation strictly forbidden by .strict() Zod schema
+    }),
+  });
+
+  assert.equal(res.status, 400);
+  const body = (await res.json()) as any;
+  assert.equal(body.ok, false);
+  assert.equal(body.code, 'VALIDATION_ERROR');
+});
+
+test('AUTH: /api/users/profile accepts valid profile field update', async () => {
+  const token = 'mock-token-customer-cust-valid-1-biz-aerocool';
+  const res = await fetch(`${baseUrl}/api/users/profile`, {
+    method: 'PATCH',
+    headers: {
+      Authorization: `Bearer ${token}`,
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({
+      displayName: 'Aarav Updated',
+      gender: 'Male',
+      phone: '9876543210',
+    }),
+  });
+
+  assert.equal(res.status, 200);
+  const body = (await res.json()) as any;
+  assert.equal(body.ok, true);
+  assert.equal(body.profile.displayName, 'Aarav Updated');
+});
+
+test('AUTH: /api/users/profile returns 401 TOKEN_EXPIRED on expired ID token', async () => {
+  const res = await fetch(`${baseUrl}/api/users/profile`, {
+    headers: {
+      Authorization: 'Bearer mock-token-expired',
+    },
+  });
+
+  assert.equal(res.status, 401);
+  const body = (await res.json()) as any;
+  assert.equal(body.ok, false);
+  assert.equal(body.code, 'TOKEN_EXPIRED');
+});
+
+test('AUTH: /api/users/profile returns 401 TOKEN_REVOKED on revoked ID token', async () => {
+  const res = await fetch(`${baseUrl}/api/users/profile`, {
+    headers: {
+      Authorization: 'Bearer mock-token-revoked',
+    },
+  });
+
+  assert.equal(res.status, 401);
+  const body = (await res.json()) as any;
+  assert.equal(body.ok, false);
+  assert.equal(body.code, 'TOKEN_REVOKED');
+});
+
+test('AUTH: updateFirestoreUserRole throws forbidden error on client role change attempt', async () => {
+  const { updateFirestoreUserRole } = await import('../firebase');
+  await assert.rejects(
+    async () => {
+      await updateFirestoreUserRole('some-uid', 'admin' as any);
+    },
+    (err: any) => {
+      return (
+        err?.message?.includes('ROLE_ESCALATION_FORBIDDEN') ||
+        err?.message?.includes('Client cannot update user roles')
+      );
+    }
+  );
+});
+
+test('AUTH: ensureFirestoreUserProfile assigns lowest-privilege customer role idempotently', async () => {
+  const { ensureFirestoreUserProfile } = await import('../firebase');
+  const mockUser: any = {
+    uid: `test-signup-${Date.now()}`,
+    email: 'newuser@paypilot.in',
+    displayName: 'New User',
+  };
+
+  const profile1 = await ensureFirestoreUserProfile(mockUser, 'business_head' as any);
+  assert.equal(profile1.role, 'customer', 'Default role must be customer (lowest privilege)');
+  assert.equal(profile1.uid, mockUser.uid);
+
+  // Subsequent retrieval returns the profile identically
+  const profile2 = await ensureFirestoreUserProfile(mockUser);
+  assert.equal(profile2.role, 'customer');
+  assert.equal(profile2.uid, mockUser.uid);
+});
+
+test('AUTH: authenticatedFetch auto-attaches headers and executes clean API request', async () => {
+  const { authenticatedFetch } = await import('../services/apiClient');
+  const res = await authenticatedFetch(`${baseUrl}/api/health`, { skipAuth: true });
+  assert.equal(res.status, 200);
+});
+
+test('PAYMENTS: Guest create-order generates single-use guestCaptureToken', async () => {
+  const res = await fetch(`${baseUrl}/api/paypal/create-order`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({
+      idempotencyKey: `idem-guest-cap-${Date.now()}`,
+      currency: 'USD',
+      items: [{ sku: '#FAN-BLDC-892', quantity: 1 }],
+      sellerId: 'biz-aerocool',
+    }),
+  });
+
+  assert.equal(res.status, 201);
+  const body = (await res.json()) as any;
+  assert.equal(body.ok, true);
+  assert.ok(body.order.isGuestCheckout, 'Order must be flagged as guest checkout');
+  assert.ok(body.guestCaptureToken, 'Server must return guestCaptureToken to guest');
+  assert.equal(typeof body.guestCaptureToken, 'string');
+  assert.equal(body.guestCaptureToken.length, 64, 'SHA-256 / 32-byte hex token is 64 characters');
+});
+
+test('PAYMENTS: Guest capture happy path succeeds with valid guestCaptureToken', async () => {
+  // 1. Create guest order
+  const createRes = await fetch(`${baseUrl}/api/paypal/create-order`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({
+      idempotencyKey: `idem-guest-happy-${Date.now()}`,
+      currency: 'USD',
+      items: [{ sku: '#FAN-BLDC-892', quantity: 1 }],
+      sellerId: 'biz-aerocool',
+    }),
+  });
+  const createBody = (await createRes.json()) as any;
+  assert.equal(createRes.status, 201);
+  const orderId = createBody.order.id;
+  const guestToken = createBody.guestCaptureToken;
+
+  // 2. Capture using valid guestCaptureToken
+  const capRes = await fetch(`${baseUrl}/api/paypal/capture-order/${orderId}`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({
+      idempotencyKey: `idem-cap-happy-${Date.now()}`,
+      guestCaptureToken: guestToken,
+      simulateOutcome: 'COMPLETED',
+    }),
+  });
+
+  assert.equal(capRes.status, 200);
+  const capBody = (await capRes.json()) as any;
+  assert.equal(capBody.ok, true);
+  assert.equal(capBody.order.paymentStatus, 'Captured');
+  assert.equal(capBody.order.guestTokenUsed, true);
+});
+
+test('PAYMENTS: Guest capture rejected with 403 INVALID_GUEST_TOKEN on wrong token', async () => {
+  // 1. Create guest order
+  const createRes = await fetch(`${baseUrl}/api/paypal/create-order`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({
+      idempotencyKey: `idem-guest-wrong-${Date.now()}`,
+      currency: 'USD',
+      items: [{ sku: '#FAN-BLDC-892', quantity: 1 }],
+      sellerId: 'biz-aerocool',
+    }),
+  });
+  const createBody = (await createRes.json()) as any;
+  const orderId = createBody.order.id;
+
+  // 2. Attempt capture with wrong token
+  const capRes = await fetch(`${baseUrl}/api/paypal/capture-order/${orderId}`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({
+      idempotencyKey: `idem-cap-wrong-${Date.now()}`,
+      guestCaptureToken: 'wrong-token-deadbeef00112233445566778899aabbccddeeff',
+      simulateOutcome: 'COMPLETED',
+    }),
+  });
+
+  assert.equal(capRes.status, 403);
+  const capBody = (await capRes.json()) as any;
+  assert.equal(capBody.ok, false);
+  assert.equal(capBody.code, 'INVALID_GUEST_TOKEN');
+});
+
+test('PAYMENTS: Reused guest capture token rejected with 403 GUEST_TOKEN_REUSED', async () => {
+  // 1. Create guest order
+  const createRes = await fetch(`${baseUrl}/api/paypal/create-order`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({
+      idempotencyKey: `idem-guest-reuse-${Date.now()}`,
+      currency: 'USD',
+      items: [{ sku: '#FAN-BLDC-892', quantity: 1 }],
+      sellerId: 'biz-aerocool',
+    }),
+  });
+  const createBody = (await createRes.json()) as any;
+  const orderId = createBody.order.id;
+  const guestToken = createBody.guestCaptureToken;
+
+  // 2. First capture succeeds
+  const firstCap = await fetch(`${baseUrl}/api/paypal/capture-order/${orderId}`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({
+      idempotencyKey: `idem-cap-first-${Date.now()}`,
+      guestCaptureToken: guestToken,
+      simulateOutcome: 'COMPLETED',
+    }),
+  });
+  assert.equal(firstCap.status, 200);
+
+  // 3. Second capture with a DIFFERENT idempotencyKey attempting reuse
+  const secondCap = await fetch(`${baseUrl}/api/paypal/capture-order/${orderId}`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({
+      idempotencyKey: `idem-cap-second-reuse-${Date.now()}`,
+      guestCaptureToken: guestToken,
+      simulateOutcome: 'COMPLETED',
+    }),
+  });
+
+  assert.equal(secondCap.status, 403);
+  const secondBody = (await secondCap.json()) as any;
+  assert.equal(secondBody.ok, false);
+  assert.equal(secondBody.code, 'GUEST_TOKEN_REUSED');
+});
+
+test('PAYMENTS: Expired guest capture token rejected with 403 GUEST_TOKEN_EXPIRED', async () => {
+  const { defaultServerLedger } = await import('../server/paymentEngine');
+  const crypto = await import('node:crypto');
+
+  // Create an order in the ledger with an already-expired guest token
+  const rawToken = crypto.randomBytes(32).toString('hex');
+  const tokenHash = crypto.createHash('sha256').update(rawToken).digest('hex');
+  const expiredOrderRes = await defaultServerLedger.createOrder({
+    idempotencyKey: `idem-expired-${Date.now()}`,
+    currency: 'USD',
+    items: [{ sku: '#FAN-BLDC-892', quantity: 1 }],
+    sellerId: 'biz-aerocool',
+    customerId: `guest-expired-${Date.now()}`,
+    buyerName: 'Expired Guest',
+    buyerEmail: 'expired@guest.in',
+    shippingAddress: '123 Expired St',
+    isGuestCheckout: true,
+    guestCaptureTokenHash: tokenHash,
+    guestExpiresAt: new Date(Date.now() - 3600000).toISOString(), // 1 hour ago
+  });
+
+  const capRes = await fetch(`${baseUrl}/api/paypal/capture-order/${expiredOrderRes.order.id}`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({
+      idempotencyKey: `idem-cap-expired-${Date.now()}`,
+      guestCaptureToken: rawToken,
+      simulateOutcome: 'COMPLETED',
+    }),
+  });
+
+  assert.equal(capRes.status, 403);
+  const capBody = (await capRes.json()) as any;
+  assert.equal(capBody.ok, false);
+  assert.equal(capBody.code, 'GUEST_TOKEN_EXPIRED');
+});
+
+test('PAYMENTS: Token for Order A cannot capture Order B (403 INVALID_GUEST_TOKEN)', async () => {
+  // Create Order A
+  const resA = await fetch(`${baseUrl}/api/paypal/create-order`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      idempotencyKey: `idem-cross-a-${Date.now()}`,
+      currency: 'USD',
+      items: [{ sku: '#FAN-BLDC-892', quantity: 1 }],
+      sellerId: 'biz-aerocool',
+    }),
+  });
+  const bodyA = (await resA.json()) as any;
+
+  // Create Order B
+  const resB = await fetch(`${baseUrl}/api/paypal/create-order`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      idempotencyKey: `idem-cross-b-${Date.now()}`,
+      currency: 'USD',
+      items: [{ sku: '#FAN-BLDC-892', quantity: 1 }],
+      sellerId: 'biz-aerocool',
+    }),
+  });
+  const bodyB = (await resB.json()) as any;
+
+  // Try capturing Order B using token from Order A
+  const crossCap = await fetch(`${baseUrl}/api/paypal/capture-order/${bodyB.order.id}`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      idempotencyKey: `idem-cap-cross-${Date.now()}`,
+      guestCaptureToken: bodyA.guestCaptureToken, // Token A on Order B
+      simulateOutcome: 'COMPLETED',
+    }),
+  });
+
+  assert.equal(crossCap.status, 403);
+  const crossBody = (await crossCap.json()) as any;
+  assert.equal(crossBody.ok, false);
+  assert.equal(crossBody.code, 'INVALID_GUEST_TOKEN');
+});
+
+test('CONFIG: validateStartupConfig in production throws ConfigurationError listing missing env vars', async () => {
+  const { validateStartupConfig, ConfigurationError } = await import('../server/configValidator');
+
+  assert.throws(
+    () => {
+      validateStartupConfig({
+        NODE_ENV: 'production',
+      });
+    },
+    (err: any) => {
+      assert.ok(err instanceof ConfigurationError);
+      assert.ok(err.missingVars.includes('PAYPAL_WEBHOOK_ID'));
+      assert.ok(err.missingVars.includes('PAYPAL_CLIENT_ID'));
+      assert.ok(err.missingVars.includes('PAYPAL_CLIENT_SECRET'));
+      assert.ok(err.missingVars.includes('GOOGLE_APPLICATION_CREDENTIALS'));
+      return true;
+    }
+  );
+});
+
+test('CONFIG: validateStartupConfig forbids test webhook bypass outside test environment', async () => {
+  const { validateStartupConfig, ConfigurationError } = await import('../server/configValidator');
+
+  assert.throws(
+    () => {
+      validateStartupConfig({
+        NODE_ENV: 'production',
+        ALLOW_TEST_SIGNATURE_BYPASS: 'true',
+      });
+    },
+    (err: any) => {
+      assert.ok(err instanceof ConfigurationError);
+      assert.ok(err.message.includes('SECURITY VIOLATION'));
+      return true;
+    }
+  );
+});
+
+test('HEALTH: /api/health reports persistenceMode and system status', async () => {
+  const res = await fetch(`${baseUrl}/api/health`);
+  assert.equal(res.status, 200);
+  const body = (await res.json()) as any;
+  assert.equal(body.ok, true);
+  assert.ok(['firestore-admin', 'memory-volatile'].includes(body.persistenceMode));
+  assert.ok(['healthy', 'degraded'].includes(body.status));
+});
