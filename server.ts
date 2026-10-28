@@ -76,6 +76,8 @@ import {
   getMerchantProfileForBiz,
   updateMerchantProfileForBiz,
   seedDefaultStorefrontInFirestore,
+  getAdminDb,
+  authMiddleware,
   DEFAULT_BIZ_ID,
 } from './src/server/firebaseAdmin';
 
@@ -2010,6 +2012,76 @@ export async function createAppServer() {
         return sendTypedError(res, 400, 'VALIDATION_ERROR', err.issues[0]?.message || 'Validation error', err.issues);
       }
       return sendTypedError(res, 500, 'PROFILE_UPDATE_ERROR', 'Failed to update merchant profile');
+    }
+  });
+
+  // ==========================================================================
+  // 15b. User Profile Management (GET/PATCH /api/users/profile)
+  // ==========================================================================
+  const UserProfileUpdateSchema = z
+    .object({
+      displayName: z.string().min(1).max(100).optional(),
+      gender: z.enum(['Male', 'Female', 'Non-binary', 'Prefer not to say']).optional(),
+      phone: z.string().max(25).optional(),
+      countryCode: z.string().max(10).optional(),
+      age: z.number().int().min(18).max(120).optional(),
+      onboardingCompleted: z.boolean().optional(),
+    })
+    .strict();
+
+  app.get('/api/users/profile', async (req: Request, res: Response) => {
+    try {
+      const actor = await requireAuth(req, res);
+      if (!actor) return;
+
+      const db = getAdminDb();
+      const userDoc = await db.collection('users').doc(actor.uid).get();
+      if (!userDoc.exists) {
+        return sendTypedError(res, 404, 'USER_NOT_FOUND', 'User profile not found.');
+      }
+      return res.json({
+        ok: true,
+        profile: userDoc.data(),
+      });
+    } catch (err: any) {
+      return sendTypedError(res, 500, 'USER_PROFILE_FETCH_ERROR', err.message || 'Failed to fetch user profile');
+    }
+  });
+
+  app.patch('/api/users/profile', async (req: Request, res: Response) => {
+    try {
+      const actor = await requireAuth(req, res);
+      if (!actor) return;
+
+      const parsed = UserProfileUpdateSchema.parse(req.body);
+      const db = getAdminDb();
+      const userRef = db.collection('users').doc(actor.uid);
+
+      await userRef.set(
+        {
+          ...parsed,
+          updatedAt: new Date().toISOString(),
+        },
+        { merge: true }
+      );
+
+      const updatedSnap = await userRef.get();
+      return res.json({
+        ok: true,
+        message: 'Profile updated successfully',
+        profile: updatedSnap.data(),
+      });
+    } catch (err: any) {
+      if (err instanceof ZodError) {
+        return sendTypedError(
+          res,
+          400,
+          'VALIDATION_ERROR',
+          'Invalid profile update payload. Role, bizId, and verification status are immutable.',
+          err.issues
+        );
+      }
+      return sendTypedError(res, 500, 'USER_PROFILE_UPDATE_ERROR', err?.message || 'Failed to update user profile');
     }
   });
 

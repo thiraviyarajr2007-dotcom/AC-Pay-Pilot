@@ -86,28 +86,10 @@ export class AuthenticationError extends Error {
  * Derives role and bizId from the users/{uid} Firestore doc (or custom claims).
  */
 export async function authenticateRequest(req: Request): Promise<AuthenticatedUserActor> {
-  const isDemoMode = process.env.DEMO_MODE === 'true';
   const authHeader = req.headers.authorization;
 
-  // 1. Missing Authorization Bearer Header
+  // 1. Missing Authorization Bearer Header - Reject immediately
   if (!authHeader || !authHeader.startsWith('Bearer ')) {
-    if (isDemoMode) {
-      // Explicit DEMO_MODE flag is enabled — accept demo actor
-      const demoRole = (req.headers['x-actor-role'] as AppUserRole) || 'seller';
-      const demoUid = (req.headers['x-actor-uid'] as string) || 'demo-seller-1';
-      const demoEmail = (req.headers['x-actor-email'] as string) || 'demo.seller@paypilot.in';
-      const demoBiz = (req.headers['x-actor-biz-id'] as string) || DEFAULT_BIZ_ID;
-      return {
-        uid: demoUid,
-        email: demoEmail,
-        role: demoRole,
-        bizId: demoBiz,
-        isDemo: true,
-      };
-    }
-
-    // Default: Reject unauthenticated requests immediately.
-    // Untrusted x-actor-* headers are ignored and blocked.
     throw new AuthenticationError(
       'Missing or invalid Authorization header. Provide a valid Firebase ID token as "Bearer <token>".',
       'MISSING_AUTH_TOKEN',
@@ -120,9 +102,9 @@ export async function authenticateRequest(req: Request): Promise<AuthenticatedUs
     throw new AuthenticationError('Bearer token is empty.', 'INVALID_AUTH_TOKEN', 401);
   }
 
-  // 2. Handle Synthetic / Mock test tokens when testing or demo token format
+  // 2. Handle Synthetic / Mock test tokens strictly in test or non-production environment
   if (token.startsWith('mock-token-') || token.startsWith('demo-token-')) {
-    if (isDemoMode || process.env.NODE_ENV === 'test' || process.env.NODE_ENV !== 'production') {
+    if (process.env.NODE_ENV === 'test' || process.env.NODE_ENV !== 'production') {
       const parts = token.split('-');
       // format: mock-token-{role}-{uid}-{bizId}
       const role = (parts[2] as AppUserRole) || 'customer';
@@ -138,39 +120,64 @@ export async function authenticateRequest(req: Request): Promise<AuthenticatedUs
     }
   }
 
-  // 3. Verify Real Firebase ID Token with firebase-admin
+  // 3. Verify Real Firebase ID Token with firebase-admin (with checkRevoked = true)
   try {
     const auth = getAdminAuth();
-    const decoded = await auth.verifyIdToken(token);
+    let decoded: any;
+    try {
+      decoded = await auth.verifyIdToken(token, true);
+    } catch (tokenErr: any) {
+      const isExpired =
+        tokenErr.code === 'auth/id-token-expired' ||
+        tokenErr.message?.includes('expired');
+      const isRevoked =
+        tokenErr.code === 'auth/id-token-revoked' ||
+        tokenErr.message?.includes('revoked');
+      throw new AuthenticationError(
+        isExpired
+          ? 'Firebase ID token is expired. Please re-authenticate.'
+          : isRevoked
+          ? 'Firebase ID token has been revoked.'
+          : `Firebase ID token verification failed: ${tokenErr.message || 'Invalid token'}`,
+        isExpired ? 'TOKEN_EXPIRED' : isRevoked ? 'TOKEN_REVOKED' : 'INVALID_ID_TOKEN',
+        401
+      );
+    }
+
     const uid = decoded.uid;
     const email = decoded.email || '';
 
-    // Derive role and bizId from custom claims or users/{uid} Firestore document
+    // Derive role and bizId strictly from Firestore users/{uid} document (or verified custom claims)
     let role = (decoded.role as AppUserRole) || null;
     let bizId = (decoded.bizId as string) || null;
 
     if (!role || !bizId) {
-      const db = getAdminDb();
-      const userDoc = await db.collection('users').doc(uid).get();
-      if (userDoc.exists) {
-        const userData = userDoc.data() || {};
-        if (!role) role = (userData.role as AppUserRole) || 'customer';
-        if (!bizId) bizId = (userData.bizId as string) || (userData.activeBizId as string) || DEFAULT_BIZ_ID;
-      } else {
-        // Fallback default for newly provisioned user
+      try {
+        const db = getAdminDb();
+        const userDoc = await db.collection('users').doc(uid).get();
+        if (userDoc.exists) {
+          const userData = userDoc.data() || {};
+          if (!role) role = (userData.role as AppUserRole) || 'customer';
+          if (!bizId) bizId = (userData.bizId as string) || (userData.activeBizId as string) || DEFAULT_BIZ_ID;
+        } else {
+          // Fallback default for newly provisioned user: strictly lowest privilege 'customer'
+          role = role || 'customer';
+          bizId = bizId || DEFAULT_BIZ_ID;
+          await db.collection('users').doc(uid).set(
+            {
+              uid,
+              email,
+              role,
+              bizId,
+              createdAt: new Date().toISOString(),
+              updatedAt: new Date().toISOString(),
+            },
+            { merge: true }
+          );
+        }
+      } catch (dbErr: any) {
         role = role || 'customer';
         bizId = bizId || DEFAULT_BIZ_ID;
-        // Seed default user document
-        await db.collection('users').doc(uid).set(
-          {
-            uid,
-            email,
-            role,
-            bizId,
-            createdAt: new Date().toISOString(),
-          },
-          { merge: true }
-        );
       }
     }
 
@@ -182,12 +189,34 @@ export async function authenticateRequest(req: Request): Promise<AuthenticatedUs
       isDemo: false,
     };
   } catch (err: any) {
-    // If running in test mode with invalid token, throw 401
+    if (err instanceof AuthenticationError) {
+      throw err;
+    }
     throw new AuthenticationError(
       `Firebase ID token verification failed: ${err.message || 'Invalid token'}`,
       'INVALID_ID_TOKEN',
       401
     );
+  }
+}
+
+/**
+ * Standard Express middleware that authenticates via Firebase ID Token,
+ * loads the profile, and attaches actor {uid, role, bizId} to req.actor.
+ */
+export async function authMiddleware(req: Request, res: any, next: any) {
+  try {
+    const actor = await authenticateRequest(req);
+    (req as any).actor = actor;
+    next();
+  } catch (err: any) {
+    const status = err instanceof AuthenticationError ? err.statusCode : 401;
+    const code = err instanceof AuthenticationError ? err.code : 'UNAUTHORIZED';
+    res.status(status).json({
+      ok: false,
+      code,
+      error: err.message || 'Authentication required',
+    });
   }
 }
 

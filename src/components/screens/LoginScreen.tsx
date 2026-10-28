@@ -85,9 +85,8 @@ export const LoginScreen: React.FC = () => {
     setIsLoading(true);
     setErrorMsg(null);
     try {
-      setRole(selectedRole);
       await signInWithGoogle();
-      navigate(selectedRole === 'seller' ? '/seller/dashboard' : '/customer/discover');
+      navigate('/customer/discover');
     } catch (err: any) {
       setErrorMsg(err?.message || 'Google sign in failed. Please try again.');
     } finally {
@@ -99,9 +98,8 @@ export const LoginScreen: React.FC = () => {
     setIsLoading(true);
     setErrorMsg(null);
     try {
-      setRole(selectedRole);
       await signInWithFacebook();
-      navigate(selectedRole === 'seller' ? '/seller/dashboard' : '/customer/discover');
+      navigate('/customer/discover');
     } catch (err: any) {
       setErrorMsg(err?.message || 'Facebook sign in failed. Please try again.');
     } finally {
@@ -129,18 +127,13 @@ export const LoginScreen: React.FC = () => {
         setErrorMsg('Please provide your mobile phone number.');
         return;
       }
-      if (selectedRole === 'seller' && !email.trim()) {
-        setErrorMsg('Email address is mandatory for seller merchant accounts.');
-        return;
-      }
     }
 
     setIsLoading(true);
     setErrorMsg(null);
     try {
-      setRole(selectedRole);
       if (authMode === 'signup') {
-        await signUpWithEmail(email, password, selectedRole);
+        await signUpWithEmail(email, password);
         await completeProfileOnboarding({
           name: fullName.trim(),
           gender,
@@ -155,7 +148,7 @@ export const LoginScreen: React.FC = () => {
         setSuccessMsg('Signed in successfully! Redirecting...');
       }
       setTimeout(() => {
-        navigate(selectedRole === 'seller' ? '/seller/dashboard' : '/customer/discover');
+        navigate('/customer/discover');
       }, 500);
     } catch (err: any) {
       setErrorMsg(err?.message || 'Authentication error. Please check your credentials.');

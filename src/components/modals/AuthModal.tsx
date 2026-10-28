@@ -37,7 +37,6 @@ export const AuthModal: React.FC<AuthModalProps> = ({
     setIsLoading(true);
     setAuthError(null);
     try {
-      setRole(selectedRole);
       await signInWithGoogle();
       showToast('Signed in with Google securely.');
       onClose();
@@ -52,7 +51,6 @@ export const AuthModal: React.FC<AuthModalProps> = ({
     setIsLoading(true);
     setAuthError(null);
     try {
-      setRole(selectedRole);
       await signInWithFacebook();
       showToast('Signed in with Facebook securely.');
       onClose();
@@ -77,9 +75,8 @@ export const AuthModal: React.FC<AuthModalProps> = ({
     setIsLoading(true);
     setAuthError(null);
     try {
-      setRole(selectedRole);
       if (authMode === 'signup') {
-        await signUpWithEmail(email, password, selectedRole);
+        await signUpWithEmail(email, password);
         showToast('Account created successfully! Welcome to AC PayPilot.');
       } else {
         await signInWithEmail(email, password);

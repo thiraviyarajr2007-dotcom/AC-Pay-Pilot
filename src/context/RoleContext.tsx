@@ -1,13 +1,14 @@
-import React, { createContext, useContext, useState, useEffect, useMemo } from 'react';
+import React, { createContext, useContext, useState, useEffect, useMemo, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { AppRoute, DataSource, UserRole } from '../types';
 import {
   auth,
   onAuthStateChanged,
+  onSnapshot,
+  db,
   FirebaseUser,
   ensureFirestoreUserProfile,
   updateFirestoreUserProfile,
-  updateFirestoreUserRole,
   signInWithGooglePopup,
   signInWithFacebookPopup,
   signInWithEmailPassword,
@@ -16,6 +17,15 @@ import {
   testFirestoreConnection,
   FirestoreUserProfile,
 } from '../firebase';
+import { doc } from 'firebase/firestore';
+import { authenticatedFetch, ApiFetchOptions } from '../services/apiClient';
+
+export type AuthStatus =
+  | 'loading'
+  | 'unauthenticated'
+  | 'authenticated-profile-loading'
+  | 'ready'
+  | 'error';
 
 export interface RoleProfile {
   role: UserRole;
@@ -195,6 +205,8 @@ export function isRoleReadOnlyOnPath(role: UserRole, pathname: string): boolean 
 interface RoleContextValue {
   role: UserRole;
   profile: RoleProfile;
+  authStatus: AuthStatus;
+  authError: string | null;
   authSource: 'demo-switcher' | 'auth-provider';
   isAuthenticated: boolean;
   firebaseUser: FirebaseUser | null;
@@ -208,10 +220,12 @@ interface RoleContextValue {
   signOutUser: () => Promise<void>;
   setRole: (newRole: UserRole, navigateToHome?: boolean) => void;
   getActorHeaders: () => Record<string, string>;
+  authFetch: (url: string, options?: ApiFetchOptions) => Promise<Response>;
   dataSource: DataSource;
   setDataSource: (source: DataSource) => void;
   activeBizId: string;
   isDemoMode: boolean;
+  isDemoModeSupported: boolean;
   serverConfirmed: boolean;
   setServerConfirmed: (confirmed: boolean) => void;
   feesVerified: boolean;
@@ -246,30 +260,39 @@ const RoleContext = createContext<RoleContextValue | undefined>(undefined);
 export const RoleProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   const navigate = useNavigate();
 
+  // Explicit demo mode flag (OFF by default unless VITE_DEMO_MODE=true)
+  const isDemoModeSupported =
+    typeof import.meta !== 'undefined' &&
+    import.meta.env &&
+    import.meta.env.VITE_DEMO_MODE === 'true';
+
+  const [authStatus, setAuthStatus] = useState<AuthStatus>('loading');
+  const [authError, setAuthError] = useState<string | null>(null);
+
   const [demoRole, setDemoRoleState] = useState<UserRole>(() => {
     try {
       const saved = localStorage.getItem('paypilot_active_role') as UserRole | null;
       if (saved && ROLE_PROFILES[saved]) return saved;
     } catch {
-      // ignore storage errors
+      // ignore
     }
-    return 'seller';
+    return 'customer'; // safe default
   });
 
   const [firebaseUser, setFirebaseUser] = useState<FirebaseUser | null>(null);
   const [firebaseRole, setFirebaseRole] = useState<UserRole>('customer');
   const [userProfile, setUserProfile] = useState<FirestoreUserProfile | null>(null);
-  const [authLoading, setAuthLoading] = useState<boolean>(true);
   const [firestoreConnected, setFirestoreConnected] = useState<boolean>(false);
   const [isProfileOnboardingPending, setIsProfileOnboardingPending] = useState<boolean>(false);
   const [isAuthModalOpen, setIsAuthModalOpen] = useState<boolean>(false);
 
   const [dataSource, setDataSourceState] = useState<DataSource>(() => {
+    if (!isDemoModeSupported) return 'live';
     try {
       const saved = localStorage.getItem('paypilot_data_source') as DataSource | null;
       if (saved === 'demo' || saved === 'live') return saved;
     } catch {
-      // ignore storage errors
+      // ignore
     }
     return 'demo';
   });
@@ -279,54 +302,133 @@ export const RoleProvider: React.FC<{ children: React.ReactNode }> = ({ children
   const [lastServerOrderId, setLastServerOrderId] = useState<string | null>('ord-1');
   const [demoStepIndex, setDemoStepIndex] = useState<number | null>(null);
 
+  const unsubProfileRef = useRef<(() => void) | null>(null);
+
+  // Connection and Auth Lifecycle Listener
   useEffect(() => {
     testFirestoreConnection().then((ok) => setFirestoreConnected(ok));
 
-    const unsubscribe = onAuthStateChanged(auth, async (fbUser) => {
-      setFirebaseUser(fbUser);
-      if (fbUser) {
-        const userDoc = await ensureFirestoreUserProfile(fbUser, demoRole);
-        setUserProfile(userDoc);
-        if (userDoc.role && ROLE_PROFILES[userDoc.role]) {
-          setFirebaseRole(userDoc.role);
+    let isMounted = true;
+
+    const unsubAuth = onAuthStateChanged(
+      auth,
+      async (fbUser) => {
+        if (!isMounted) return;
+
+        // Cleanup any existing Firestore profile listener
+        if (unsubProfileRef.current) {
+          unsubProfileRef.current();
+          unsubProfileRef.current = null;
         }
-        if (userDoc.onboardingCompleted === false || !userDoc.gender || !userDoc.phone) {
-          setIsProfileOnboardingPending(true);
-        }
-        try {
-          const savedSource = localStorage.getItem('paypilot_data_source');
-          if (!savedSource) {
-            setDataSourceState('live');
+
+        if (!fbUser) {
+          setFirebaseUser(null);
+          setUserProfile(null);
+          setFirebaseRole('customer');
+          setIsProfileOnboardingPending(false);
+
+          if (isDemoModeSupported && dataSource === 'demo') {
+            setAuthStatus('ready');
+          } else {
+            setAuthStatus('unauthenticated');
           }
-        } catch {}
-      } else {
-        setUserProfile(null);
-        setIsProfileOnboardingPending(false);
+          return;
+        }
+
+        setFirebaseUser(fbUser);
+        setAuthStatus('authenticated-profile-loading');
+
+        // Attach real-time snapshot listener on users/{uid} (single source of truth)
+        const userDocRef = doc(db, 'users', fbUser.uid);
+
+        unsubProfileRef.current = onSnapshot(
+          userDocRef,
+          async (snap) => {
+            if (!isMounted) return;
+
+            if (snap.exists()) {
+              const data = snap.data() as FirestoreUserProfile;
+              setUserProfile(data);
+              if (data.role && ROLE_PROFILES[data.role]) {
+                setFirebaseRole(data.role);
+              } else {
+                setFirebaseRole('customer');
+              }
+              if (data.onboardingCompleted === false || !data.gender || !data.phone) {
+                setIsProfileOnboardingPending(true);
+              } else {
+                setIsProfileOnboardingPending(false);
+              }
+              setAuthStatus('ready');
+              setAuthError(null);
+            } else {
+              // "Handle auth user exists but profile doc missing by creating a safe default profile with the lowest-privilege role."
+              try {
+                const safeProfile = await ensureFirestoreUserProfile(fbUser, 'customer');
+                if (isMounted) {
+                  setUserProfile(safeProfile);
+                  setFirebaseRole('customer');
+                  setIsProfileOnboardingPending(true);
+                  setAuthStatus('ready');
+                  setAuthError(null);
+                }
+              } catch (profileErr: any) {
+                console.error('[Auth] Failed to initialize default profile:', profileErr);
+                if (isMounted) {
+                  setAuthStatus('error');
+                  setAuthError(profileErr?.message || 'Failed to initialize user profile.');
+                }
+              }
+            }
+          },
+          (snapErr) => {
+            console.error('[Auth] Profile onSnapshot error:', snapErr);
+            if (isMounted) {
+              setAuthStatus('error');
+              setAuthError(snapErr.message);
+            }
+          }
+        );
+      },
+      (authErr) => {
+        console.error('[Auth] onAuthStateChanged error:', authErr);
+        if (isMounted) {
+          setAuthStatus('error');
+          setAuthError(authErr.message);
+        }
       }
-      setAuthLoading(false);
-    });
+    );
 
-    return () => unsubscribe();
-  }, []);
+    return () => {
+      isMounted = false;
+      unsubAuth();
+      if (unsubProfileRef.current) {
+        unsubProfileRef.current();
+        unsubProfileRef.current = null;
+      }
+    };
+  }, [isDemoModeSupported, dataSource]);
 
-  // Compute active business ID: isolated for logged-in users, shared demo biz for demo mode
+  // Derived Business ID: Synchronized with user profile or default business
   const activeBizId = useMemo(() => {
-    if (dataSource === 'live' && firebaseUser?.uid) {
-      return `biz-${firebaseUser.uid}`;
+    if (firebaseUser && userProfile?.bizId) {
+      return userProfile.bizId;
     }
     return 'biz-aerocool';
-  }, [dataSource, firebaseUser]);
+  }, [firebaseUser, userProfile]);
 
-  // In 'live' mode with a signed-in Firebase user, role comes from Firestore users/{uid}.role.
-  // In 'demo' mode, the clearly labelled "Demo role" switcher controls the role.
+  // Role resolution: In live mode, role comes strictly from Firestore users/{uid}.role
   const activeRole: UserRole =
     dataSource === 'live' && firebaseUser ? firebaseRole : demoRole;
 
   const activeProfile = useMemo<RoleProfile>(() => {
-    const base = ROLE_PROFILES[activeRole];
+    const base = ROLE_PROFILES[activeRole] || ROLE_PROFILES.customer;
     if (firebaseUser) {
       const displayName =
-        userProfile?.displayName || firebaseUser.displayName || firebaseUser.email?.split('@')[0] || base.userName;
+        userProfile?.displayName ||
+        firebaseUser.displayName ||
+        firebaseUser.email?.split('@')[0] ||
+        base.userName;
       const initials = displayName
         .split(' ')
         .map((n) => n[0])
@@ -344,116 +446,79 @@ export const RoleProvider: React.FC<{ children: React.ReactNode }> = ({ children
   }, [activeRole, firebaseUser, userProfile]);
 
   const setRole = (newRole: UserRole, navigateToHome = false) => {
-    setDemoRoleState(newRole);
-    try {
-      localStorage.setItem('paypilot_active_role', newRole);
-    } catch {
-      // ignore
+    if (dataSource === 'demo' && isDemoModeSupported) {
+      setDemoRoleState(newRole);
+      try {
+        localStorage.setItem('paypilot_active_role', newRole);
+      } catch {
+        // ignore
+      }
+      if (navigateToHome) {
+        navigate(ROLE_PROFILES[newRole].homeRoute);
+      }
+      return;
     }
-    if (firebaseUser) {
-      setFirebaseRole(newRole);
-      void updateFirestoreUserRole(firebaseUser.uid, newRole);
-    }
-    if (navigateToHome) {
-      navigate(ROLE_PROFILES[newRole].homeRoute);
-    }
+    console.warn('[SECURITY] Role changes in live mode are server-governed and cannot be mutated by client.');
   };
 
   const signInWithGoogle = async () => {
+    setAuthError(null);
     try {
       const cred = await signInWithGooglePopup();
       if (cred.user) {
-        const profileDoc = await ensureFirestoreUserProfile(cred.user, activeRole);
-        setUserProfile(profileDoc);
-        setFirebaseRole(profileDoc.role);
+        await ensureFirestoreUserProfile(cred.user, 'customer');
         setDataSourceState('live');
-        if (profileDoc.onboardingCompleted === false || !profileDoc.gender || !profileDoc.phone) {
-          setIsProfileOnboardingPending(true);
-        }
       }
-    } catch (err) {
-      console.error('Google Sign-In error:', err);
+    } catch (err: any) {
+      console.error('Google Sign-In failed:', err);
+      setAuthError(err?.message || 'Google authentication failed.');
+      throw err;
     }
   };
 
   const signInWithFacebook = async () => {
+    setAuthError(null);
     try {
       const cred = await signInWithFacebookPopup();
       if (cred.user) {
-        const profileDoc = await ensureFirestoreUserProfile(cred.user, activeRole);
-        setUserProfile(profileDoc);
-        setFirebaseRole(profileDoc.role);
+        await ensureFirestoreUserProfile(cred.user, 'customer');
         setDataSourceState('live');
-        if (profileDoc.onboardingCompleted === false || !profileDoc.gender || !profileDoc.phone) {
-          setIsProfileOnboardingPending(true);
-        }
       }
     } catch (err: any) {
-      console.warn('Facebook OAuth note:', err);
-      // Smooth fallback if Facebook OAuth popup is blocked by browser or domain whitelist
-      const mockFbUser: any = {
-        uid: `fb-${Date.now().toString(36)}`,
-        displayName: 'Verified Facebook User',
-        email: 'facebook.user@apexcloud.io',
-      };
-      setFirebaseUser(mockFbUser);
-      const profileDoc = await ensureFirestoreUserProfile(mockFbUser, activeRole);
-      setUserProfile(profileDoc);
-      setIsProfileOnboardingPending(true);
-      setDataSourceState('live');
+      console.error('Facebook Sign-In failed:', err);
+      setAuthError(err?.message || 'Facebook authentication failed.');
+      throw err;
     }
   };
 
   const signInWithEmail = async (email: string, pass: string) => {
+    setAuthError(null);
     try {
       const cred = await signInWithEmailPassword(email, pass);
       if (cred.user) {
-        const profileDoc = await ensureFirestoreUserProfile(cred.user, activeRole);
-        setUserProfile(profileDoc);
-        setFirebaseRole(profileDoc.role);
+        await ensureFirestoreUserProfile(cred.user, 'customer');
         setDataSourceState('live');
-        if (profileDoc.onboardingCompleted === false || !profileDoc.gender || !profileDoc.phone) {
-          setIsProfileOnboardingPending(true);
-        }
       }
     } catch (err: any) {
-      console.warn('Email sign-in notice, providing local authenticated session:', err);
-      const emailUser: any = {
-        uid: `usr-${Date.now().toString(36)}`,
-        displayName: email.split('@')[0],
-        email,
-      };
-      setFirebaseUser(emailUser);
-      const profileDoc = await ensureFirestoreUserProfile(emailUser, activeRole);
-      setUserProfile(profileDoc);
-      setIsProfileOnboardingPending(true);
-      setDataSourceState('live');
+      console.error('Email sign-in failed:', err);
+      setAuthError(err?.message || 'Invalid email or password.');
+      throw err;
     }
   };
 
-  const signUpWithEmail = async (email: string, pass: string, targetRole: UserRole = activeRole) => {
+  const signUpWithEmail = async (email: string, pass: string, _targetRole?: UserRole) => {
+    setAuthError(null);
     try {
       const cred = await signUpWithEmailPassword(email, pass);
       if (cred.user) {
-        const profileDoc = await ensureFirestoreUserProfile(cred.user, targetRole);
-        setUserProfile(profileDoc);
-        setFirebaseRole(targetRole);
+        await ensureFirestoreUserProfile(cred.user, 'customer');
         setDataSourceState('live');
         setIsProfileOnboardingPending(true);
       }
     } catch (err: any) {
-      console.warn('Email register notice, providing local registered session:', err);
-      const newUser: any = {
-        uid: `usr-${Date.now().toString(36)}`,
-        displayName: email.split('@')[0],
-        email,
-      };
-      setFirebaseUser(newUser);
-      const profileDoc = await ensureFirestoreUserProfile(newUser, targetRole);
-      setUserProfile(profileDoc);
-      setFirebaseRole(targetRole);
-      setIsProfileOnboardingPending(true);
-      setDataSourceState('live');
+      console.error('Email registration failed:', err);
+      setAuthError(err?.message || 'Registration failed.');
+      throw err;
     }
   };
 
@@ -465,18 +530,17 @@ export const RoleProvider: React.FC<{ children: React.ReactNode }> = ({ children
     age: number;
     email?: string;
   }) => {
-    const uid = firebaseUser?.uid || 'local-user';
-    const updated: Partial<FirestoreUserProfile> = {
+    if (!firebaseUser) {
+      throw new Error('Must be authenticated to complete onboarding');
+    }
+    await updateFirestoreUserProfile(firebaseUser.uid, {
       displayName: details.name,
       gender: details.gender,
       phone: details.phone,
       countryCode: details.countryCode,
       age: details.age,
-      ...(details.email ? { email: details.email } : {}),
       onboardingCompleted: true,
-    };
-    await updateFirestoreUserProfile(uid, updated);
-    setUserProfile((prev) => (prev ? { ...prev, ...updated } : (updated as any)));
+    });
     setIsProfileOnboardingPending(false);
   };
 
@@ -484,10 +548,7 @@ export const RoleProvider: React.FC<{ children: React.ReactNode }> = ({ children
     setIsProfileOnboardingPending(false);
   };
 
-  const openAuthModal = (targetRole?: UserRole) => {
-    if (targetRole) {
-      setRole(targetRole);
-    }
+  const openAuthModal = (_targetRole?: UserRole) => {
     setIsAuthModalOpen(true);
   };
 
@@ -497,35 +558,47 @@ export const RoleProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
   const signOutUser = async () => {
     try {
+      if (unsubProfileRef.current) {
+        unsubProfileRef.current();
+        unsubProfileRef.current = null;
+      }
       await signOutFirebase();
       setFirebaseUser(null);
       setUserProfile(null);
       setIsProfileOnboardingPending(false);
-      setDataSourceState('demo');
+
+      // Clear all caches, listeners, and storage keys tied to the user
+      try {
+        const keys = Object.keys(localStorage);
+        for (const k of keys) {
+          if (k.startsWith('paypilot_') || k.startsWith('ac_') || k.includes('profile')) {
+            localStorage.removeItem(k);
+          }
+        }
+        sessionStorage.clear();
+      } catch (storageErr) {
+        console.warn('Storage cleanup notice:', storageErr);
+      }
+
+      setAuthStatus('unauthenticated');
+      navigate('/login');
     } catch (err) {
       console.error('Sign-out error:', err);
     }
   };
 
+  // Deprecated header builder kept for non-security backwards compatibility
   const getActorHeaders = (): Record<string, string> => {
-    const uid =
-      firebaseUser?.uid ||
-      (activeRole === 'customer'
-        ? 'cust-demo-1'
-        : activeRole === 'seller'
-        ? 'seller-demo-1'
-        : activeRole === 'finance'
-        ? 'finance-demo-1'
-        : 'exec-demo-1');
     return {
       'Content-Type': 'application/json',
-      'x-actor-uid': uid,
-      'x-actor-email': activeProfile.userEmail,
-      'x-actor-role': activeRole,
     };
   };
 
   const setDataSource = (source: DataSource) => {
+    if (!isDemoModeSupported && source === 'demo') {
+      console.warn('[SECURITY] Demo mode is disabled in production environment.');
+      return;
+    }
     setDataSourceState(source);
     if (source === 'demo') {
       setServerConfirmed(false);
@@ -538,6 +611,7 @@ export const RoleProvider: React.FC<{ children: React.ReactNode }> = ({ children
   };
 
   const applyDemoStep = (index: number) => {
+    if (!isDemoModeSupported) return;
     const step = DEMO_TOUR_STEPS[index];
     if (!step) {
       setDemoStepIndex(null);
@@ -582,11 +656,13 @@ export const RoleProvider: React.FC<{ children: React.ReactNode }> = ({ children
     () => ({
       role: activeRole,
       profile: activeProfile,
+      authStatus,
+      authError,
       authSource: firebaseUser ? 'auth-provider' : 'demo-switcher',
-      isAuthenticated: Boolean(firebaseUser) || dataSource === 'demo',
+      isAuthenticated: Boolean(firebaseUser) || (isDemoModeSupported && dataSource === 'demo'),
       firebaseUser,
       userProfile,
-      authLoading,
+      authLoading: authStatus === 'loading' || authStatus === 'authenticated-profile-loading',
       firestoreConnected,
       signInWithGoogle,
       signInWithFacebook,
@@ -595,10 +671,12 @@ export const RoleProvider: React.FC<{ children: React.ReactNode }> = ({ children
       signOutUser,
       setRole,
       getActorHeaders,
+      authFetch: authenticatedFetch,
       dataSource,
       setDataSource,
       activeBizId,
-      isDemoMode: dataSource === 'demo',
+      isDemoMode: dataSource === 'demo' && isDemoModeSupported,
+      isDemoModeSupported,
       serverConfirmed,
       setServerConfirmed,
       feesVerified,
@@ -623,12 +701,14 @@ export const RoleProvider: React.FC<{ children: React.ReactNode }> = ({ children
     [
       activeRole,
       activeProfile,
+      authStatus,
+      authError,
       firebaseUser,
       userProfile,
-      authLoading,
       firestoreConnected,
       dataSource,
       activeBizId,
+      isDemoModeSupported,
       serverConfirmed,
       feesVerified,
       lastServerOrderId,
