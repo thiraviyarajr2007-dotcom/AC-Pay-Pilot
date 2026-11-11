@@ -3,6 +3,10 @@
   "private": true,
   "version": "0.0.0",
   "type": "module",
+  "engines": {
+    "node": ">=24.12.0 <25.0.0",
+    "npm": ">=10.0.0"
+  },
   "scripts": {
     "dev": "node node_modules/tsx/dist/cli.mjs server.ts",
     "start": "node node_modules/tsx/dist/cli.mjs server.ts",
@@ -10,7 +14,8 @@
     "preview": "node node_modules/vite/bin/vite.js preview",
     "clean": "node -e \"const fs=require('fs'); fs.rmSync('dist',{recursive:true,force:true});\"",
     "lint": "node node_modules/typescript/bin/tsc --noEmit",
-    "test": "node node_modules/tsx/dist/cli.mjs --test src/utils/finance.test.ts src/test/securityAndSingleSource.test.ts"
+    "test": "node node_modules/tsx/dist/cli.mjs --test src/utils/finance.test.ts src/test/securityAndSingleSource.test.ts src/test/financialIntegrityAndConcurrency.test.ts src/test/productionReadiness.test.ts",
+    "test:rules": "firebase emulators:exec --only firestore \"node node_modules/tsx/dist/cli.mjs --test src/test/firestoreRules.emulator.test.ts\""
   },
   "dependencies": {
     "@google/genai": "^2.4.0",
@@ -35,15 +40,20 @@
     "zod": "^4.6.7"
   },
   "devDependencies": {
+    "@firebase/rules-unit-testing": "6.0.0",
     "@types/express": "^4.17.21",
     "@types/node": "^22.14.0",
     "@types/react": "^19.3.0",
     "@types/react-dom": "^19.3.0",
     "@types/three": "^0.186.0",
     "autoprefixer": "^10.4.21",
-    "esbuild": "^0.27.0",
+    "esbuild": "^0.28.2",
     "tailwindcss": "^4.3.3",
     "tsx": "^4.21.0",
     "typescript": "^7.0.2"
+  },
+  "overrides": {
+    "@grpc/grpc-js": "1.14.7",
+    "rimraf": "^6.1.4"
   }
 }

@@ -10,9 +10,9 @@ process.on('unhandledRejection', (reason: any) => {
   }
   console.warn('Unhandled server promise warning:', reason?.message || reason);
 });
+import fs from 'node:fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
-import { createServer as createViteServer } from 'vite';
 import { z, ZodError } from 'zod';
 import { GoogleGenAI } from '@google/genai';
 import {
@@ -81,13 +81,27 @@ import {
   authMiddleware,
   getUserProfileFromDb,
   saveUserProfileToDb,
+  PersistenceError,
+  atomicLockOrderForCapture,
+  atomicConsumeGuestTokenAndLockOrder,
+  isWebhookEventProcessed,
+  recordWebhookEvent,
   DEFAULT_BIZ_ID,
 } from './src/server/firebaseAdmin';
 import crypto from 'node:crypto';
-import { validateStartupConfig } from './src/server/configValidator';
+import { validateStartupConfig, ConfigurationError } from './src/server/configValidator';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
+
+export function resolveServerPort(rawPort: string | undefined = process.env.PORT): number {
+  if (rawPort === undefined || rawPort.trim() === '') return 3000;
+  const port = Number(rawPort);
+  if (!Number.isInteger(port) || port < 1 || port > 65535) {
+    throw new Error(`Invalid PORT '${rawPort}': must be an integer between 1 and 65535.`);
+  }
+  return port;
+}
 
 /**
  * Enforces token authentication via Firebase ID Token (Authorization: Bearer <token>).
@@ -170,7 +184,26 @@ const AiSuggestBodySchema = z.object({
 
 export async function createAppServer() {
   // Validate startup configuration and persistence requirements
-  const configStatus = validateStartupConfig(process.env);
+  let configStatus: ReturnType<typeof validateStartupConfig>;
+  try {
+    configStatus = validateStartupConfig(process.env);
+  } catch (err: any) {
+    if (err instanceof ConfigurationError && err.message.includes('SECURITY VIOLATION')) {
+      throw err;
+    }
+    const missingVars: string[] = err?.missingVars || [];
+    if (process.env.NODE_ENV !== 'test') {
+      console.error(
+        `[PRODUCTION READINESS DEGRADED] Missing configuration [${missingVars.join(', ')}]. /health/ready will return 503 and durable mutations are blocked.`
+      );
+    }
+    configStatus = {
+      ok: false,
+      missing: missingVars,
+      warnings: [err?.message || 'Production configuration incomplete'],
+      persistenceMode: getPersistenceMode(),
+    };
+  }
   if (configStatus.warnings.length > 0 && process.env.NODE_ENV !== 'test') {
     for (const warn of configStatus.warnings) {
       console.warn(`[CONFIG WARNING] ${warn}`);
@@ -180,21 +213,23 @@ export async function createAppServer() {
   const app = express();
   app.use(express.json({ limit: '25mb' }));
 
-  // Refuse payment routes in production if persistence is volatile
-  const persistenceCheckMiddleware = (req: Request, res: Response, next: NextFunction) => {
-    if (process.env.NODE_ENV === 'production' && getPersistenceMode() === 'memory-volatile') {
+  // Refuse ALL durable mutations in production when durable Firestore persistence is unavailable
+  const persistenceCheckMiddleware = (_req: Request, res: Response, next: NextFunction) => {
+    const durableRequired =
+      process.env.NODE_ENV === 'production' && process.env.DEMO_MODE !== 'true';
+    if (durableRequired && getPersistenceMode() !== 'firestore-admin') {
       return sendTypedError(
         res,
         503,
         'PERSISTENCE_UNAVAILABLE',
-        'Persistent database is unavailable. Production payments are disabled in volatile memory mode.'
+        'Persistent database is unavailable. Durable mutations are disabled in volatile memory mode.'
       );
     }
     next();
   };
 
-  // Seed default canonical storefront and products into Firestore if not present (skipped in test mode)
-  if (process.env.NODE_ENV !== 'test') {
+  // Seed default canonical storefront and products into Firestore only when Admin DB is active
+  if (process.env.NODE_ENV !== 'test' && getPersistenceMode() === 'firestore-admin') {
     seedDefaultStorefrontInFirestore().catch((err) => {
       console.warn('Firestore initial seeding warning:', err?.message || err);
     });
@@ -251,6 +286,30 @@ export async function createAppServer() {
     });
   });
 
+  // Liveness is intentionally cheap and always available once the process is serving.
+  app.get(['/health/live', '/api/health/live'], (_req: Request, res: Response) => {
+    res.json({
+      ok: true,
+      status: 'live',
+      serverTime: new Date().toISOString(),
+    });
+  });
+
+  // Readiness fails closed in production when durable Firestore persistence is unavailable.
+  app.get(['/health/ready', '/api/health/ready'], (_req: Request, res: Response) => {
+    const persistenceMode = getPersistenceMode();
+    const durableRequired = process.env.NODE_ENV === 'production' && process.env.DEMO_MODE !== 'true';
+    const ready = !durableRequired || persistenceMode === 'firestore-admin';
+    res.status(ready ? 200 : 503).json({
+      ok: ready,
+      status: ready ? 'ready' : 'not_ready',
+      persistenceMode,
+      durableRequired,
+      serverTime: new Date().toISOString(),
+      ...(ready ? {} : { code: 'PERSISTENCE_UNAVAILABLE' }),
+    });
+  });
+
   // ==========================================================================
   // 1b. Real-Time Seller Order Notification Stream (SSE + Storefront Notify)
   // ==========================================================================
@@ -301,7 +360,7 @@ export async function createAppServer() {
     });
   });
 
-  app.post('/api/orders/notify', async (req: Request, res: Response) => {
+  app.post('/api/orders/notify', persistenceCheckMiddleware, async (req: Request, res: Response) => {
     try {
       const body = req.body || {};
       const bizId = String(body.bizId || DEFAULT_BIZ_ID);
@@ -352,14 +411,22 @@ export async function createAppServer() {
     let guestCaptureTokenHash: string | undefined;
     let guestExpiresAt: string | undefined;
 
-    try {
-      const userActor = await authenticateRequest(req);
-      actor = userActor;
-    } catch {
-      // Unauthenticated checkout: generate unique unforgeable guest actor & high-entropy capture token
+    // Requirement P1: Reject an invalid supplied Bearer token with HTTP 401 instead of silently treating it as guest checkout
+    const authHeader = req.headers.authorization;
+    if (authHeader) {
+      try {
+        const userActor = await authenticateRequest(req);
+        actor = userActor;
+      } catch (err: any) {
+        const status = err instanceof AuthenticationError ? err.statusCode : 401;
+        const code = err instanceof AuthenticationError ? err.code : 'UNAUTHORIZED';
+        return sendTypedError(res, status, code, err.message || 'Invalid authorization credentials');
+      }
+    } else {
+      // Unauthenticated checkout: generate unique cryptographically secure guest actor & high-entropy capture token
       isGuest = true;
       actor = {
-        uid: `guest-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+        uid: `guest-${Date.now()}-${crypto.randomBytes(16).toString('hex')}`,
         email: 'guest@paypilot.in',
         role: 'customer',
         bizId: DEFAULT_BIZ_ID,
@@ -395,46 +462,48 @@ export async function createAppServer() {
         name: p.name,
         price: p.price ?? ((p.priceMinor || 0) / 100),
         priceMinor: p.priceMinor || Math.round((p.price || 0) * 100),
-        priceUsd: p.priceUsd ?? (typeof p.price === 'number' ? Math.round(p.price * Number(process.env.INR_TO_USD_EXCHANGE_RATE || 0.012) * 100) / 100 : undefined),
+        priceUsd: p.priceUsd ?? (p.currency === 'USD' ? p.price : (typeof p.price === 'number' ? Math.round(p.price * Number(process.env.INR_TO_USD_EXCHANGE_RATE || 0.012) * 100) / 100 : undefined)),
         currency: p.currency || 'INR',
         gstRatePercent: p.gstRate || 18,
         hsnCode: p.hsCode || '8414',
       }));
 
-      const calc = calculateAuthoritativeOrderTotalsMinor(
-        parsedBody.items.map((i) => ({ sku: i.sku, quantity: i.quantity })),
-        catalogItems as any,
-        parsedBody.currency,
-        parsedBody.shippingMinor
+      // Single authoritative calculation is used directly inside ledger creation and provider payload
+      const result = await defaultServerLedger.createOrder(
+        {
+          ...parsedBody,
+          guestCheckoutToken: guestCaptureToken,
+        },
+        { catalogProducts: catalogItems }
       );
 
-      const result = await defaultServerLedger.createOrder(parsedBody);
+      // On idempotent replay: do NOT overwrite the persisted order with new tokens or replace stored token hashes
+      if (!result.idempotentReplay) {
+        // Persist order and initial escrow event to Firestore businesses/{bizId}/orders
+        await saveOrderForBiz(bizId, {
+          ...result.order,
+          bizId,
+          isGuestCheckout: isGuest,
+          guestCaptureTokenHash,
+          guestExpiresAt,
+          guestTokenUsed: false,
+        });
+        await recordEscrowEventForBiz(bizId, {
+          orderId: result.order.id,
+          fromState: null,
+          toState: 'created',
+          actorId: actor.uid,
+          actorRole: actor.role,
+          reason: `Order created for ${result.order.currency} ${result.order.totalMinor} minor units`,
+          timestamp: new Date().toISOString(),
+        });
+      }
 
-      // Persist order and initial escrow event to Firestore businesses/{bizId}/orders
-      await saveOrderForBiz(bizId, {
-        ...result.order,
-        bizId,
-        items: calc.items,
-        totalMinor: calc.totalMinor,
-        isGuestCheckout: isGuest,
-        guestCaptureTokenHash,
-        guestExpiresAt,
-        guestTokenUsed: false,
-      });
-      await recordEscrowEventForBiz(bizId, {
-        orderId: result.order.id,
-        fromState: null,
-        toState: 'created',
-        actorId: actor.uid,
-        actorRole: actor.role,
-        reason: `Order created for ${calc.currency} ${calc.totalMinor} minor units`,
-        timestamp: new Date().toISOString(),
-      });
-
+      const activeGuestToken = result.order.guestCheckoutToken || (isGuest ? guestCaptureToken : undefined);
       res.status(result.idempotentReplay ? 200 : 201).json({
         ok: true,
         ...result,
-        ...(isGuest && guestCaptureToken ? { guestCaptureToken } : {}),
+        ...(result.order.isGuestCheckout && activeGuestToken ? { guestCaptureToken: activeGuestToken } : {}),
       });
     } catch (err: any) {
       if (err instanceof ZodError) {
@@ -494,6 +563,10 @@ export async function createAppServer() {
 
     const order = existing.order;
     const bizId = order.bizId || DEFAULT_BIZ_ID;
+    if (!defaultServerLedger.getOrderWithEvents(orderOrPaypalId)) {
+      defaultServerLedger.hydrateOrderRecord(order as any, [], []);
+    }
+    const guestToken = (req.body?.guestCaptureToken || req.headers['x-guest-capture-token']) as string | undefined;
 
     if (actor) {
       // Authenticated via Bearer ID Token: Check role permissions
@@ -511,7 +584,6 @@ export async function createAppServer() {
       }
     } else {
       // Guest Checkout: Require single-use high-entropy capture token
-      const guestToken = (req.body?.guestCaptureToken || req.headers['x-guest-capture-token']) as string | undefined;
       if (!guestToken || typeof guestToken !== 'string' || guestToken.trim() === '') {
         return sendTypedError(
           res,
@@ -565,6 +637,21 @@ export async function createAppServer() {
         );
       }
 
+      if (getPersistenceMode() === 'firestore-admin') {
+        const idempotencyKey = req.body?.idempotencyKey || (req.headers['idempotency-key'] as string) || `cap-${order.id}`;
+        const txResult = await atomicConsumeGuestTokenAndLockOrder(bizId, order.id, guestToken, idempotencyKey);
+        if (!txResult.ok) {
+          const code = txResult.statusCode === 409
+            ? 'CONCURRENT_CAPTURE_CONFLICT'
+            : txResult.reason?.includes('expired')
+            ? 'GUEST_TOKEN_EXPIRED'
+            : txResult.reason?.includes('already been used')
+            ? 'GUEST_TOKEN_REUSED'
+            : 'INVALID_GUEST_TOKEN';
+          return sendTypedError(res, txResult.statusCode || 403, code, txResult.reason || 'Invalid guest token');
+        }
+      }
+
       isGuestCapture = true;
       actor = {
         uid: order.customerId,
@@ -572,6 +659,26 @@ export async function createAppServer() {
         role: 'customer',
         bizId,
       };
+    }
+
+    const captureIdempotencyKey =
+      req.body?.idempotencyKey || (req.headers['idempotency-key'] as string) || `cap-${order.id}`;
+
+    // For authenticated orders in production firestore-admin mode, acquire durable capture lock
+    if (!guestToken && getPersistenceMode() === 'firestore-admin') {
+      const lockResult = await atomicLockOrderForCapture(bizId, order.id, captureIdempotencyKey);
+      if (!lockResult.ok) {
+        const code =
+          lockResult.statusCode === 409
+            ? 'CONCURRENT_CAPTURE_CONFLICT'
+            : 'CAPTURE_LOCK_FAILED';
+        return sendTypedError(
+          res,
+          lockResult.statusCode || 409,
+          code,
+          lockResult.reason || 'Capture lock failed'
+        );
+      }
     }
 
     try {
@@ -589,21 +696,51 @@ export async function createAppServer() {
       }
 
       // Persist captured order & payment to Firestore businesses/{bizId}/...
-      await saveOrderForBiz(bizId, {
-        ...result.order,
-        bizId,
-        guestTokenUsed: true,
-      });
-      if (result.payment) {
-        await savePaymentForBiz(bizId, {
-          ...result.payment,
+      try {
+        await saveOrderForBiz(bizId, {
+          ...result.order,
           bizId,
+          guestTokenUsed: true,
         });
-      }
-      if (result.escrowEvents?.length) {
-        for (const evt of result.escrowEvents) {
-          await recordEscrowEventForBiz(bizId, evt);
+        if (result.payment) {
+          await savePaymentForBiz(bizId, {
+            ...result.payment,
+            bizId,
+          });
         }
+        if (result.escrowEvents?.length) {
+          for (const evt of result.escrowEvents) {
+            await recordEscrowEventForBiz(bizId, evt);
+          }
+        }
+      } catch (persistErr: any) {
+        // Requirement P0: Provider capture succeeded but DB write failed -> produce recoverable reconciliation state
+        if (
+          persistErr instanceof PersistenceError ||
+          persistErr?.name === 'PersistenceError' ||
+          persistErr?.code === 'DURABLE_WRITE_FAILED'
+        ) {
+          console.error(
+            '[CRITICAL FINANCIAL RECONCILIATION] Provider capture succeeded but durable persistence failed. DO NOT report payment failed.',
+            {
+              orderId: result.order.id,
+              paypalCaptureId: result.order.paypalCaptureId,
+              error: persistErr.message,
+            }
+          );
+          return res.status(502).json({
+            ok: false,
+            code: 'PAYMENT_CAPTURED_RECONCILIATION_REQUIRED',
+            error:
+              'Payment was captured by PayPal, but durable database persistence failed. Payment has been flagged for automated reconciliation. Escrow remains held in safety.',
+            orderId: result.order.id,
+            paypalCaptureId: result.order.paypalCaptureId,
+            paymentStatus: result.order.paymentStatus,
+            escrowState: 'created',
+            reconciliationRequired: true,
+          });
+        }
+        throw persistErr;
       }
 
       if (!result.idempotentReplay && result.order.paymentStatus === 'Captured') {
@@ -635,6 +772,30 @@ export async function createAppServer() {
           'VALIDATION_ERROR',
           'Invalid capture-order payload',
           err.issues
+        );
+      }
+      if (err?.message === 'CONCURRENT_CAPTURE_CONFLICT') {
+        return sendTypedError(
+          res,
+          409,
+          'CONCURRENT_CAPTURE_CONFLICT',
+          'A capture operation is already in progress for this order with a different idempotency key.'
+        );
+      }
+      if (err?.message === 'GUEST_TOKEN_REUSED') {
+        return sendTypedError(
+          res,
+          403,
+          'GUEST_TOKEN_REUSED',
+          'Guest capture token has already been used and is invalidated.'
+        );
+      }
+      if (err?.message === 'GUEST_TOKEN_EXPIRED') {
+        return sendTypedError(
+          res,
+          403,
+          'GUEST_TOKEN_EXPIRED',
+          'Guest capture token has expired.'
         );
       }
       const message = err instanceof Error ? err.message : 'Unable to capture PayPal order';
@@ -673,6 +834,9 @@ export async function createAppServer() {
 
     const order = existing.order;
     const bizId = order.bizId || DEFAULT_BIZ_ID;
+    if (!defaultServerLedger.getOrderWithEvents(orderOrPaypalId)) {
+      defaultServerLedger.hydrateOrderRecord(order as any, [], []);
+    }
 
     if (!actor) {
       const guestToken = (req.body?.guestCaptureToken || req.headers['x-guest-capture-token']) as string | undefined;
@@ -773,11 +937,17 @@ export async function createAppServer() {
       if (!orderMap.has(o.id)) orderMap.set(o.id, o);
     }
 
+    const isProduction = process.env.NODE_ENV === 'production' && process.env.DEMO_MODE !== 'true';
+    let orders = Array.from(orderMap.values());
+    if (isProduction) {
+      orders = orders.filter((o) => !o.isDemo);
+    }
+
     res.json({
       ok: true,
       bizId: actor.bizId,
       actorRole: actor.role,
-      orders: Array.from(orderMap.values()),
+      orders,
     });
   });
 
@@ -802,10 +972,16 @@ export async function createAppServer() {
       if (!paymentMap.has(p.id)) paymentMap.set(p.id, p);
     }
 
+    const isProduction = process.env.NODE_ENV === 'production' && process.env.DEMO_MODE !== 'true';
+    let payments = Array.from(paymentMap.values());
+    if (isProduction) {
+      payments = payments.filter((p) => !p.isDemo);
+    }
+
     res.json({
       ok: true,
       bizId: actor.bizId,
-      payments: Array.from(paymentMap.values()),
+      payments,
     });
   });
 
@@ -821,7 +997,7 @@ export async function createAppServer() {
     });
   });
 
-  app.post('/api/paypal/refund-order/:id', async (req: Request, res: Response) => {
+  app.post('/api/paypal/refund-order/:id', persistenceCheckMiddleware, async (req: Request, res: Response) => {
     const actor = await requireAuth(req, res);
     if (!actor) return;
 
@@ -848,6 +1024,51 @@ export async function createAppServer() {
         'ORDER_NOT_FOUND',
         `Order '${orderOrPaypalId}' was not found in server ledger or Firestore.`
       );
+    }
+
+    // Tenant boundary check:
+    if (authoritativeOrder.bizId && authoritativeOrder.bizId !== actor.bizId) {
+      return sendTypedError(
+        res,
+        403,
+        'TENANT_ACCESS_DENIED',
+        'Cannot issue refund for an order belonging to another business tenant.'
+      );
+    }
+
+    // State validation: Funds must have been captured from provider before refunding
+    if (authoritativeOrder.paymentStatus !== 'Captured') {
+      return sendTypedError(
+        res,
+        400,
+        'INVALID_REFUND_STATE',
+        `Cannot refund order with payment status '${authoritativeOrder.paymentStatus}'. Order must be 'Captured'.`
+      );
+    }
+
+    // Escrow state machine validation:
+    const currentEscrow = (authoritativeOrder.escrowState || authoritativeOrder.escrowStage || 'created') as any;
+    if (!canTransitionEscrow(currentEscrow, 'refunded')) {
+      return sendTypedError(
+        res,
+        400,
+        'INVALID_STATE_TRANSITION',
+        `Cannot refund order in escrow state '${currentEscrow}'. Escrow funds may have already been released or refunded.`
+      );
+    }
+
+    // Sync in-memory ledger if order is tracked in memory
+    if (ledgerEntry) {
+      try {
+        defaultServerLedger.transitionOrderEscrow(authoritativeOrder.id, {
+          nextState: 'refunded',
+          actorId: actor.uid,
+          actorRole: actor.role as any,
+          reason,
+        });
+      } catch {
+        // Ledger state sync
+      }
     }
 
     // Never trust amounts coming from the client; derive strictly from authoritative server record
@@ -894,7 +1115,7 @@ export async function createAppServer() {
   // ==========================================================================
   // 7. Application-Level Escrow Transition (POST /api/orders/:id/escrow-transition)
   // ==========================================================================
-  app.post('/api/orders/:id/escrow-transition', async (req: Request, res: Response) => {
+  app.post('/api/orders/:id/escrow-transition', persistenceCheckMiddleware, async (req: Request, res: Response) => {
     const actor = await requireAuth(req, res);
     if (!actor) return;
 
@@ -924,12 +1145,65 @@ export async function createAppServer() {
         );
       }
 
+      // Fetch authoritative order first to verify existence, tenant isolation, and ownership boundaries
+      const firestoreOrder = await getOrderByIdForBiz(actor.bizId, orderId);
+      const ledgerEntry = defaultServerLedger.getOrderWithEvents(orderId);
+      const authoritativeOrder = firestoreOrder || ledgerEntry?.order;
+
+      if (!authoritativeOrder) {
+        return sendTypedError(
+          res,
+          404,
+          'ORDER_NOT_FOUND',
+          `Order '${orderId}' was not found in server ledger or Firestore.`
+        );
+      }
+
+      // Tenant boundary check:
+      if (authoritativeOrder.bizId && authoritativeOrder.bizId !== actor.bizId) {
+        return sendTypedError(
+          res,
+          403,
+          'TENANT_ACCESS_DENIED',
+          'Cannot transition escrow for another business tenant.'
+        );
+      }
+
+      // Customer ownership check: Customers may only transition their own orders
+      if (
+        actor.role === 'customer' &&
+        authoritativeOrder.customerId &&
+        authoritativeOrder.customerId !== actor.uid
+      ) {
+        return sendTypedError(
+          res,
+          403,
+          'ORDER_ACCESS_DENIED',
+          'Customers may only transition escrow on their own orders.'
+        );
+      }
+
+      // Seller ownership check: Sellers may only transition orders assigned to them
+      if (
+        actor.role === 'seller' &&
+        authoritativeOrder.sellerId &&
+        authoritativeOrder.sellerId !== actor.uid
+      ) {
+        return sendTypedError(
+          res,
+          403,
+          'ORDER_ACCESS_DENIED',
+          'Sellers may only transition escrow on their own assigned orders.'
+        );
+      }
+
+      const targetBizId = authoritativeOrder.bizId || actor.bizId;
+
       let result;
       try {
         result = defaultServerLedger.transitionOrderEscrow(orderId, parsedBody);
       } catch (ledgerErr) {
         // If not found in memory ledger, look up in Firestore businesses/{bizId}/orders
-        const firestoreOrder = await getOrderByIdForBiz(actor.bizId, orderId);
         if (!firestoreOrder) {
           throw ledgerErr;
         }
@@ -944,22 +1218,22 @@ export async function createAppServer() {
         if (!transitionCheck.ok) {
           throw Object.assign(new Error(transitionCheck.error), { code: transitionCheck.code });
         }
-        const updated = await saveOrderForBiz(actor.bizId, {
+        const updated = await saveOrderForBiz(targetBizId, {
           ...firestoreOrder,
           escrowState: parsedBody.nextState,
           updatedAt: new Date().toISOString(),
         });
-        const event = await recordEscrowEventForBiz(actor.bizId, transitionCheck.event);
+        const event = await recordEscrowEventForBiz(targetBizId, transitionCheck.event);
         result = { order: updated, event, nextState: parsedBody.nextState };
       }
 
       // Persist transition to Firestore businesses/{bizId}/orders & escrowEvents
-      await saveOrderForBiz(actor.bizId, {
+      await saveOrderForBiz(targetBizId, {
         ...result.order,
-        bizId: actor.bizId,
+        bizId: targetBizId,
       });
       if (result.event) {
-        await recordEscrowEventForBiz(actor.bizId, result.event);
+        await recordEscrowEventForBiz(targetBizId, result.event);
       }
 
       res.json({
@@ -1067,9 +1341,10 @@ export async function createAppServer() {
   // ==========================================================================
   // 9. Executive KPI Calculation for Chosen Date Range (POST /api/executive/kpis)
   // ==========================================================================
-  app.post('/api/executive/kpis', (req: Request, res: Response) => {
+  app.post('/api/executive/kpis', async (req: Request, res: Response) => {
     try {
-      const actor = resolveActorFromRequest(req);
+      const actor = await requireAuth(req, res);
+      if (!actor) return;
       if (actor.role !== 'business_head' && actor.role !== 'finance') {
         return sendTypedError(
           res,
@@ -1376,9 +1651,10 @@ export async function createAppServer() {
     sizeBytes: z.number().int().nonnegative(),
   });
 
-  app.post('/api/products/:sku/asset', (req: Request, res: Response) => {
+  app.post('/api/products/:sku/asset', persistenceCheckMiddleware, async (req: Request, res: Response) => {
     try {
-      const actor = resolveActorFromRequest(req);
+      const actor = await requireAuth(req, res);
+      if (!actor) return;
       if (actor.role !== 'seller' && actor.role !== 'business_head') {
         return sendTypedError(
           res,
@@ -1411,6 +1687,9 @@ export async function createAppServer() {
   // ==========================================================================
   const getServerGenAiClient = (): GoogleGenAI => {
     const apiKey = process.env.GEMINI_API_KEY || '';
+    if (!apiKey || apiKey === 'MY_GEMINI_API_KEY') {
+      throw new Error('GEMINI_API_KEY_MISSING');
+    }
     return new GoogleGenAI({
       apiKey,
       httpOptions: {
@@ -1471,6 +1750,9 @@ export async function createAppServer() {
         systemInstruction,
       });
     } catch (err: any) {
+      if (err?.message === 'GEMINI_API_KEY_MISSING') {
+        return sendTypedError(res, 503, 'AI_SERVICE_UNAVAILABLE', 'Gemini API key is not configured.');
+      }
       const msg = err instanceof Error ? err.message : 'Unable to generate chat response';
       return res.status(500).json({
         ok: false,
@@ -1512,6 +1794,9 @@ export async function createAppServer() {
         transcript: (response.text || '').trim(),
       });
     } catch (err: any) {
+      if (err?.message === 'GEMINI_API_KEY_MISSING') {
+        return sendTypedError(res, 503, 'AI_SERVICE_UNAVAILABLE', 'Gemini API key is not configured.');
+      }
       const msg = err instanceof Error ? err.message : 'Audio transcription failed';
       return res.status(500).json({
         ok: false,
@@ -1595,6 +1880,9 @@ export async function createAppServer() {
         imageSize: safeSize,
       });
     } catch (err: any) {
+      if (err?.message === 'GEMINI_API_KEY_MISSING') {
+        return sendTypedError(res, 503, 'AI_SERVICE_UNAVAILABLE', 'Gemini API key is not configured.');
+      }
       const msg = err instanceof Error ? err.message : 'Image generation/editing failed';
       return res.status(500).json({
         ok: false,
@@ -1687,22 +1975,15 @@ export async function createAppServer() {
         videoUrl: `data:${videoMime};base64,${videoBase64}`,
       });
     } catch (err: any) {
+      if (err?.message === 'GEMINI_API_KEY_MISSING') {
+        return sendTypedError(res, 503, 'AI_SERVICE_UNAVAILABLE', 'Gemini API key is not configured.');
+      }
       const msg = err instanceof Error ? err.message : 'Video generation failed';
       return res.status(500).json({
         ok: false,
         error: msg,
       });
     }
-  });
-
-  // Standard Liveness/Readiness Health Endpoints (GET /health, GET /api/health)
-  app.get(['/health', '/api/health'], (_req: Request, res: Response) => {
-    res.json({
-      ok: true,
-      status: 'healthy',
-      uptimeSeconds: Math.floor(process.uptime()),
-      timestamp: new Date().toISOString(),
-    });
   });
 
   // ==========================================================================
@@ -1823,7 +2104,7 @@ export async function createAppServer() {
     }
   }
 
-  app.post('/api/paypal/webhook', async (req: Request, res: Response) => {
+  app.post('/api/paypal/webhook', persistenceCheckMiddleware, async (req: Request, res: Response) => {
     try {
       // 1. Enforce Webhook Signature Verification Headers
       const transmissionId = req.headers['paypal-transmission-id'];
@@ -1855,9 +2136,10 @@ export async function createAppServer() {
       const resource = parsed.resource || {};
       const paypalOrderId = (resource.id as string) || (resource.order_id as string) || '';
 
-      // 2. Deduplication check by event ID
+      // 2. Deduplication check by event ID (durable + memory)
       if (parsed.id) {
-        if (processedWebhookEventIds.has(parsed.id)) {
+        const isProcessed = await isWebhookEventProcessed(parsed.id);
+        if (isProcessed || processedWebhookEventIds.has(parsed.id)) {
           return res.status(200).json({
             ok: true,
             duplicate: true,
@@ -1866,6 +2148,11 @@ export async function createAppServer() {
             message: `Event '${parsed.id}' has already been processed.`,
           });
         }
+        await recordWebhookEvent(parsed.id, {
+          eventType,
+          paypalOrderId,
+          timestamp: new Date().toISOString(),
+        });
         processedWebhookEventIds.add(parsed.id);
       }
 
@@ -1899,7 +2186,7 @@ export async function createAppServer() {
           );
         }
 
-        // Amount & currency verification if included in resource
+        // Amount & currency verification if included in resource (exact integer minor-unit check)
         if (resource.amount) {
           const resCurrency = resource.amount.currency_code;
           const resValue = resource.amount.value;
@@ -1913,7 +2200,7 @@ export async function createAppServer() {
           }
           if (resValue) {
             const resMinor = toMinorUnits(parseFloat(resValue));
-            if (Math.abs(resMinor - targetOrder.totalMinor) > 100) {
+            if (resMinor !== targetOrder.totalMinor) {
               return sendTypedError(
                 res,
                 400,
@@ -1931,12 +2218,13 @@ export async function createAppServer() {
           else if (eventType === 'PAYMENT.CAPTURE.REFUNDED') nextState = 'refunded';
 
           if (nextState !== existingOrder.escrowState && canTransitionEscrow(existingOrder.escrowState, nextState)) {
-            await saveOrderForBiz(DEFAULT_BIZ_ID, {
+            const webhookBizId = targetOrder.bizId || existingOrder.bizId || DEFAULT_BIZ_ID;
+            await saveOrderForBiz(webhookBizId, {
               ...existingOrder,
               escrowState: nextState,
               status: nextState === 'funded' ? 'processing' : existingOrder.status,
             });
-            await recordEscrowEventForBiz(DEFAULT_BIZ_ID, {
+            await recordEscrowEventForBiz(webhookBizId, {
               orderId: existingOrder.id,
               paypalOrderId,
               previousState: existingOrder.escrowState,
@@ -2049,7 +2337,7 @@ export async function createAppServer() {
 
   // POST /api/products
   // Requires verified seller/business_head auth. Scoped strictly to actor.bizId in Firestore.
-  app.post('/api/products', async (req: Request, res: Response) => {
+  app.post('/api/products', persistenceCheckMiddleware, async (req: Request, res: Response) => {
     try {
       const actor = await requireAuth(req, res);
       if (!actor) return;
@@ -2092,7 +2380,7 @@ export async function createAppServer() {
 
   // DELETE /api/products/:sku
   // Requires verified seller/business_head auth.
-  app.delete('/api/products/:sku', async (req: Request, res: Response) => {
+  app.delete('/api/products/:sku', persistenceCheckMiddleware, async (req: Request, res: Response) => {
     try {
       const actor = await requireAuth(req, res);
       if (!actor) return;
@@ -2174,7 +2462,7 @@ export async function createAppServer() {
     }
   });
 
-  app.post('/api/merchants/profile', async (req: Request, res: Response) => {
+  app.post('/api/merchants/profile', persistenceCheckMiddleware, async (req: Request, res: Response) => {
     try {
       const actor = await requireAuth(req, res);
       if (!actor) return;
@@ -2244,7 +2532,7 @@ export async function createAppServer() {
     }
   });
 
-  app.patch('/api/users/profile', async (req: Request, res: Response) => {
+  app.patch('/api/users/profile', persistenceCheckMiddleware, async (req: Request, res: Response) => {
     try {
       const actor = await requireAuth(req, res);
       if (!actor) return;
@@ -2478,6 +2766,204 @@ export async function createAppServer() {
   });
 
   // Catch-all for unknown /api/* routes
+  // ==========================================================================
+  // Storefront Order Server Endpoints (Admin SDK persistence; clients cannot write orders directly)
+  // ==========================================================================
+  const StorefrontOrderItemSchema = z.object({
+    sku: z.string().min(1),
+    quantity: z.number().int().positive(),
+    name: z.string().optional(),
+    price: z.number().nonnegative().optional(),
+    image: z.string().optional(),
+  });
+
+  const StorefrontOrderCreateSchema = z.object({
+    bizId: z.string().min(1).default(DEFAULT_BIZ_ID),
+    orderNumber: z.string().optional(),
+    customerName: z.string().min(1),
+    customerEmail: z.string().email(),
+    customerPhone: z.string().optional().default(''),
+    shippingAddress: z.string().min(3),
+    items: z.array(StorefrontOrderItemSchema).min(1),
+    discount: z.number().nonnegative().optional(),
+    shippingFee: z.number().nonnegative().optional(),
+    paymentMethod: z.enum(['paypal', 'escrow']).default('paypal'),
+    trackingId: z.string().optional(),
+    carrier: z.string().optional(),
+    paypalOrderId: z.string().optional(),
+  });
+
+  app.post('/api/storefront/orders', persistenceCheckMiddleware, async (req: Request, res: Response) => {
+    try {
+      const parsed = StorefrontOrderCreateSchema.parse(req.body || {});
+      const bizId = parsed.bizId || DEFAULT_BIZ_ID;
+      const products = await getProductsForBiz(bizId);
+      const bySku = new Map<string, any>();
+      for (const product of products) {
+        const keys = [product.sku, product.sku?.replace(/^#/, ''), product.id, `#${String(product.sku || '').replace(/^#/, '')}`];
+        for (const key of keys) {
+          if (key) bySku.set(String(key), product);
+        }
+      }
+
+      let subtotal = 0;
+      const items = parsed.items.map((item) => {
+        const cleanSku = item.sku.replace(/^#/, '');
+        const product = bySku.get(item.sku) || bySku.get(cleanSku) || bySku.get(`#${cleanSku}`);
+        if (!product) {
+          throw new Error(`Product '${item.sku}' was not found in the storefront catalog.`);
+        }
+        const unitPrice =
+          typeof product.price === 'number'
+            ? product.price
+            : (product.priceMinor || 0) / 100;
+        subtotal += unitPrice * item.quantity;
+        return {
+          sku: product.sku || `#${cleanSku}`,
+          name: product.name || item.name || cleanSku,
+          quantity: item.quantity,
+          price: unitPrice,
+          image: product.images?.[0] || product.img || item.image,
+        };
+      });
+
+      const discount = Math.min(Math.max(0, parsed.discount || 0), subtotal);
+      const shippingFee = Math.min(Math.max(0, parsed.shippingFee || 0), 100000);
+      const taxable = Math.max(0, subtotal - discount);
+      const tax = Math.round(taxable * 0.18);
+      const total = taxable + shippingFee + tax;
+      const escrowFee = Math.round(total * 0.015);
+      const now = new Date().toISOString();
+      const orderId = `ord-store-${Date.now()}-${crypto.randomBytes(4).toString('hex')}`;
+      const orderNumber = parsed.orderNumber || `#ORD-${Math.floor(1000 + Math.random() * 9000)}`;
+
+      const order = await saveOrderForBiz(bizId, {
+        id: orderId,
+        bizId,
+        orderNumber,
+        customerName: parsed.customerName,
+        customerEmail: parsed.customerEmail,
+        customerPhone: parsed.customerPhone,
+        shippingAddress: parsed.shippingAddress,
+        items,
+        subtotal,
+        discount,
+        shippingFee,
+        tax,
+        total,
+        escrowFee,
+        escrowStatus: 'Escrow Locked',
+        paymentMethod: parsed.paymentMethod,
+        paypalOrderId: parsed.paypalOrderId,
+        trackingId: parsed.trackingId || `BLUEDART-${Math.floor(100000000 + Math.random() * 900000000)}`,
+        carrier: parsed.carrier || 'BlueDart Air Express',
+        timeline: [
+          { step: 'escrow_locked', label: 'Payment Verified & Secured in Escrow', timestamp: now, completed: true, current: true },
+          { step: 'packed', label: 'Merchant Processing & Packing', timestamp: '', completed: false },
+          { step: 'in_transit', label: 'Shipped via BlueDart Express Air', timestamp: '', completed: false },
+          { step: 'released', label: 'Delivery Verified & Escrow Released', timestamp: '', completed: false },
+        ],
+        createdAt: now,
+        updatedAt: now,
+      });
+
+      const escrowEvent = await recordEscrowEventForBiz(bizId, {
+        orderId,
+        fromState: null,
+        toState: 'created',
+        actorId: 'storefront-customer',
+        actorRole: 'customer',
+        reason: `Storefront order ${orderNumber} created for ${parsed.customerEmail}`,
+        timestamp: now,
+      });
+
+      return res.status(201).json({ ok: true, order, escrowEvent });
+    } catch (err: any) {
+      if (err instanceof ZodError) {
+        return sendTypedError(res, 400, 'VALIDATION_ERROR', 'Invalid storefront order payload', err.issues);
+      }
+      return sendTypedError(res, 400, 'STOREFRONT_ORDER_FAILED', err?.message || 'Unable to create storefront order');
+    }
+  });
+
+  const StorefrontEscrowStatusSchema = z.object({
+    bizId: z.string().optional(),
+    escrowStatus: z.enum(['Escrow Locked', 'In Transit', 'Delivered — Escrow Released', 'Disputed']),
+    reason: z.string().optional(),
+    trackingId: z.string().optional(),
+  });
+
+  app.post('/api/storefront/orders/:id/escrow-status', persistenceCheckMiddleware, async (req: Request, res: Response) => {
+    try {
+      const actor = await requireAuth(req, res);
+      if (!actor) return;
+      if (!['seller', 'business_head', 'finance'].includes(actor.role)) {
+        return sendTypedError(res, 403, 'ROLE_ACCESS_DENIED', 'Only seller, finance, or business head may update storefront order status.');
+      }
+
+      const parsed = StorefrontEscrowStatusSchema.parse(req.body || {});
+      const order = await getOrderByIdForBiz(actor.bizId, req.params.id);
+      if (!order) {
+        return sendTypedError(res, 404, 'ORDER_NOT_FOUND', `Storefront order '${req.params.id}' was not found.`);
+      }
+      if (order.bizId && order.bizId !== actor.bizId) {
+        return sendTypedError(res, 403, 'TENANT_ACCESS_DENIED', 'Cannot update an order belonging to another business tenant.');
+      }
+
+      const now = new Date().toISOString();
+      const timeline = Array.isArray(order.timeline) ? order.timeline : [];
+      const updatedTimeline = timeline.map((item: any) => {
+        if (parsed.escrowStatus === 'In Transit' && item.step === 'in_transit') {
+          return { ...item, completed: true, timestamp: now, current: true };
+        }
+        if (parsed.escrowStatus === 'Delivered — Escrow Released' && item.step === 'released') {
+          return { ...item, completed: true, timestamp: now, current: true };
+        }
+        if (parsed.escrowStatus === 'Disputed') {
+          return { ...item, current: false };
+        }
+        return item;
+      });
+
+      const toState =
+        parsed.escrowStatus === 'In Transit'
+          ? 'in_delivery'
+          : parsed.escrowStatus === 'Delivered — Escrow Released'
+            ? 'released'
+            : parsed.escrowStatus === 'Disputed'
+              ? 'disputed'
+              : 'funded';
+
+      const updated = await saveOrderForBiz(actor.bizId, {
+        ...order,
+        bizId: actor.bizId,
+        escrowStatus: parsed.escrowStatus,
+        timeline: updatedTimeline,
+        ...(parsed.trackingId ? { trackingId: parsed.trackingId } : {}),
+        ...(parsed.reason ? { updateReason: parsed.reason } : {}),
+        updatedAt: now,
+      });
+
+      const escrowEvent = await recordEscrowEventForBiz(actor.bizId, {
+        orderId: updated.id,
+        orderNumber: updated.orderNumber,
+        fromState: order.escrowState || 'funded',
+        toState,
+        actorId: actor.uid,
+        actorRole: actor.role,
+        reason: parsed.reason || `Storefront order status changed to ${parsed.escrowStatus}`,
+        timestamp: now,
+      });
+
+      return res.json({ ok: true, order: updated, escrowEvent });
+    } catch (err: any) {
+      if (err instanceof ZodError) {
+        return sendTypedError(res, 400, 'VALIDATION_ERROR', 'Invalid storefront escrow status payload', err.issues);
+      }
+      return sendTypedError(res, 400, 'STOREFRONT_ORDER_UPDATE_FAILED', err?.message || 'Unable to update storefront order status');
+    }
+  });
+
   app.use('/api/*', (_req: Request, res: Response) => {
     sendTypedError(res, 404, 'API_ROUTE_NOT_FOUND', 'Requested API endpoint does not exist.');
   });
@@ -2490,42 +2976,54 @@ export async function createAppServer() {
     sendTypedError(res, 500, 'INTERNAL_SERVER_ERROR', 'An unexpected server error occurred.');
   });
 
-  const isDirectEntry = Boolean(
-    process.argv[1] &&
-      (process.argv[1].endsWith('server.ts') || process.argv[1].endsWith('server.js'))
-  );
+  const isDirectEntry =
+    !process.env.VERCEL &&
+    Boolean(
+      process.argv[1] &&
+        (process.argv[1].endsWith('server.ts') || process.argv[1].endsWith('server.js'))
+    );
 
   // ==========================================================================
   // Vite Middleware (Dev) or Static Dist Serving (Prod)
   // ==========================================================================
   if (process.env.NODE_ENV !== 'production' && process.env.NODE_ENV !== 'test' && isDirectEntry) {
+    const { createServer: createViteServer } = await import('vite');
     const vite = await createViteServer({
       server: { middlewareMode: true },
       appType: 'spa',
     });
     app.use(vite.middlewares);
   } else if (process.env.NODE_ENV === 'production') {
-    const distPath = path.join(__dirname, 'dist');
-    app.use(express.static(distPath));
-    app.get('*', (_req: Request, res: Response) => {
-      res.sendFile(path.join(distPath, 'index.html'));
-    });
+    const candidateDistPaths = [
+      path.join(__dirname, 'dist'),
+      path.resolve(process.cwd(), 'dist'),
+    ];
+    const distPath = candidateDistPaths.find((candidate) =>
+      fs.existsSync(path.join(candidate, 'index.html'))
+    );
+    if (distPath) {
+      app.use(express.static(distPath));
+      app.get('*', (_req: Request, res: Response) => {
+        res.sendFile(path.join(distPath, 'index.html'));
+      });
+    }
   }
 
   return app;
 }
 
-const PORT = 3000;
-
-const isDirectEntry = Boolean(
-  process.argv[1] &&
-    (process.argv[1].endsWith('server.ts') || process.argv[1].endsWith('server.js'))
-);
+const isDirectEntry =
+  !process.env.VERCEL &&
+  Boolean(
+    process.argv[1] &&
+      (process.argv[1].endsWith('server.ts') || process.argv[1].endsWith('server.js'))
+  );
 
 if (process.env.NODE_ENV !== 'test' && isDirectEntry) {
+  const port = resolveServerPort();
   createAppServer().then((app) => {
-    app.listen(PORT, '0.0.0.0', () => {
-      console.log(`AC PayPilot server listening on http://0.0.0.0:${PORT}`);
+    app.listen(port, '0.0.0.0', () => {
+      console.log(`AC PayPilot server listening on http://0.0.0.0:${port}`);
     });
   });
 }

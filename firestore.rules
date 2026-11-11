@@ -54,79 +54,91 @@ service cloud.firestore {
         get(/databases/$(database)/documents/businesses/$(bizId)).data.ownerUid == request.auth.uid;
     }
 
+    function getUserBizId() {
+      return userDocExists()
+        ? get(/databases/$(database)/documents/users/$(request.auth.uid)).data.bizId
+        : null;
+    }
+
+    function getUserActiveBizId() {
+      return userDocExists()
+        ? get(/databases/$(database)/documents/users/$(request.auth.uid)).data.activeBizId
+        : null;
+    }
+
+    function isBusinessMember(bizId) {
+      return isAuthenticated() &&
+        exists(/databases/$(database)/documents/businesses/$(bizId)) &&
+        (
+          isBusinessOwner(bizId) ||
+          (
+            (isSeller() || isFinance() || isBusinessHead()) &&
+            (getUserBizId() == bizId || getUserActiveBizId() == bizId)
+          )
+        );
+    }
+
+    function isResourceTenantStaff() {
+      return (isFinance() || isBusinessHead()) &&
+        resource.data.get('bizId', null) != null &&
+        (
+          resource.data.get('bizId', null) == getUserBizId() ||
+          resource.data.get('bizId', null) == getUserActiveBizId()
+        );
+    }
+
+    function canManageBusiness(bizId) {
+      return isBusinessMember(bizId) &&
+        (isBusinessOwner(bizId) || isSeller() || isBusinessHead());
+    }
+
     // ===============================================================
     // Multi-Tenant: Businesses, Storefront, Sub-collections & Domains
     // ===============================================================
     match /businesses/{bizId} {
       allow read: if true; // Public for storefront metadata & branding
       allow create: if isAuthenticated() && request.resource.data.ownerUid == request.auth.uid;
-      allow update: if isAuthenticated() && (resource.data.ownerUid == request.auth.uid || isBusinessHead());
-      allow delete: if isAuthenticated() && resource.data.ownerUid == request.auth.uid;
+      allow update: if isBusinessOwner(bizId) &&
+        request.resource.data.ownerUid == resource.data.ownerUid;
+      allow delete: if isBusinessOwner(bizId);
 
       match /storefrontConfig/{configId} {
         allow read: if true; // Public for customer storefront rendering
-        allow create, update, delete: if isAuthenticated() &&
-          get(/databases/$(database)/documents/businesses/$(bizId)).data.ownerUid == request.auth.uid;
+        allow create, update, delete: if canManageBusiness(bizId);
       }
 
       match /products/{productId} {
         allow read: if true; // Public for customer catalog browsing
-        allow create, update, delete: if isAuthenticated() &&
-          get(/databases/$(database)/documents/businesses/$(bizId)).data.ownerUid == request.auth.uid;
+        allow create, update, delete: if canManageBusiness(bizId);
       }
 
       match /orders/{orderId} {
-        // Business owner, seller, finance, business head, or matching customer can get
+        // Single-document reads may be performed by tenant staff members or the owning customer.
         allow get: if isAuthenticated() && (
-          isBusinessOwner(bizId) ||
-          isSeller() ||
-          isFinance() ||
-          isBusinessHead() ||
-          (resource.data.customerEmail != null && resource.data.customerEmail == request.auth.token.email) ||
-          (resource.data.customerId != null && resource.data.customerId == request.auth.uid)
+          isBusinessMember(bizId) ||
+          resource.data.customerId == request.auth.uid ||
+          (
+            request.auth.token.email_verified == true &&
+            resource.data.get('customerEmail', null) != null &&
+            resource.data.customerEmail == request.auth.token.email
+          )
         );
-        // Business owner, seller, finance, business head, or matching customer can list
-        allow list: if isAuthenticated() && (
-          isBusinessOwner(bizId) ||
-          isSeller() ||
-          isFinance() ||
-          isBusinessHead() ||
-          (resource.data.customerEmail != null && resource.data.customerEmail == request.auth.token.email) ||
-          (resource.data.customerId != null && resource.data.customerId == request.auth.uid)
-        );
-        // Public checkout creation: any customer can place an order
-        allow create: if request.resource.data.total is int && request.resource.data.total >= 0;
-        // Only business owner, seller, finance, or business head can update escrow/fulfillment status
-        allow update: if isAuthenticated() && (
-          isBusinessOwner(bizId) ||
-          isSeller() ||
-          isFinance() ||
-          isBusinessHead()
-        );
-        allow delete: if false;
+        // Collection listing is restricted to tenant staff members; customers use the authenticated server API.
+        allow list: if isBusinessMember(bizId);
+        // Payment/escrow orders are created and mutated only by the trusted server Admin SDK.
+        allow create, update, delete: if false;
       }
 
       match /payments/{paymentId} {
-        // Finance, business head, business owner, and sellers read payments
-        allow read: if (isAuthenticated() && (
-            isBusinessOwner(bizId) ||
-            isSeller() ||
-            isFinance() ||
-            isBusinessHead()
-          ));
-        allow write: if false; // Captured securely on server via Admin SDK
+        // Tenant staff members read payments; writes are server Admin SDK only.
+        allow read: if isBusinessMember(bizId);
+        allow write: if false;
       }
 
       match /escrowEvents/{eventId} {
-        // Business owner, seller, finance, and participants read audit trail
-        allow read: if (isAuthenticated() && (
-            isBusinessOwner(bizId) ||
-            isSeller() ||
-            isFinance() ||
-            isBusinessHead() ||
-            resource.data.actorId == request.auth.uid
-          ));
-        allow write: if false; // Immutable audit log written securely on server via Admin SDK
+        // Tenant staff members read the audit trail; writes are server Admin SDK only.
+        allow read: if isBusinessMember(bizId);
+        allow write: if false;
       }
     }
 
@@ -136,23 +148,35 @@ service cloud.firestore {
 
     match /domains/{domain} {
       allow read: if true; // Public for subdomain & custom domain routing
-      allow create, update: if isAuthenticated();
-      allow delete: if isAuthenticated();
+      allow create: if isAuthenticated() &&
+        request.resource.data.bizId is string &&
+        isBusinessMember(request.resource.data.bizId);
+      allow update, delete: if isAuthenticated() &&
+        resource.data.bizId is string &&
+        isBusinessMember(resource.data.bizId);
     }
 
     // ===============================================================
-    // 1. users (role)
+    // 1. users (role & tenant identity immutable to clients)
     // ===============================================================
     match /users/{userId} {
-      allow read: if isOwner(userId) || isFinance() || isBusinessHead();
+      allow read: if isOwner(userId) || (
+        (isFinance() || isBusinessHead()) &&
+        getUserBizId() != null &&
+        resource.data.get('bizId', null) == getUserBizId()
+      );
       allow create: if isOwner(userId) &&
         request.resource.data.uid == userId &&
         request.resource.data.email is string &&
         request.resource.data.displayName is string &&
-        isValidRole(request.resource.data.role);
+        request.resource.data.role == 'customer' &&
+        !('activeBizId' in request.resource.data) &&
+        !('isVerified' in request.resource.data) &&
+        (!('bizId' in request.resource.data) || request.resource.data.bizId == 'biz-aerocool' || request.resource.data.bizId == null); // Privilege Escalation Prevention: self-signup is always lowest-privilege customer
       allow update: if isOwner(userId) &&
+        !request.resource.data.diff(resource.data).affectedKeys().hasAny(['uid', 'role', 'bizId', 'activeBizId', 'isVerified']) &&
         request.resource.data.uid == resource.data.uid &&
-        isValidRole(request.resource.data.role);
+        request.resource.data.role == resource.data.role; // Role/tenant identity are admin-only mutations
       allow delete: if false;
     }
 
@@ -209,7 +233,7 @@ service cloud.firestore {
     // 5. carts (customers read/write only their own carts; business_head reads)
     // ===============================================================
     match /carts/{cartId} {
-      allow read: if (isCustomer() && resource.data.customerId == request.auth.uid) || isBusinessHead();
+      allow read: if (isCustomer() && resource.data.customerId == request.auth.uid) || isResourceTenantStaff();
       allow create: if isCustomer() &&
         request.resource.data.customerId == request.auth.uid &&
         request.resource.data.budgetMinor is int &&
@@ -222,117 +246,95 @@ service cloud.firestore {
     }
 
     // ===============================================================
-    // 6. orders (customers read only their own orders; sellers see only their own orders; finance & business_head read)
+    // 6. orders (customers read only their own orders; sellers see only their own orders; tenant finance & business_head read; writes are server Admin SDK only)
     // ===============================================================
     match /orders/{orderId} {
       allow read: if (isCustomer() && resource.data.customerId == request.auth.uid) ||
         (isSeller() && resource.data.sellerId == request.auth.uid) ||
-        isFinance() ||
-        isBusinessHead();
-      allow create: if isCustomer() &&
-        request.resource.data.customerId == request.auth.uid &&
-        request.resource.data.totalMinor is int &&
-        request.resource.data.totalMinor >= 0 &&
-        isValidCurrency(request.resource.data.currency);
-      allow update: if (
-          (isCustomer() && resource.data.customerId == request.auth.uid) ||
-          (isSeller() && resource.data.sellerId == request.auth.uid) ||
-          isFinance()
-        ) &&
-        request.resource.data.customerId == resource.data.customerId &&
-        request.resource.data.sellerId == resource.data.sellerId &&
-        request.resource.data.totalMinor == resource.data.totalMinor;
-      allow delete: if false;
+        isResourceTenantStaff();
+      allow create, update, delete: if false;
     }
 
     // ===============================================================
-    // 7. orderItems (same access boundaries as parent order)
+    // 7. orderItems (same access boundaries as parent order; server Admin SDK only)
     // ===============================================================
     match /orderItems/{itemId} {
       allow read: if (isCustomer() && resource.data.customerId == request.auth.uid) ||
         (isSeller() && resource.data.sellerId == request.auth.uid) ||
-        isFinance() ||
-        isBusinessHead();
-      allow create: if isCustomer() &&
-        request.resource.data.customerId == request.auth.uid &&
-        request.resource.data.quantity is int &&
-        request.resource.data.quantity > 0 &&
-        request.resource.data.totalMinor is int;
-      allow update, delete: if false;
+        isResourceTenantStaff();
+      allow create, update, delete: if false;
     }
 
     // ===============================================================
-    // 8. payments (finance reads/writes; business_head reads; customer/seller read own)
+    // 8. payments (tenant finance/business_head & owner read; server Admin SDK writes only)
     // ===============================================================
     match /payments/{paymentId} {
-      allow read: if isFinance() ||
-        isBusinessHead() ||
+      allow read: if isResourceTenantStaff() ||
         (isCustomer() && resource.data.customerId == request.auth.uid) ||
         (isSeller() && resource.data.sellerId == request.auth.uid);
-      allow create, update: if isFinance() &&
-        request.resource.data.grossMinor is int &&
-        isValidCurrency(request.resource.data.currency);
-      allow delete: if false;
+      allow create, update, delete: if false;
     }
 
     // ===============================================================
-    // 9. invoices (finance reads/writes; seller reads/writes own; customer reads own; business_head reads)
+    // 9. invoices (tenant finance/business_head read; seller reads/writes own; customer reads own)
     // ===============================================================
     match /invoices/{invoiceId} {
-      allow read: if isFinance() ||
-        isBusinessHead() ||
+      allow read: if isResourceTenantStaff() ||
         (isSeller() && resource.data.sellerId == request.auth.uid) ||
         (isCustomer() && resource.data.customerId == request.auth.uid);
-      allow create: if (isFinance() || (isSeller() && request.resource.data.sellerId == request.auth.uid)) &&
+      allow create: if (
+          (isFinance() && request.resource.data.get('bizId', null) != null &&
+            (request.resource.data.bizId == getUserBizId() || request.resource.data.bizId == getUserActiveBizId())) ||
+          (isSeller() && request.resource.data.sellerId == request.auth.uid &&
+            (!('bizId' in request.resource.data) || request.resource.data.bizId == getUserBizId() || request.resource.data.bizId == getUserActiveBizId()))
+        ) &&
         request.resource.data.totalMinor is int &&
         isValidCurrency(request.resource.data.currency);
-      allow update: if (isFinance() || (isSeller() && resource.data.sellerId == request.auth.uid)) &&
+      allow update: if (
+          isResourceTenantStaff() ||
+          (isSeller() && resource.data.sellerId == request.auth.uid)
+        ) &&
         request.resource.data.sellerId == resource.data.sellerId &&
         request.resource.data.totalMinor is int;
       allow delete: if false;
     }
 
     // ===============================================================
-    // 10. invoiceItems (finance reads/writes; seller reads/writes own; business_head reads)
+    // 10. invoiceItems (tenant finance reads/writes; seller reads/writes own; tenant business_head reads)
     // ===============================================================
     match /invoiceItems/{itemId} {
-      allow read: if isFinance() ||
-        isBusinessHead() ||
+      allow read: if isResourceTenantStaff() ||
         (isSeller() && resource.data.sellerId == request.auth.uid);
-      allow create: if (isFinance() || (isSeller() && request.resource.data.sellerId == request.auth.uid)) &&
+      allow create: if (
+          (isFinance() && request.resource.data.get('bizId', null) != null &&
+            (request.resource.data.bizId == getUserBizId() || request.resource.data.bizId == getUserActiveBizId())) ||
+          (isSeller() && request.resource.data.sellerId == request.auth.uid &&
+            (!('bizId' in request.resource.data) || request.resource.data.bizId == getUserBizId() || request.resource.data.bizId == getUserActiveBizId()))
+        ) &&
         request.resource.data.totalMinor is int;
-      allow update: if (isFinance() || (isSeller() && resource.data.sellerId == request.auth.uid)) &&
+      allow update: if (isResourceTenantStaff() || (isSeller() && resource.data.sellerId == request.auth.uid)) &&
         request.resource.data.sellerId == resource.data.sellerId;
       allow delete: if false;
     }
 
     // ===============================================================
-    // 11. refunds (finance reads/writes; seller/customer read own; business_head reads)
+    // 11. refunds (tenant finance/business_head & owner read; server Admin SDK writes only)
     // ===============================================================
     match /refunds/{refundId} {
-      allow read: if isFinance() ||
-        isBusinessHead() ||
+      allow read: if isResourceTenantStaff() ||
         (isCustomer() && resource.data.customerId == request.auth.uid) ||
         (isSeller() && resource.data.sellerId == request.auth.uid);
-      allow create, update: if isFinance() &&
-        request.resource.data.amountMinor is int &&
-        request.resource.data.amountMinor > 0;
-      allow delete: if false;
+      allow create, update, delete: if false;
     }
 
     // ===============================================================
-    // 12. escrowEvents (append-only audit trail; never updated or deleted)
+    // 12. escrowEvents (append-only audit trail; never updated or deleted by clients)
     // ===============================================================
     match /escrowEvents/{eventId} {
-      allow read: if isFinance() ||
-        isBusinessHead() ||
+      allow read: if isResourceTenantStaff() ||
         (isCustomer() && resource.data.customerId == request.auth.uid) ||
         (isSeller() && resource.data.sellerId == request.auth.uid);
-      allow create: if isAuthenticated() &&
-        request.resource.data.actorId == request.auth.uid &&
-        request.resource.data.reason is string &&
-        request.resource.data.toState in ['created', 'funded', 'in_delivery', 'released', 'disputed', 'refunded'];
-      allow update, delete: if false;
+      allow create, update, delete: if false; // Append-only audit events are written by the trusted server Admin SDK
     }
   }
 }

@@ -19,6 +19,7 @@ import {
   onAuthStateChanged,
   FirebaseUser,
 } from '../firebase';
+import { authenticatedFetch } from './apiClient';
 import {
   BusinessProfile,
   StorefrontConfig,
@@ -659,51 +660,17 @@ export async function createStorefrontOrder(
   bizId: string,
   orderData: Omit<StorefrontOrder, 'id' | 'createdAt' | 'timeline'>
 ): Promise<StorefrontOrder> {
-  const orderId = `ord-${Date.now()}-${Math.random().toString(36).substring(2, 7)}`;
-  const path = `businesses/${bizId}/orders/${orderId}`;
-  const newOrder: StorefrontOrder = {
-    ...orderData,
-    id: orderId,
-    createdAt: new Date().toISOString(),
-    timeline: [
-      {
-        step: 'escrow_locked',
-        label: 'Payment Verified & Secured in Escrow',
-        timestamp: new Date().toISOString(),
-        completed: true,
-        current: true,
-      },
-      {
-        step: 'packed',
-        label: 'Merchant Processing & Packing',
-        timestamp: '',
-        completed: false,
-      },
-      {
-        step: 'in_transit',
-        label: 'Shipped via BlueDart Express Air',
-        timestamp: '',
-        completed: false,
-      },
-      {
-        step: 'released',
-        label: 'Delivery Verified & Escrow Released',
-        timestamp: '',
-        completed: false,
-      },
-    ],
-  };
-
-  try {
-    if (auth.currentUser) {
-      await setDoc(doc(db, 'businesses', bizId, 'orders', orderId), newOrder);
-    }
-  } catch (error) {
-    if (auth.currentUser) {
-      handleFirestoreError(error, OperationType.CREATE, path);
-    }
+  const response = await authenticatedFetch('/api/storefront/orders', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ ...orderData, bizId }),
+  });
+  const payload = (await response.json().catch(() => ({}))) as any;
+  if (!response.ok || !payload?.order) {
+    throw new Error(payload?.error || 'Unable to place storefront order.');
   }
 
+  const newOrder = payload.order as StorefrontOrder;
   const firstItem = newOrder.items?.[0]?.name || 'Storefront Order';
   const extraCount = (newOrder.items?.length || 1) - 1;
   emitOrderPlacedNotification({
@@ -730,34 +697,21 @@ export async function updateStorefrontOrderEscrow(
   newEscrowStatus: StorefrontOrder['escrowStatus'],
   reason?: string
 ): Promise<void> {
-  const path = `businesses/${bizId}/orders/${orderId}`;
-  try {
-    const orderRef = doc(db, 'businesses', bizId, 'orders', orderId);
-    const snap = await getDoc(orderRef);
-    if (!snap.exists()) return;
-
-    const currentOrder = snap.data() as StorefrontOrder;
-    const nowIso = new Date().toISOString();
-
-    const updatedTimeline = currentOrder.timeline.map((item) => {
-      if (newEscrowStatus === 'In Transit' && item.step === 'in_transit') {
-        return { ...item, completed: true, timestamp: nowIso, current: true };
-      }
-      if (newEscrowStatus === 'Delivered — Escrow Released' && item.step === 'released') {
-        return { ...item, completed: true, timestamp: nowIso, current: true };
-      }
-      return item;
-    });
-
-    await updateDoc(orderRef, {
-      escrowStatus: newEscrowStatus,
-      timeline: updatedTimeline,
-      ...(reason ? { updateReason: reason } : {}),
-      updatedAt: nowIso,
-    });
-  } catch (error) {
-    handleFirestoreError(error, OperationType.UPDATE, path);
-    throw error;
+  const response = await authenticatedFetch(
+    `/api/storefront/orders/${encodeURIComponent(orderId)}/escrow-status`,
+    {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        bizId,
+        escrowStatus: newEscrowStatus,
+        reason,
+      }),
+    }
+  );
+  const payload = (await response.json().catch(() => ({}))) as any;
+  if (!response.ok) {
+    throw new Error(payload?.error || 'Unable to update storefront order status.');
   }
 }
 

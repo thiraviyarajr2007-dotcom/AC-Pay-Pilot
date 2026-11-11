@@ -419,4 +419,204 @@
 - **Files Modified:** `AUDIT_REPORT.md`, `DEPLOYMENT_READINESS.md`, `TEST_RESULTS.md`, `BUG_FIX_LOG.md`, `.gitignore`, `.env.example`, `docs/evidence/*`
 - **Retest Result:** All documentation synchronized with current reality.
 
+---
+
+### [BF-020] Single Authoritative Server Order Calculation & Discrepancy Resolution
+- **Priority:** **P0** (Financial Integrity & Price Authority)
+- **Status:** **Resolved & Verified**
+- **Symptom:**
+  - Create-order route fetched Firestore catalog items, but `defaultServerLedger.createOrder()` recalculated totals against static `CATALOG_PRODUCTS`. Later, the stored order was overwritten with Firestore-derived totals, creating potential discrepancies between PayPal provider total, saved order amount, and capture validation amount.
+- **Root Cause:**
+  - Decoupled pricing calculations between `server.ts` and `ServerPaymentLedger`.
+- **Corrective Action:**
+  - Refactored `ServerPaymentLedger.createOrder(input, options)` to accept authoritative catalog items directly from Firestore.
+  - A single authoritative calculation computes currency, item unit prices, taxes, shipping, and total.
+  - The exact same calculated total is passed to PayPal and stored on the immutable order record.
+  - Capture validation strictly compares against this immutable order total.
+  - Idempotent create-order replays return the existing order and token binding without modifying pricing.
+- **Files Modified:** `server.ts`, `src/server/paymentEngine.ts`, `src/utils/finance.ts`
+- **Regression Test Added:** `src/test/financialIntegrityAndConcurrency.test.ts` (TC-078, TC-079, TC-080).
+- **Retest Result:** All tests pass; provider, order, and capture amounts match exactly.
+
+---
+
+### [BF-021] Strict Provider Capture Validation & Zero Capture Fallbacks
+- **Priority:** **P0** (Payment Verification & Escrow Protection)
+- **Status:** **Resolved & Verified**
+- **Symptom:**
+  - Payment engine contained fallbacks that could substitute expected order amounts or currencies if actual provider capture evidence was missing or incomplete.
+- **Root Cause:**
+  - Permissive default values in capture handling logic.
+- **Corrective Action:**
+  - Implemented `validatePayPalCaptureEvidence()` with zero tolerance for missing or malformed data:
+    1. Valid capture object and non-empty capture ID required (`PAYPAL_CAPTURE_MISSING`, `PAYPAL_CAPTURE_ID_MISSING`).
+    2. Explicit capture status required (`PAYPAL_CAPTURE_STATUS_MISSING`).
+    3. Explicit captured amount and currency required (`PAYPAL_CAPTURE_AMOUNT_MISSING`, `PAYPAL_CAPTURE_CURRENCY_MISSING`).
+    4. Exact integer minor unit comparison against order total (`PAYPAL_CAPTURE_AMOUNT_MISMATCH`).
+    5. Strict currency comparison (`PAYPAL_CAPTURE_CURRENCY_MISMATCH`).
+    6. Mismatched PayPal order ID rejected (`PAYPAL_ORDER_ID_MISMATCH`).
+    7. No server verification (`verifiedByServer = false`) and no escrow funding unless all invariants pass.
+- **Files Modified:** `src/server/paymentEngine.ts`
+- **Regression Test Added:** `src/test/financialIntegrityAndConcurrency.test.ts` (TC-081).
+- **Retest Result:** All tests pass with zero fallbacks.
+
+---
+
+### [BF-022] Production Persistence Fail-Closed & 502 Reconciliation Protocol
+- **Priority:** **P0** (Data Durability & Financial Reconciliation)
+- **Status:** **Resolved & Verified**
+- **Symptom:**
+  - Storage helper functions caught Firestore write failures and fell back to in-memory maps in production mode.
+- **Root Cause:**
+  - Permissive try/catch blocks masking database write failures.
+- **Corrective Action:**
+  - Implemented `isDurablePersistenceRequired()`: in production (`NODE_ENV === 'production'` and `DEMO_MODE !== 'true'`), all product, order, payment, escrow event, user profile, and webhook write failures throw explicit `PersistenceError`.
+  - In `server.ts`, if a provider capture succeeds at PayPal but subsequent database writes fail, the server logs a critical reconciliation alert and returns HTTP 502 with `PAYMENT_CAPTURED_RECONCILIATION_REQUIRED` and `reconciliationRequired: true`.
+  - The payment is never reported as failed (since PayPal charged the buyer), and escrow remains locked in `created` state until reconciled.
+- **Files Modified:** `src/server/firebaseAdmin.ts`, `server.ts`
+- **Regression Test Added:** `src/test/financialIntegrityAndConcurrency.test.ts` (TC-082, TC-083, TC-084, TC-085).
+- **Retest Result:** Production persistence strictly fails closed; reconciliation protocol verified.
+
+---
+
+### [BF-023] Atomic Guest Capture Token Lifecycle & Concurrency Lock
+- **Priority:** **P1** (Guest Checkout Security & Race Condition Prevention)
+- **Status:** **Resolved & Verified**
+- **Symptom:**
+  - Guest UIDs used low-entropy identifiers; invalid Bearer tokens silently defaulted to guest checkout; token consumption was susceptible to concurrent race conditions.
+- **Root Cause:**
+  - Non-cryptographic random generator and in-memory boolean flags for token consumption.
+- **Corrective Action:**
+  - Generated guest UIDs using `crypto.randomBytes(16)` (32 hex characters of cryptographic entropy).
+  - Explicitly reject invalid supplied Bearer tokens with HTTP 401 instead of silent guest checkout.
+  - Implemented `atomicConsumeGuestTokenAndLockOrder()` using Firestore `db.runTransaction()` for atomic check-and-set token consumption.
+  - Added in-flight capture lock (`activeCaptures`) in `ServerPaymentLedger` that throws HTTP 409 `CONCURRENT_CAPTURE_CONFLICT` when concurrent captures with different idempotency keys are attempted.
+  - Idempotent create-order retries preserve the original order and token binding without replacing stored token hashes.
+- **Files Modified:** `server.ts`, `src/server/firebaseAdmin.ts`, `src/server/paymentEngine.ts`
+- **Regression Test Added:** `src/test/financialIntegrityAndConcurrency.test.ts` (TC-086, TC-087, TC-088, TC-089, TC-090, TC-091, TC-092).
+- **Retest Result:** High entropy, 401 on bad Bearer, 409 on race conditions, 403 on replay/expiry all verified.
+
+---
+
+### [BF-024] Isolation of Seeded Demo Financial Data
+- **Priority:** **P1** (Financial Ledger Integrity)
+- **Status:** **Resolved & Verified**
+- **Symptom:**
+  - `seedInitialLedger()` populated synthetic historical orders and payments in production mode, contaminating executive KPIs and order listings.
+- **Root Cause:**
+  - Seed function executed unconditionally at ledger initialization.
+- **Corrective Action:**
+  - `seedInitialLedger()` skips execution unless `DEMO_MODE === 'true'` or `NODE_ENV === 'test'`.
+  - Synthetic demo records are explicitly flagged `isDemo: true`, `feesFromProvider: false`, `verifiedByServer: false`.
+  - In production mode, `listOrdersForActor()`, `listPaymentsForActor()`, and `computeExecutiveKpisForDateRange()` filter out all records with `isDemo: true`.
+- **Files Modified:** `src/server/paymentEngine.ts`, `src/utils/finance.ts`, `server.ts`
+- **Regression Test Added:** `src/test/financialIntegrityAndConcurrency.test.ts` (TC-093, TC-094).
+- **Retest Result:** Production starts with 0 orders and 0 payments; demo data isolated from KPIs.
+
+---
+
+### [BF-025] Configuration Credential Validation & Application Default Credentials (ADC) Support
+- **Priority:** **P1** (Deployment & Environment Configuration)
+- **Status:** **Resolved & Verified**
+- **Symptom:**
+  - Startup config validator only checked for environment variable presence without verifying file accessibility, and failed when running under Google Cloud ADC without a local credential file.
+- **Root Cause:**
+  - Incomplete credential validation logic.
+- **Corrective Action:**
+  - Enhanced `validateStartupConfig()` to verify that `GOOGLE_APPLICATION_CREDENTIALS` points to an existing file (`fs.existsSync()`).
+  - Supported Application Default Credentials (ADC) on Google Cloud hosting platforms (`K_SERVICE` or `GAE_SERVICE`).
+  - Strict production enforcement: rejects startup if required variables are missing or credentials file does not exist.
+- **Files Modified:** `src/server/configValidator.ts`
+- **Regression Test Added:** `src/test/financialIntegrityAndConcurrency.test.ts` (TC-095, TC-096).
+- **Retest Result:** Configuration validation and ADC support verified.
+
+---
+
+### [BF-026] GitHub Actions CI Pipeline Modernization & Webpack Removal
+- **Priority:** **P1** (CI/CD & Automation Integrity)
+- **Status:** **Resolved & Verified**
+- **Symptom:**
+  - `.github/workflows/webpack.yml` failed in CI with missing `webpack` executable and unsupported Node.js 18 matrix entry.
+- **Root Cause:**
+  - Legacy workflow attempted to execute `npx webpack`, but AC PayPilot is a Vite 8 + TypeScript + Node Native Test project. Additionally, Node 18 is incompatible with React 19 / Vite 8.
+- **Corrective Action:**
+  - Modernized `.github/workflows/webpack.yml` with:
+    1. Node.js matrix `[20.x, 22.x]`.
+    2. Dependency installation via `npm ci || npm install`.
+    3. Static typecheck and lint via `npm run lint` (`tsc --noEmit`).
+    4. Full automated regression test suite via `npm test`.
+    5. Production bundle validation via `npm run build` (`vite build`).
+- **Files Modified:** `.github/workflows/webpack.yml`
+- **Regression Test Added:** Ran `npm run lint`, `npm test`, and `npm run build` locally.
+- **Retest Result:** Exited with code 0 across all steps.
+- **Residual Limitations:** None.
+
+---
+
+### [BF-027] Protected Endpoints Missing Bearer Authentication Enforcement
+- **Priority:** **P1** (Authentication & RBAC Hardening)
+- **Status:** **Resolved & Verified**
+- **Symptom:**
+  - `POST /api/executive/kpis` and `POST /api/products/:sku/asset` invoked `resolveActorFromRequest(req)` instead of `requireAuth(req, res)`. Outside demo mode, requests lacked Bearer token parsing and defaulted to role `customer`, rejecting legitimate requests with 403; inside demo mode, untrusted client headers were accepted.
+- **Root Cause:**
+  - Omission of `await requireAuth(req, res)` middleware on sensitive executive and seller endpoints.
+- **Corrective Action:**
+  - Refactored both endpoints to execute `const actor = await requireAuth(req, res); if (!actor) return;`.
+  - Enforced RBAC check (`business_head` or `finance` for Executive KPIs; `seller` or `business_head` for 3D asset registration).
+- **Files Modified:** `server.ts`
+- **Regression Test Added:** Verified with `npm test`.
+- **Retest Result:** Protected endpoints require authentic Firebase ID tokens (or demo tokens in demo mode) and enforce strict RBAC boundaries.
+- **Residual Limitations:** None.
+
+---
+
+### [BF-028] Multimodal Gemini 503 Service Unavailable Fail-Closed Handling
+- **Priority:** **P2** (Service Reliability & Error Reporting)
+- **Status:** **Resolved & Verified**
+- **Symptom:**
+  - Missing or placeholder `GEMINI_API_KEY` led to unhandled errors in multimodal AI endpoints (`/api/ai/chat`, `/api/ai/transcribe`, `/api/ai/image`, `/api/ai/video`) throwing generic 500 errors.
+- **Root Cause:**
+  - `getServerGenAiClient()` lacked upfront key validation, allowing instantiation with empty strings and causing downstream API exceptions.
+- **Corrective Action:**
+  - Updated `getServerGenAiClient()` to assert `GEMINI_API_KEY` is present and not the placeholder `MY_GEMINI_API_KEY`, throwing `GEMINI_API_KEY_MISSING`.
+  - Added error catch handlers returning HTTP 503 `AI_SERVICE_UNAVAILABLE` across all `/api/ai/*` routes.
+- **Files Modified:** `server.ts`
+- **Regression Test Added:** Verified via static compilation and runtime test runner.
+- **Retest Result:** Missing AI credentials fail closed with clear 503 service unavailable responses.
+- **Residual Limitations:** Live Gemini generation requires a valid `GEMINI_API_KEY`.
+
+---
+
+### [BF-029] Frontend Client Bearer Token Alignment
+- **Priority:** **P1** (Client-Server Auth Alignment)
+- **Status:** **Resolved & Verified**
+- **Symptom:**
+  - Frontend screens calling `fetch()` with `getActorHeaders()` or `authenticatedFetch()` in demo mode or initial state did not pass `Authorization: Bearer <token>`, causing backend protected endpoints to reject calls with 401.
+- **Root Cause:**
+  - `getActorHeaders()` only returned `Content-Type: application/json` without attaching the cached session token or demo token.
+- **Corrective Action:**
+  - In `src/context/RoleContext.tsx`, cached the latest ID token in `cachedTokenRef` upon auth state change.
+  - Updated `getActorHeaders()` to attach `Authorization: Bearer ${cachedTokenRef.current}` or `demo-token-${activeRole}-demo-user-${activeRole}-${activeBizId}` in demo mode.
+  - In `src/services/apiClient.ts`, updated `authenticatedFetch()` to attach demo bearer tokens in non-production environments when no Firebase user is logged in.
+- **Files Modified:** `src/context/RoleContext.tsx`, `src/services/apiClient.ts`
+- **Regression Test Added:** `npm run build` and `npm test`.
+- **Retest Result:** Client requests cleanly attach valid Bearer tokens in both authenticated and demo modes.
+- **Residual Limitations:** None.
+
+---
+
+### [BF-030] Duplicate Health Route Registration Cleanup
+- **Priority:** **P3** (Code Hygiene & Redundancy)
+- **Status:** **Resolved & Verified**
+- **Symptom:**
+  - `server.ts` registered `GET ['/health', '/api/health']` twice: once at line 210 (full diagnostic with `persistenceMode`) and once at line 1794 (legacy static response).
+- **Root Cause:**
+  - Leftover redundant handler from prior consolidation.
+- **Corrective Action:**
+  - Removed duplicate route registration at line 1794, leaving the authoritative handler at line 210 that runs system diagnostics and reports `persistenceMode`.
+- **Files Modified:** `server.ts`
+- **Regression Test Added:** Verified `/api/health` test in `securityAndSingleSource.test.ts`.
+- **Retest Result:** Health endpoints return complete system status and persistenceMode.
+- **Residual Limitations:** None.
+
 

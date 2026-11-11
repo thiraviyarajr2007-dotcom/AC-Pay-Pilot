@@ -531,7 +531,7 @@ export const Header: React.FC<HeaderProps> = ({
             target="_blank"
             rel="noopener noreferrer"
             title="Open customer storefront in new window"
-            className="inline-flex items-center gap-1.5 px-2.5 sm:px-3 py-1.5 rounded-lg border border-emerald-500/30 bg-emerald-500/10 text-emerald-800 hover:bg-emerald-500/20 font-label-md text-xs font-bold transition-all shadow-2xs shrink-0"
+            className="hidden sm:inline-flex items-center gap-1.5 px-2.5 sm:px-3 py-1.5 rounded-lg border border-emerald-500/30 bg-emerald-500/10 text-emerald-800 hover:bg-emerald-500/20 font-label-md text-xs font-bold transition-all shadow-2xs shrink-0"
           >
             <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse shrink-0" />
             <span className="material-symbols-outlined text-[15px] text-emerald-700">storefront</span>

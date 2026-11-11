@@ -1,0 +1,72 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 128 128" width="128" height="128" fill="none">
+  <defs>
+    <linearGradient id="acp-bg" x1="0" y1="0" x2="128" y2="128" gradientUnits="userSpaceOnUse">
+      <stop offset="0%" stop-color="#0A192F" />
+      <stop offset="50%" stop-color="#0F2952" />
+      <stop offset="100%" stop-color="#1E3A8A" />
+    </linearGradient>
+    <linearGradient id="acp-wing-main" x1="22" y1="92" x2="106" y2="26" gradientUnits="userSpaceOnUse">
+      <stop offset="0%" stop-color="#38BDF8" />
+      <stop offset="55%" stop-color="#2563EB" />
+      <stop offset="100%" stop-color="#60A5FA" />
+    </linearGradient>
+    <linearGradient id="acp-wing-accent" x1="36" y1="96" x2="98" y2="44" gradientUnits="userSpaceOnUse">
+      <stop offset="0%" stop-color="#10B981" />
+      <stop offset="100%" stop-color="#38BDF8" />
+    </linearGradient>
+    <linearGradient id="acp-shield-rim" x1="16" y1="12" x2="112" y2="116" gradientUnits="userSpaceOnUse">
+      <stop offset="0%" stop-color="#60A5FA" stop-opacity="0.65" />
+      <stop offset="100%" stop-color="#1D4ED8" stop-opacity="0.15" />
+    </linearGradient>
+    <filter id="acp-glow" x="-10%" y="-10%" width="120%" height="120%">
+      <feDropShadow dx="0" dy="4" stdDeviation="5" flood-color="#0284C7" flood-opacity="0.35" />
+    </filter>
+  </defs>
+
+  <!-- Squircle App Icon Base -->
+  <rect x="4" y="4" width="120" height="120" rx="28" fill="url(#acp-bg)" />
+  <rect x="6" y="6" width="116" height="116" rx="26" stroke="url(#acp-shield-rim)" stroke-width="2.5" />
+
+  <!-- Subtle Geometric Grid Arc -->
+  <path
+    d="M22 92C42 48 68 34 104 26"
+    stroke="#38BDF8"
+    stroke-opacity="0.2"
+    stroke-width="2"
+    stroke-dasharray="4 4"
+    stroke-linecap="round"
+  />
+
+  <!-- Outer Escrow Shield Frame -->
+  <path
+    d="M64 18L98 31V61C98 84.5 83.4 103.4 64 111C44.6 103.4 30 84.5 30 61V31L64 18Z"
+    fill="#0F172A"
+    fill-opacity="0.55"
+    stroke="url(#acp-shield-rim)"
+    stroke-width="2.5"
+  />
+
+  <!-- Primary Pilot Wing / Autonomous Delta Paper-Plane -->
+  <path
+    filter="url(#acp-glow)"
+    d="M26 71L102 30L73 98L58 72L26 71Z"
+    fill="url(#acp-wing-main)"
+  />
+
+  <!-- Inner Velocity Fold & Escrow Check Accent -->
+  <path
+    d="M58 72L102 30L67 80L58 72Z"
+    fill="#E0F2FE"
+    fill-opacity="0.92"
+  />
+  <path
+    d="M42 84L56 96L94 52"
+    stroke="url(#acp-wing-accent)"
+    stroke-width="6.5"
+    stroke-linecap="round"
+    stroke-linejoin="round"
+  />
+
+  <!-- Spark Node at Apex -->
+  <circle cx="102" cy="30" r="4.5" fill="#F8FAFC" />
+</svg>

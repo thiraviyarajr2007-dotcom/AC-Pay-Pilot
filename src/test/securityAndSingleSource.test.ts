@@ -1024,7 +1024,10 @@ test('CONFIG: validateStartupConfig in production throws ConfigurationError list
       assert.ok(err.missingVars.includes('PAYPAL_WEBHOOK_ID'));
       assert.ok(err.missingVars.includes('PAYPAL_CLIENT_ID'));
       assert.ok(err.missingVars.includes('PAYPAL_CLIENT_SECRET'));
-      assert.ok(err.missingVars.includes('GOOGLE_APPLICATION_CREDENTIALS'));
+      assert.ok(
+        err.missingVars.some((v: string) => v.includes('GOOGLE_APPLICATION_CREDENTIALS')),
+        'Production config must require Google credentials or an inline service account'
+      );
       return true;
     }
   );

@@ -299,10 +299,11 @@ export const RoleProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
   const [serverConfirmed, setServerConfirmed] = useState<boolean>(false);
   const [feesVerified, setFeesVerified] = useState<boolean>(false);
-  const [lastServerOrderId, setLastServerOrderId] = useState<string | null>('ord-1');
+  const [lastServerOrderId, setLastServerOrderId] = useState<string | null>(null);
   const [demoStepIndex, setDemoStepIndex] = useState<number | null>(null);
 
   const unsubProfileRef = useRef<(() => void) | null>(null);
+  const cachedTokenRef = useRef<string | null>(null);
 
   // Connection and Auth Lifecycle Listener
   useEffect(() => {
@@ -322,6 +323,7 @@ export const RoleProvider: React.FC<{ children: React.ReactNode }> = ({ children
         }
 
         if (!fbUser) {
+          cachedTokenRef.current = null;
           setFirebaseUser(null);
           setUserProfile(null);
           setFirebaseRole('customer');
@@ -333,6 +335,13 @@ export const RoleProvider: React.FC<{ children: React.ReactNode }> = ({ children
             setAuthStatus('unauthenticated');
           }
           return;
+        }
+
+        try {
+          const t = await fbUser.getIdToken();
+          cachedTokenRef.current = t;
+        } catch {
+          // Token will be refreshed on demand
         }
 
         setFirebaseUser(fbUser);
@@ -587,11 +596,17 @@ export const RoleProvider: React.FC<{ children: React.ReactNode }> = ({ children
     }
   };
 
-  // Deprecated header builder kept for non-security backwards compatibility
+  // Authoritative actor headers attached with active session token or demo token
   const getActorHeaders = (): Record<string, string> => {
-    return {
+    const headers: Record<string, string> = {
       'Content-Type': 'application/json',
     };
+    if (cachedTokenRef.current) {
+      headers['Authorization'] = `Bearer ${cachedTokenRef.current}`;
+    } else if (dataSource === 'demo' || isDemoModeSupported) {
+      headers['Authorization'] = `Bearer demo-token-${activeRole}-demo-user-${activeRole}-${activeBizId}`;
+    }
+    return headers;
   };
 
   const setDataSource = (source: DataSource) => {

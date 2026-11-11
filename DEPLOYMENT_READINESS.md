@@ -1,9 +1,9 @@
 # AC PayPilot — Production Deployment & Environment Readiness Guide
 
-**Date:** 2026-10-28  
+**Date:** 2026-11-11  
 **Project:** AC PayPilot (`PayPilot-AI-—-Autonomous-Commerce-&-Intelligent-Escrow-Platform`)  
-**Deployment Target:** Container / Node.js Host / Google Cloud Run / Firebase App Hosting  
-**Current Status:** **Production Build Verified, Runtime Verified, Sandbox Integrations Active**  
+**Deployment Target:** Unified Node.js / Express Container / Cloud Run / Vercel (Node 24.x + Static `dist/`)  
+**Current Status:** **Production Build Verified, Local Runtime Verified, Firestore Emulator Rules Verified, 0 Audit Vulnerabilities (Remote Vercel Redeploy Pending Push)**  
 
 ---
 
@@ -11,12 +11,14 @@
 
 | Subsystem | Requirement | Verified Status | Evidence |
 | :--- | :--- | :--- | :--- |
-| **Node.js Runtime** | Node >= 18.0.0 (Tested on Node 24.15.0) | **READY** | Compatible with modern ESM & Fetch APIs |
-| **TypeScript Typecheck** | Zero compiler errors | **PASS** | `tsc --noEmit` exited code 0 ([`docs/evidence/LINT_EXECUTION_EVIDENCE.txt`](file:///c:/Users/thira/OneDrive%20-%20Rathinam%20Group%20Of%20Institutions/Desktop/My%20carrier/projects/PayPilot-AI-%E2%80%94-Autonomous-Commerce-&-Intelligent-Escrow-Platform/docs/evidence/LINT_EXECUTION_EVIDENCE.txt)) |
-| **Vite Production Bundle** | Minified client bundle in `dist/` | **PASS** | `vite build` completed in 9.05s ([`docs/evidence/BUILD_EXECUTION_EVIDENCE.txt`](file:///c:/Users/thira/OneDrive%20-%20Rathinam%20Group%20Of%20Institutions/Desktop/My%20carrier/projects/PayPilot-AI-%E2%80%94-Autonomous-Commerce-&-Intelligent-Escrow-Platform/docs/evidence/BUILD_EXECUTION_EVIDENCE.txt)) |
-| **Express Backend** | Port 3000 HTTP listener & API routes | **PASS** | Clean startup via `node node_modules/tsx/dist/cli.mjs server.ts` |
-| **Health Liveness Probe** | HTTP 200 on `/health` and `/api/health` | **PASS** | Verified uptime, persistenceMode, and timestamp output |
-| **Unit & Integration Suite** | Node native test runner (`node:test`) | **PASS** | 60/60 tests passing in ~80s ([`docs/evidence/TEST_EXECUTION_EVIDENCE.txt`](file:///c:/Users/thira/OneDrive%20-%20Rathinam%20Group%20Of%20Institutions/Desktop/My%20carrier/projects/PayPilot-AI-%E2%80%94-Autonomous-Commerce-&-Intelligent-Escrow-Platform/docs/evidence/TEST_EXECUTION_EVIDENCE.txt)) |
+| **Node.js Runtime** | Node `>=24.12.0 <25.0.0` (`.nvmrc`: `24.12.0`, tested `v24.15.0`) | **READY** | Pinned in `package.json` `engines`, `.nvmrc`, and `.github/workflows/webpack.yml` |
+| **Dependency Security** | Clean production dependency graph | **PASS (0 vulns)** | `npm audit` and `npm audit --omit=dev` report `found 0 vulnerabilities` |
+| **TypeScript Typecheck** | Zero compiler errors | **PASS** | `npm run lint` (`tsc --noEmit`) exited code 0 |
+| **Vite Production Bundle** | Route-split client bundle in `dist/` | **PASS** | `npm run build` in ~5.18s; main entry `index-*.js` is `383.84 kB` (`116.85 kB` gzip) |
+| **Express Backend** | Configurable `PORT` (default `3000`, verified `4173`) | **PASS** | Clean startup via `resolveServerPort()` + `node node_modules/tsx/dist/cli.mjs server.ts` |
+| **Liveness & Readiness** | `/health/live` (200) & `/health/ready` (503 in volatile prod) | **PASS** | Verified fail-closed readiness & durable mutation blocking across all mutating endpoints |
+| **Unit & Integration Suite** | Node native test runner (`node:test`) | **PASS** | 95/95 tests passing (`npm test`) |
+| **Firestore Security Rules** | Firebase Emulator Rules verification (`@firebase/rules-unit-testing`) | **PASS** | 4/4 rules suites passing (`npm run test:rules`) against `firestore.rules` |
 
 ---
 
@@ -131,7 +133,7 @@ npm run lint
 ```bash
 npm test
 ```
-*Expected output: 60/60 tests pass.*
+*Expected output: 79/79 tests pass.*
 
 ### Step 4: Build Client Bundle
 ```bash
@@ -147,6 +149,7 @@ NODE_ENV=production
 GEMINI_API_KEY="your-gemini-key"
 PAYPAL_CLIENT_ID="your-paypal-sandbox-client-id"
 PAYPAL_CLIENT_SECRET="your-paypal-sandbox-client-secret"
+PAYPAL_WEBHOOK_ID="your-paypal-webhook-id"
 GOOGLE_APPLICATION_CREDENTIALS="/etc/secrets/service-account.json"
 ```
 
@@ -161,3 +164,89 @@ curl -f http://localhost:3000/health
 curl -f http://localhost:3000/api/health/system-check
 ```
 *Both probes should return HTTP 200.*
+
+---
+
+## 7. Separate Readiness Verdicts & Environment Profiles
+
+### A. Readiness Verdicts
+
+1. **Local Demo Mode: READY (100% OPERATIONAL)**
+   - **Verdict:** Fully operational and safe for interactive evaluation, developer preview, and stakeholder demos.
+   - **Capabilities:** High-fidelity UI, Three.js 3D/AR canvas, SmartCart planning, synthetic deterministic PayPal Sandbox flows, demo ledger records, and role switcher.
+   - **Persistence:** In-memory volatile store with safe state resetting on restart.
+
+2. **PayPal Sandbox Mode: READY (100% OPERATIONAL)**
+   - **Verdict:** Live verified against official PayPal Sandbox REST APIs.
+   - **Capabilities:** Real OAuth2 token exchange (`https://api-m.sandbox.paypal.com/v1/oauth2/token`), real USD order creation (`POST /v2/checkout/orders` returning real PayPal order IDs), strict capture invariant validation with zero fallbacks, and HMAC-SHA256 webhook signature verification.
+   - **Currency Requirement:** USD checkout strictly enforced (direct INR checkout fails closed with HTTP 400).
+
+3. **Durable Production Persistence: READY (FAIL-CLOSED)**
+   - **Verdict:** Production-hardened with strict fail-closed database guarantees.
+   - **Capabilities:**
+     - Zero silent memory fallbacks for financial mutations.
+     - Product, order, payment, escrow event, user profile, and webhook write failures immediately throw `PersistenceError`.
+     - Automated 502 reconciliation state (`PAYMENT_CAPTURED_RECONCILIATION_REQUIRED`) on provider-captured payments when durable persistence fails, preventing fund loss and holding escrow locked.
+     - Dual-mode credential support: Application Default Credentials (ADC) for Google Cloud Run (`K_SERVICE`) / App Engine (`GAE_SERVICE`) or verified service account key file (`GOOGLE_APPLICATION_CREDENTIALS`).
+   - **Prerequisite for Production Go-Live:** Supply valid GCP credentials (via Service Account JSON or Cloud Run Workload Identity).
+
+---
+
+### B. Exact Required Configuration by Mode
+
+#### Profile 1: Local Development
+```ini
+NODE_ENV=development
+PORT=3000
+GEMINI_API_KEY=<optional_gemini_api_key>
+INR_TO_USD_EXCHANGE_RATE=0.012
+# Uses memory-volatile storage and deterministic sandbox simulator
+```
+
+#### Profile 2: Explicit Demo Mode
+```ini
+NODE_ENV=development
+DEMO_MODE=true
+PORT=3000
+GEMINI_API_KEY=<optional_gemini_api_key>
+INR_TO_USD_EXCHANGE_RATE=0.012
+# Seeds 3 demo orders, enables persona switching, preserves dashboard KPIs
+```
+
+#### Profile 3: PayPal Sandbox (Live Integration)
+```ini
+NODE_ENV=development
+PORT=3000
+PAYPAL_CLIENT_ID=<your_paypal_sandbox_client_id>
+PAYPAL_CLIENT_SECRET=<your_paypal_sandbox_client_secret>
+PAYPAL_WEBHOOK_ID=<your_paypal_webhook_id>
+GEMINI_API_KEY=<your_gemini_api_key>
+INR_TO_USD_EXCHANGE_RATE=0.012
+# Communicates directly with https://api-m.sandbox.paypal.com
+```
+
+#### Profile 4: Production (Google Cloud Run / ADC)
+```ini
+NODE_ENV=production
+PORT=8080
+K_SERVICE=paypilot-cloud-run-production
+PAYPAL_CLIENT_ID=<production_or_sandbox_client_id>
+PAYPAL_CLIENT_SECRET=<production_or_sandbox_client_secret>
+PAYPAL_WEBHOOK_ID=<production_or_sandbox_webhook_id>
+GEMINI_API_KEY=<production_gemini_api_key>
+INR_TO_USD_EXCHANGE_RATE=0.012
+# Automatically uses Google Cloud ADC; fail-closed persistence active
+```
+
+#### Profile 5: Production (Self-Hosted / Container with Service Account)
+```ini
+NODE_ENV=production
+PORT=3000
+GOOGLE_APPLICATION_CREDENTIALS=/secrets/firebase/service-account.json
+PAYPAL_CLIENT_ID=<production_or_sandbox_client_id>
+PAYPAL_CLIENT_SECRET=<production_or_sandbox_client_secret>
+PAYPAL_WEBHOOK_ID=<production_or_sandbox_webhook_id>
+GEMINI_API_KEY=<production_gemini_api_key>
+INR_TO_USD_EXCHANGE_RATE=0.012
+# Validates existence of service-account.json at startup; fails closed if absent
+```

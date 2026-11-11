@@ -53,10 +53,16 @@ export const CreatePayPalOrderSchema = z.object({
     .array(
       z.object({
         sku: z.string().min(1, 'SKU is required'),
-        quantity: z.number().int().positive('Quantity must be a positive integer'),
+        quantity: z
+          .number()
+          .int()
+          .positive('Quantity must be a positive integer')
+          .max(10000, 'Quantity cannot exceed 10000 units per line item'),
         // Any client-sent price or total is intentionally ignored by the server calculator!
+        price: z.number().optional(),
+        priceMinor: z.number().optional(),
         clientPriceIgnored: z.number().optional(),
-      })
+      }).passthrough()
     )
     .min(1, 'At least one item is required'),
   shippingMinor: z.number().int().min(0).default(0),
@@ -68,13 +74,16 @@ export const CreatePayPalOrderSchema = z.object({
     .default('Embassy TechVillage, Outer Ring Rd, Bengaluru 560103'),
   customerId: z.string().min(1).default('cust-demo-1'),
   sellerId: z.string().min(1).default('seller-demo-1'),
-  // Optional client total passed by untrusted browser — strictly ignored!
+  // Optional client total passed by untrusted browser — strictly ignored by authoritative calculator!
+  price: z.number().optional(),
+  priceMinor: z.number().optional(),
+  totalMinor: z.number().optional(),
   clientUntrustedTotalMinor: z.number().optional(),
   isGuestCheckout: z.boolean().optional(),
   guestCheckoutToken: z.string().optional(),
   guestCaptureTokenHash: z.string().optional(),
   guestExpiresAt: z.string().optional(),
-});
+}).passthrough();
 
 export const CapturePayPalOrderSchema = z.object({
   idempotencyKey: z.string().min(6, 'idempotencyKey must be at least 6 characters'),
@@ -179,6 +188,9 @@ export interface ServerOrderRecord {
   guestCaptureTokenHash?: string;
   guestExpiresAt?: string;
   guestTokenUsed?: boolean;
+  captureInProgress?: boolean;
+  captureLockKey?: string;
+  isDemo?: boolean;
   bizId?: string;
   createdAt: string;
   updatedAt: string;
@@ -200,6 +212,7 @@ export interface ServerPaymentRecord {
   feesFromProvider: boolean;
   verifiedByServer: boolean;
   providerRawStatus: string;
+  isDemo?: boolean;
   createdAt: string;
   updatedAt: string;
 }
@@ -222,13 +235,19 @@ export interface PayPalProviderAdapter {
   captureOrder(params: {
     paypalOrderId: string;
     idempotencyKey: string;
-    currency: SupportedCurrency;
+    currency?: SupportedCurrency;
+    expectedCurrency?: SupportedCurrency;
     expectedTotalMinor: number;
+    orderId?: string;
+    rawCaptureResponse?: any;
     simulateOutcome?: 'COMPLETED' | 'DECLINED' | 'PENDING' | 'CANCELLED' | 'TIMEOUT';
   }): Promise<{
     paypalOrderId: string;
     captureId?: string;
     providerStatus: 'COMPLETED' | 'DECLINED' | 'PENDING' | 'CANCELLED' | 'TIMEOUT';
+    status?: 'COMPLETED' | 'DECLINED' | 'PENDING' | 'CANCELLED' | 'TIMEOUT';
+    capturedAmountMinor?: number;
+    capturedCurrency?: SupportedCurrency;
     seller_receivable_breakdown?: {
       gross_amount: { currency_code: string; value: string };
       paypal_fee: { currency_code: string; value: string };
@@ -239,6 +258,109 @@ export interface PayPalProviderAdapter {
   }>;
 }
 
+export class PayPalCaptureInvariantError extends Error {
+  code: string;
+  constructor(message: string, code: string) {
+    super(message);
+    this.name = 'PayPalCaptureInvariantError';
+    this.code = code;
+  }
+}
+
+export function validatePayPalCaptureEvidence(
+  data: any,
+  expected: {
+    paypalOrderId: string;
+    expectedTotalMinor: number;
+    expectedCurrency: SupportedCurrency;
+  }
+) {
+  if (data?.id && typeof data.id === 'string' && data.id !== expected.paypalOrderId) {
+    throw new PayPalCaptureInvariantError(
+      `PayPal order ID mismatch: response was for order ${data.id}, expected ${expected.paypalOrderId}`,
+      'PAYPAL_ORDER_ID_MISMATCH'
+    );
+  }
+
+  const captures = data?.purchase_units?.[0]?.payments?.captures;
+  const capture = Array.isArray(captures) && captures.length > 0 ? captures[0] : null;
+
+  // Strict capture record & ID validation
+  if (!capture || typeof capture !== 'object') {
+    throw new PayPalCaptureInvariantError('Missing capture record in provider response', 'PAYPAL_CAPTURE_MISSING');
+  }
+  if (!capture.id || typeof capture.id !== 'string' || capture.id.trim() === '') {
+    throw new PayPalCaptureInvariantError('Missing capture ID in provider response', 'PAYPAL_CAPTURE_ID_MISSING');
+  }
+
+  // Strict explicit status validation
+  if (!capture.status || typeof capture.status !== 'string') {
+    throw new PayPalCaptureInvariantError('Missing explicit capture status in provider response', 'PAYPAL_CAPTURE_STATUS_MISSING');
+  }
+
+  // Strict captured amount & currency validation
+  if (!capture.amount || typeof capture.amount !== 'object') {
+    throw new PayPalCaptureInvariantError('Missing capture amount object in provider response', 'PAYPAL_CAPTURE_AMOUNT_MISSING');
+  }
+
+  const capturedCurrency = capture.amount.currency_code;
+  const capturedValue = capture.amount.value;
+
+  if (!capturedCurrency || typeof capturedCurrency !== 'string') {
+    throw new PayPalCaptureInvariantError('Missing capture currency in provider response', 'PAYPAL_CAPTURE_CURRENCY_MISSING');
+  }
+
+  if (
+    capturedValue === undefined ||
+    capturedValue === null ||
+    typeof capturedValue !== 'string' ||
+    capturedValue.trim() === '' ||
+    isNaN(Number(capturedValue)) ||
+    Number(capturedValue) < 0
+  ) {
+    throw new PayPalCaptureInvariantError('Malformed numeric capture amount in provider response', 'PAYPAL_CAPTURE_AMOUNT_INVALID');
+  }
+
+  const capturedMinor = toMinorUnits(parseFloat(capturedValue));
+
+  // Strict currency match
+  if (capturedCurrency !== expected.expectedCurrency) {
+    throw new PayPalCaptureInvariantError(
+      `Currency mismatch: PayPal captured ${capturedCurrency}, expected ${expected.expectedCurrency}`,
+      'PAYPAL_CAPTURE_CURRENCY_MISMATCH'
+    );
+  }
+
+  // Strict exact integer minor-unit comparison (zero tolerance)
+  if (capturedMinor !== expected.expectedTotalMinor) {
+    throw new PayPalCaptureInvariantError(
+      `Amount mismatch: PayPal captured minor ${capturedMinor}, expected ${expected.expectedTotalMinor}`,
+      'PAYPAL_CAPTURE_AMOUNT_MISMATCH'
+    );
+  }
+
+  // Escrow requires 100% full authorization capture; partial captures are not supported
+  if (capture.final_capture === false) {
+    throw new PayPalCaptureInvariantError(
+      'Partial capture is not supported; final_capture must be true',
+      'PAYPAL_PARTIAL_CAPTURE_NOT_SUPPORTED'
+    );
+  }
+
+  const isCompleted = capture.status === 'COMPLETED';
+
+  return {
+    paypalOrderId: data.id || expected.paypalOrderId,
+    captureId: capture.id,
+    providerStatus: isCompleted ? ('COMPLETED' as const) : (capture.status as any),
+    status: isCompleted ? ('COMPLETED' as const) : (capture.status as any),
+    capturedAmountMinor: capturedMinor,
+    capturedCurrency: capturedCurrency as SupportedCurrency,
+    seller_receivable_breakdown: capture.seller_receivable_breakdown,
+    mode: 'paypal_sandbox_api' as const,
+  };
+}
+
 /**
  * Default PayPal Sandbox Orders v2 Provider Adapter.
  * Uses real PayPal Sandbox REST API (`https://api-m.sandbox.paypal.com`) when
@@ -246,64 +368,97 @@ export interface PayPalProviderAdapter {
  * otherwise uses a deterministic Sandbox Orders v2 structure so tests and sandbox flows work reliably.
  */
 export function createPayPalSandboxAdapter(): PayPalProviderAdapter {
-  const clientId = process.env.PAYPAL_CLIENT_ID || '';
-  const clientSecret = process.env.PAYPAL_CLIENT_SECRET || '';
-  const isExplicitDemo = process.env.DEMO_MODE === 'true';
-  const isTestMode = process.env.NODE_ENV === 'test';
-  const hasRealCredentials =
-    Boolean(clientId && clientSecret) &&
-    clientId !== 'MY_PAYPAL_CLIENT_ID' &&
-    clientSecret !== 'MY_PAYPAL_CLIENT_SECRET' &&
-    !clientId.startsWith('sb-placeholder');
+  function getEnvConfig() {
+    const clientId = process.env.PAYPAL_CLIENT_ID || '';
+    const clientSecret = process.env.PAYPAL_CLIENT_SECRET || '';
+    const isExplicitDemo = process.env.DEMO_MODE === 'true';
+    const isTestMode = process.env.NODE_ENV === 'test';
+    const hasRealCredentials =
+      Boolean(clientId && clientSecret) &&
+      clientId !== 'MY_PAYPAL_CLIENT_ID' &&
+      clientSecret !== 'MY_PAYPAL_CLIENT_SECRET' &&
+      !clientId.startsWith('sb-placeholder');
+    return { clientId, clientSecret, isExplicitDemo, isTestMode, hasRealCredentials };
+  }
+
+  let cachedSandboxToken: { token: string; expiresAt: number } | null = null;
 
   async function getSandboxAccessToken(): Promise<string> {
+    const { clientId, clientSecret, hasRealCredentials } = getEnvConfig();
     if (!hasRealCredentials) {
       throw new Error('PAYPAL_CONFIG_MISSING: PayPal Sandbox credentials are not configured on the server.');
     }
-    const auth = Buffer.from(`${clientId}:${clientSecret}`).toString('base64');
-    const res = await fetch('https://api-m.sandbox.paypal.com/v1/oauth2/token', {
-      method: 'POST',
-      headers: {
-        Authorization: `Basic ${auth}`,
-        'Content-Type': 'application/x-www-form-urlencoded',
-      },
-      body: 'grant_type=client_credentials',
-    });
-    if (!res.ok) {
-      const errBody = await res.text().catch(() => '');
-      throw new Error(`PAYPAL_AUTH_FAILED: PayPal OAuth token request failed with status ${res.status}: ${errBody}`);
+    if (cachedSandboxToken && Date.now() < cachedSandboxToken.expiresAt) {
+      return cachedSandboxToken.token;
     }
-    const data = (await res.json()) as { access_token: string };
+    const auth = Buffer.from(`${clientId}:${clientSecret}`).toString('base64');
+    let res: Response | null = null;
+    for (let attempt = 0; attempt < 2; attempt++) {
+      try {
+        res = await fetch('https://api-m.sandbox.paypal.com/v1/oauth2/token', {
+          method: 'POST',
+          headers: {
+            Authorization: `Basic ${auth}`,
+            'Content-Type': 'application/x-www-form-urlencoded',
+          },
+          body: 'grant_type=client_credentials',
+        });
+        if (res.ok) break;
+      } catch (netErr: any) {
+        if (attempt === 1) throw netErr;
+        await new Promise((resolve) => setTimeout(resolve, 300));
+      }
+    }
+    if (!res || !res.ok) {
+      const errBody = (await res?.text().catch(() => '')) || '';
+      throw new Error(`PAYPAL_AUTH_FAILED: PayPal OAuth token request failed with status ${res?.status}: ${errBody}`);
+    }
+    const data = (await res.json()) as { access_token: string; expires_in?: number };
+    const expiresIn = typeof data.expires_in === 'number' ? data.expires_in : 3600;
+    cachedSandboxToken = {
+      token: data.access_token,
+      expiresAt: Date.now() + Math.max(300, expiresIn - 60) * 1000,
+    };
     return data.access_token;
   }
 
   return {
     async createOrder(params) {
+      const { isExplicitDemo, isTestMode, hasRealCredentials } = getEnvConfig();
       if (hasRealCredentials) {
         try {
           const token = await getSandboxAccessToken();
           const majorTotal = fromMinorUnits(params.totalMinor).toFixed(2);
-          const res = await fetch('https://api-m.sandbox.paypal.com/v2/checkout/orders', {
-            method: 'POST',
-            headers: {
-              Authorization: `Bearer ${token}`,
-              'Content-Type': 'application/json',
-              'PayPal-Request-Id': params.idempotencyKey,
-            },
-            body: JSON.stringify({
-              intent: 'CAPTURE',
-              purchase_units: [
-                {
-                  reference_id: params.referenceId,
-                  amount: {
-                    currency_code: params.currency,
-                    value: majorTotal,
-                  },
+          let res: Response | null = null;
+          for (let attempt = 0; attempt < 2; attempt++) {
+            try {
+              res = await fetch('https://api-m.sandbox.paypal.com/v2/checkout/orders', {
+                method: 'POST',
+                headers: {
+                  Authorization: `Bearer ${token}`,
+                  'Content-Type': 'application/json',
+                  'PayPal-Request-Id': params.idempotencyKey,
                 },
-              ],
-            }),
-          });
-          if (res.ok) {
+                body: JSON.stringify({
+                  intent: 'CAPTURE',
+                  purchase_units: [
+                    {
+                      reference_id: params.referenceId,
+                      amount: {
+                        currency_code: params.currency,
+                        value: majorTotal,
+                      },
+                    },
+                  ],
+                }),
+              });
+              break;
+            } catch (fetchErr: any) {
+              if (attempt === 1) throw fetchErr;
+              await new Promise((resolve) => setTimeout(resolve, 300));
+            }
+          }
+          if (res && res.ok) {
             const data = (await res.json()) as { id: string; status: string };
             return {
               paypalOrderId: data.id,
@@ -311,8 +466,8 @@ export function createPayPalSandboxAdapter(): PayPalProviderAdapter {
               mode: 'paypal_sandbox_api',
             };
           }
-          const errBody = await res.text().catch(() => '');
-          throw new Error(`PAYPAL_ORDER_CREATION_FAILED (HTTP ${res.status}): ${errBody}`);
+          const errBody = (await res?.text().catch(() => '')) || '';
+          throw new Error(`PAYPAL_ORDER_CREATION_FAILED (HTTP ${res?.status}): ${errBody}`);
         } catch (err: any) {
           // FAIL CLOSED: Do not convert failure into synthetic success!
           throw new Error(`PayPal Order Creation Failed: ${err.message || String(err)}`);
@@ -346,6 +501,18 @@ export function createPayPalSandboxAdapter(): PayPalProviderAdapter {
     },
 
     async captureOrder(params) {
+      const { isExplicitDemo, isTestMode, hasRealCredentials } = getEnvConfig();
+      const resolvedCurrency = (params.currency || params.expectedCurrency || 'USD') as SupportedCurrency;
+
+      // 0. Direct raw capture response validation (for targeted invariant testing)
+      if (params.rawCaptureResponse) {
+        return validatePayPalCaptureEvidence(params.rawCaptureResponse, {
+          paypalOrderId: params.paypalOrderId,
+          expectedTotalMinor: params.expectedTotalMinor,
+          expectedCurrency: resolvedCurrency,
+        });
+      }
+
       // 1. Simulation outcomes (when explicitly requested for testing decline, pending, timeout, cancelled, completed)
       if (params.simulateOutcome && (isExplicitDemo || isTestMode)) {
         if (params.simulateOutcome === 'COMPLETED') {
@@ -353,7 +520,15 @@ export function createPayPalSandboxAdapter(): PayPalProviderAdapter {
             paypalOrderId: params.paypalOrderId,
             captureId: `CAP-COMPL-${Date.now().toString(36).toUpperCase()}`,
             providerStatus: 'COMPLETED',
+            status: 'COMPLETED',
+            capturedAmountMinor: params.expectedTotalMinor,
+            capturedCurrency: resolvedCurrency,
             feeAmount: '3.50',
+            seller_receivable_breakdown: {
+              gross_amount: { currency_code: resolvedCurrency, value: (params.expectedTotalMinor / 100).toFixed(2) },
+              paypal_fee: { currency_code: resolvedCurrency, value: '3.50' },
+              net_amount: { currency_code: resolvedCurrency, value: ((params.expectedTotalMinor - 350) / 100).toFixed(2) },
+            },
             mode: 'sandbox_deterministic_fallback',
           };
         }
@@ -362,6 +537,7 @@ export function createPayPalSandboxAdapter(): PayPalProviderAdapter {
             return {
               paypalOrderId: params.paypalOrderId,
               providerStatus: 'DECLINED',
+              status: 'DECLINED',
               errorMessage: 'INSTRUMENT_DECLINED: The funding instrument was declined by the issuing bank.',
               mode: 'sandbox_deterministic_fallback',
             };
@@ -370,6 +546,7 @@ export function createPayPalSandboxAdapter(): PayPalProviderAdapter {
               paypalOrderId: params.paypalOrderId,
               captureId: `CAP-PEND-${Date.now().toString(36).toUpperCase()}`,
               providerStatus: 'PENDING',
+              status: 'PENDING',
               errorMessage: 'Payment capture is pending bank clearing review.',
               mode: 'sandbox_deterministic_fallback',
             };
@@ -377,6 +554,7 @@ export function createPayPalSandboxAdapter(): PayPalProviderAdapter {
             return {
               paypalOrderId: params.paypalOrderId,
               providerStatus: 'CANCELLED',
+              status: 'CANCELLED',
               errorMessage: 'Order was cancelled before capture completion.',
               mode: 'sandbox_deterministic_fallback',
             };
@@ -384,6 +562,7 @@ export function createPayPalSandboxAdapter(): PayPalProviderAdapter {
             return {
               paypalOrderId: params.paypalOrderId,
               providerStatus: 'TIMEOUT',
+              status: 'TIMEOUT',
               errorMessage: 'Gateway timeout waiting for upstream processor response. Safe to retry with same idempotencyKey.',
               mode: 'sandbox_deterministic_fallback',
             };
@@ -409,30 +588,11 @@ export function createPayPalSandboxAdapter(): PayPalProviderAdapter {
           );
           if (res.ok) {
             const data = (await res.json()) as any;
-            const capture = data.purchase_units?.[0]?.payments?.captures?.[0];
-
-            // Invariant verification
-            const capturedCurrency = capture?.amount?.currency_code || data.purchase_units?.[0]?.amount?.currency_code;
-            const capturedValue = capture?.amount?.value || data.purchase_units?.[0]?.amount?.value;
-            const capturedMinor = capturedValue ? toMinorUnits(parseFloat(capturedValue)) : params.expectedTotalMinor;
-
-            if (capturedCurrency && capturedCurrency !== params.currency) {
-              throw new Error(`INVARIANT_VIOLATION: Currency mismatch: PayPal captured ${capturedCurrency}, expected ${params.currency}`);
-            }
-
-            if (Math.abs(capturedMinor - params.expectedTotalMinor) > 100) {
-              throw new Error(`INVARIANT_VIOLATION: Amount mismatch: PayPal captured minor ${capturedMinor}, expected ${params.expectedTotalMinor}`);
-            }
-
-            const isCompleted = data.status === 'COMPLETED' || capture?.status === 'COMPLETED';
-
-            return {
-              paypalOrderId: data.id || params.paypalOrderId,
-              captureId: capture?.id,
-              providerStatus: isCompleted ? 'COMPLETED' : (capture?.status || data.status || 'PENDING'),
-              seller_receivable_breakdown: capture?.seller_receivable_breakdown,
-              mode: 'paypal_sandbox_api',
-            };
+            return validatePayPalCaptureEvidence(data, {
+              paypalOrderId: params.paypalOrderId,
+              expectedTotalMinor: params.expectedTotalMinor,
+              expectedCurrency: resolvedCurrency,
+            });
           } else {
             const errText = await res.text().catch(() => '');
             let parsedErr: any;
@@ -486,6 +646,7 @@ export class ServerPaymentLedger {
   private ordersById = new Map<string, ServerOrderRecord>();
   private orderIdByCreateKey = new Map<string, string>();
   private orderIdByPaypalId = new Map<string, string>();
+  private orderIdByCaptureId = new Map<string, string>();
   private captureResultByKey = new Map<
     string,
     {
@@ -497,6 +658,16 @@ export class ServerPaymentLedger {
   >();
   private paymentsById = new Map<string, ServerPaymentRecord>();
   private escrowEventsByOrderId = new Map<string, EscrowEventRecord[]>();
+  private activeCaptures = new Map<string, { idempotencyKey: string; promise: Promise<any> }>();
+  private activeOrderCreations = new Map<
+    string,
+    Promise<{
+      order: ServerOrderRecord;
+      escrowEvents: EscrowEventRecord[];
+      idempotentReplay: boolean;
+      providerMode: string;
+    }>
+  >();
   private provider: PayPalProviderAdapter;
 
   constructor(provider?: PayPalProviderAdapter) {
@@ -505,7 +676,14 @@ export class ServerPaymentLedger {
   }
 
   private seedInitialLedger() {
-    // Seed 3 historical server orders across dates so Executive KPIs and Orders/Ledger screens have initial verified records
+    // 1. Seed synthetic financial records only in explicit demo/test mode
+    const isExplicitDemo = process.env.DEMO_MODE === 'true';
+    const isTestMode = process.env.NODE_ENV === 'test';
+    if (!isExplicitDemo && !isTestMode) {
+      return;
+    }
+
+    // Seed 3 historical server orders across dates for demo/test mode only
     const seedOrders: Array<{
       id: string;
       orderNumber: string;
@@ -571,8 +749,6 @@ export class ServerPaymentLedger {
         'INR',
         0
       );
-      const feeMinor = Math.round((calc.totalMinor * 3.49) / 100) + 1200;
-      const netMinor = calc.totalMinor - feeMinor;
 
       const record: ServerOrderRecord = {
         id: s.id,
@@ -590,14 +766,16 @@ export class ServerPaymentLedger {
         taxMinor: calc.taxMinor,
         shippingMinor: 0,
         totalMinor: calc.totalMinor,
-        paypalFeeMinor: feeMinor,
-        netPayoutMinor: netMinor,
-        feesFromProvider: true,
+        paypalFeeMinor: null,
+        netPayoutMinor: null,
+        // 2. Do not mark synthetic PayPal IDs, fake capture IDs, or estimated fees as provider-verified
+        feesFromProvider: false,
         paymentStatus: s.paymentStatus,
-        verifiedByServer: true,
+        verifiedByServer: false,
+        isDemo: true,
         escrowState: s.escrowState,
         paypalIntent: ESCROW_ARCHITECTURE_DECISION.chosenPaypalIntent,
-        paypalCaptureId: `CAP-${s.paypalOrderId}`,
+        paypalCaptureId: undefined,
         items: calc.items,
         createdAt: s.createdAt,
         updatedAt: s.createdAt,
@@ -613,17 +791,7 @@ export class ServerPaymentLedger {
           toState: 'created',
           actorId: s.customerId,
           actorRole: 'customer',
-          reason: 'Order created at checkout',
-          timestamp: s.createdAt,
-        },
-        {
-          id: `evt-seed-2-${s.id}`,
-          orderId: record.id,
-          fromState: 'created',
-          toState: 'funded',
-          actorId: 'system',
-          actorRole: 'system',
-          reason: `PayPal Sandbox capture verified (${record.paypalCaptureId})`,
+          reason: 'Demo order initialized at checkout',
           timestamp: s.createdAt,
         },
       ]);
@@ -632,11 +800,14 @@ export class ServerPaymentLedger {
 
   /**
    * Creates a PayPal Order on the server.
-   * - Strictly computes amounts from stored CATALOG_PRODUCTS in integer minor units.
-   * - Ignores any total or unit price sent by the browser.
+   * - Authoritative server-side price calculation using catalog records (or CATALOG_PRODUCTS).
+   * - Ignores any total or unit price sent by the untrusted client.
    * - Idempotent: repeated calls with the same `idempotencyKey` return the existing order without creating duplicates.
    */
-  async createOrder(rawInput: unknown): Promise<{
+  async createOrder(
+    rawInput: unknown,
+    options?: { catalogProducts?: any[] }
+  ): Promise<{
     order: ServerOrderRecord;
     escrowEvents: EscrowEventRecord[];
     idempotentReplay: boolean;
@@ -656,89 +827,118 @@ export class ServerPaymentLedger {
       };
     }
 
-    // Authoritative server-side price calculation (ignores any client price/total!)
-    const calc = calculateAuthoritativeOrderTotalsMinor(
-      input.items.map((i) => ({ sku: i.sku, quantity: i.quantity })),
-      CATALOG_PRODUCTS,
-      input.currency,
-      input.shippingMinor
-    );
+    // Concurrency check: if another request with this idempotency key is already in flight, await it
+    const inFlight = this.activeOrderCreations.get(input.idempotencyKey);
+    if (inFlight) {
+      const inFlightResult = await inFlight;
+      return {
+        ...inFlightResult,
+        idempotentReplay: true,
+      };
+    }
 
-    const orderId = `ord-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`;
-    const orderNumber = `#PP-${Math.floor(1000 + Math.random() * 9000)}`;
+    const createExecution = async () => {
+      // Authoritative single-source price calculation (ignores any client price/total!)
+      const catalogSource =
+        options?.catalogProducts && options.catalogProducts.length > 0
+          ? options.catalogProducts
+          : CATALOG_PRODUCTS;
 
-    const providerRes = await this.provider.createOrder({
-      currency: calc.currency,
-      totalMinor: calc.totalMinor,
-      subtotalMinor: calc.subtotalMinor,
-      taxMinor: calc.taxMinor,
-      shippingMinor: calc.shippingMinor,
-      idempotencyKey: input.idempotencyKey,
-      referenceId: orderId,
-    });
+      const calc = calculateAuthoritativeOrderTotalsMinor(
+        input.items.map((i) => ({ sku: i.sku, quantity: i.quantity })),
+        catalogSource as any,
+        input.currency,
+        input.shippingMinor
+      );
 
-    const now = new Date().toISOString();
-    const order: ServerOrderRecord = {
-      id: orderId,
-      orderNumber,
-      paypalOrderId: providerRes.paypalOrderId,
-      createIdempotencyKey: input.idempotencyKey,
-      customerId: input.customerId,
-      sellerId: input.sellerId,
-      buyerName: input.buyerName,
-      buyerEmail: input.buyerEmail,
-      shippingAddress: input.shippingAddress,
-      currency: calc.currency,
-      subtotalMinor: calc.subtotalMinor,
-      taxMinor: calc.taxMinor,
-      shippingMinor: calc.shippingMinor,
-      totalMinor: calc.totalMinor,
-      paypalFeeMinor: null,
-      netPayoutMinor: null,
-      feesFromProvider: false,
-      paymentStatus: 'Pending',
-      verifiedByServer: false,
-      escrowState: 'created',
-      paypalIntent: ESCROW_ARCHITECTURE_DECISION.chosenPaypalIntent,
-      items: calc.items,
-      bizId: input.sellerId,
-      isGuestCheckout: input.isGuestCheckout,
-      guestCheckoutToken: input.guestCheckoutToken,
-      guestCaptureTokenHash: input.guestCaptureTokenHash,
-      guestExpiresAt: input.guestExpiresAt,
-      guestTokenUsed: false,
-      createdAt: now,
-      updatedAt: now,
+      const orderId = `ord-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`;
+      const orderNumber = `#PP-${Math.floor(1000 + Math.random() * 9000)}`;
+
+      const providerRes = await this.provider.createOrder({
+        currency: calc.currency,
+        totalMinor: calc.totalMinor,
+        subtotalMinor: calc.subtotalMinor,
+        taxMinor: calc.taxMinor,
+        shippingMinor: calc.shippingMinor,
+        idempotencyKey: input.idempotencyKey,
+        referenceId: orderId,
+      });
+
+      const now = new Date().toISOString();
+      const isExplicitDemo = process.env.DEMO_MODE === 'true';
+      const order: ServerOrderRecord = {
+        id: orderId,
+        orderNumber,
+        paypalOrderId: providerRes.paypalOrderId,
+        createIdempotencyKey: input.idempotencyKey,
+        customerId: input.customerId,
+        sellerId: input.sellerId,
+        buyerName: input.buyerName,
+        buyerEmail: input.buyerEmail,
+        shippingAddress: input.shippingAddress,
+        currency: calc.currency,
+        subtotalMinor: calc.subtotalMinor,
+        taxMinor: calc.taxMinor,
+        shippingMinor: calc.shippingMinor,
+        totalMinor: calc.totalMinor,
+        paypalFeeMinor: null,
+        netPayoutMinor: null,
+        feesFromProvider: false,
+        paymentStatus: 'Pending',
+        verifiedByServer: false,
+        escrowState: 'created',
+        paypalIntent: ESCROW_ARCHITECTURE_DECISION.chosenPaypalIntent,
+        items: calc.items,
+        bizId: input.sellerId,
+        isGuestCheckout: input.isGuestCheckout,
+        guestCheckoutToken: input.guestCheckoutToken,
+        guestCaptureTokenHash: input.guestCaptureTokenHash,
+        guestExpiresAt: input.guestExpiresAt,
+        guestTokenUsed: false,
+        isDemo: isExplicitDemo,
+        createdAt: now,
+        updatedAt: now,
+      };
+
+      const initialEscrowEvent: EscrowEventRecord = {
+        id: `esc-evt-${Date.now()}-init`,
+        orderId: order.id,
+        fromState: null,
+        toState: 'created',
+        actorId: input.customerId,
+        actorRole: 'customer',
+        reason: `PayPal Sandbox Order ${providerRes.paypalOrderId} initialized for ${calc.currency} ${order.totalMinor} minor units`,
+        timestamp: now,
+      };
+
+      this.ordersById.set(order.id, order);
+      this.orderIdByCreateKey.set(input.idempotencyKey, order.id);
+      this.orderIdByPaypalId.set(order.paypalOrderId, order.id);
+      this.escrowEventsByOrderId.set(order.id, [initialEscrowEvent]);
+
+      return {
+        order,
+        escrowEvents: [initialEscrowEvent],
+        idempotentReplay: false,
+        providerMode: providerRes.mode,
+      };
     };
 
-    const initialEscrowEvent: EscrowEventRecord = {
-      id: `esc-evt-${Date.now()}-init`,
-      orderId: order.id,
-      fromState: null,
-      toState: 'created',
-      actorId: input.customerId,
-      actorRole: 'customer',
-      reason: `PayPal Sandbox Order ${providerRes.paypalOrderId} initialized for ${calc.currency} ${order.totalMinor} minor units`,
-      timestamp: now,
-    };
+    const promise = createExecution();
+    this.activeOrderCreations.set(input.idempotencyKey, promise);
 
-    this.ordersById.set(order.id, order);
-    this.orderIdByCreateKey.set(input.idempotencyKey, order.id);
-    this.orderIdByPaypalId.set(order.paypalOrderId, order.id);
-    this.escrowEventsByOrderId.set(order.id, [initialEscrowEvent]);
-
-    return {
-      order,
-      escrowEvents: [initialEscrowEvent],
-      idempotentReplay: false,
-      providerMode: providerRes.mode,
-    };
+    try {
+      return await promise;
+    } finally {
+      this.activeOrderCreations.delete(input.idempotencyKey);
+    }
   }
 
   /**
    * Captures a PayPal Order on the server and transitions escrow `created -> funded` ONLY if provider confirms COMPLETED.
+   * - Atomic: prevents concurrent execution of duplicate captures on the same order.
+   * - Strict: verifies capture record, explicit COMPLETED status, and exact integer minor-unit amount.
    * - Idempotent: repeated calls with the same `idempotencyKey` or on an already-captured order never capture twice.
-   * - Handles COMPLETED, DECLINED, PENDING, CANCELLED, and TIMEOUT states cleanly.
    */
   async captureOrder(
     orderOrPaypalId: string,
@@ -774,7 +974,26 @@ export class ServerPaymentLedger {
 
     const order = this.ordersById.get(resolvedOrderId)!;
 
-    // 3. If order is already Captured, return existing payment idempotently without re-capturing
+    // 3. Concurrency check: prevent two simultaneous requests with different keys
+    const inFlight = this.activeCaptures.get(resolvedOrderId);
+    if (inFlight) {
+      if (inFlight.idempotencyKey === input.idempotencyKey) {
+        const inFlightResult = await inFlight.promise;
+        return {
+          ...inFlightResult,
+          idempotentReplay: true,
+        };
+      } else {
+        const err = new Error(
+          'CONCURRENT_CAPTURE_CONFLICT: A capture operation is already in progress for this order with a different idempotency key.'
+        );
+        (err as any).code = 'CONCURRENT_CAPTURE_CONFLICT';
+        (err as any).statusCode = 409;
+        throw err;
+      }
+    }
+
+    // 4. If order is already Captured, return existing payment idempotently without re-capturing
     if (order.paymentStatus === 'Captured' && order.verifiedByServer) {
       const existingPayment = Array.from(this.paymentsById.values()).find(
         (p) => p.orderId === order.id && p.status === 'Captured'
@@ -788,131 +1007,193 @@ export class ServerPaymentLedger {
       };
     }
 
-    // 4. Invoke PayPal Sandbox provider capture
-    let providerCapture;
-    try {
-      providerCapture = await this.provider.captureOrder({
-        paypalOrderId: order.paypalOrderId,
-        idempotencyKey: input.idempotencyKey,
-        currency: order.currency,
-        expectedTotalMinor: order.totalMinor,
-        simulateOutcome: input.simulateOutcome,
-      });
-    } catch (err: any) {
-      const now = new Date().toISOString();
-      order.paymentStatus = 'Failed';
-      order.verifiedByServer = false;
-      order.failureReason = err.message || 'Payment provider capture exception';
-      order.updatedAt = now;
+    // 5. Reject capture of cancelled orders
+    if (order.paymentStatus === 'Cancelled') {
+      const err = new Error('ORDER_CANCELLED: Cannot capture payment on an order that has been cancelled.');
+      (err as any).code = 'ORDER_CANCELLED';
+      (err as any).statusCode = 400;
       throw err;
     }
 
-    const now = new Date().toISOString();
-    const feeBreakdown = extractProviderFeeBreakdown(providerCapture, order.currency);
-
-    let mappedStatus: ServerPaymentStatus = 'Pending';
-    let verifiedByServer = false;
-    let retryAllowed = false;
-
-    switch (providerCapture.providerStatus) {
-      case 'COMPLETED':
-        mappedStatus = 'Captured';
-        verifiedByServer = true;
-        retryAllowed = false;
-        break;
-      case 'PENDING':
-        mappedStatus = 'Pending';
-        verifiedByServer = false;
-        retryAllowed = true;
-        break;
-      case 'DECLINED':
-        mappedStatus = 'Failed';
-        verifiedByServer = false;
-        retryAllowed = true;
-        break;
-      case 'CANCELLED':
-        mappedStatus = 'Cancelled';
-        verifiedByServer = false;
-        retryAllowed = false;
-        break;
-      case 'TIMEOUT':
-        mappedStatus = 'Pending';
-        verifiedByServer = false;
-        retryAllowed = true;
-        break;
+    // 6. Enforce single-use guest token consumption
+    if (order.isGuestCheckout && order.guestTokenUsed) {
+      const err = new Error('GUEST_TOKEN_REUSED: Guest capture token has already been used and is invalidated.');
+      (err as any).code = 'GUEST_TOKEN_REUSED';
+      (err as any).statusCode = 403;
+      throw err;
     }
 
-    order.paymentStatus = mappedStatus;
-    order.verifiedByServer = verifiedByServer;
-    order.captureIdempotencyKey = input.idempotencyKey;
-    order.paypalCaptureId = providerCapture.captureId;
-    order.paypalFeeMinor = feeBreakdown.paypalFeeMinor;
-    order.netPayoutMinor = feeBreakdown.netAmountMinor;
-    order.feesFromProvider = feeBreakdown.feesFromProvider;
-    order.failureReason = providerCapture.errorMessage;
-    if (order.isGuestCheckout) {
-      order.guestTokenUsed = true;
-    }
-    order.updatedAt = now;
-
-    // Transition escrow `created -> funded` ONLY when server verified COMPLETED capture
-    const events = this.escrowEventsByOrderId.get(order.id) || [];
-    if (mappedStatus === 'Captured' && verifiedByServer && order.escrowState === 'created') {
-      const transition = transitionEscrowState({
-        orderId: order.id,
-        currentState: order.escrowState,
-        nextState: 'funded',
-        actorId: 'system',
-        actorRole: 'system',
-        reason: `Server verified PayPal Sandbox capture (${providerCapture.captureId})`,
-        timestamp: now,
-      });
-      if (transition.ok && transition.event) {
-        order.escrowState = transition.nextState;
-        events.push(transition.event);
-        this.escrowEventsByOrderId.set(order.id, events);
+    // 7. Execute atomic capture
+    const captureExecution = async () => {
+      // Mark token used and lock capture in-progress
+      if (order.isGuestCheckout) {
+        order.guestTokenUsed = true;
       }
-    }
+      order.captureInProgress = true;
+      order.captureLockKey = input.idempotencyKey;
 
-    const payment: ServerPaymentRecord = {
-      id: `pay-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
-      orderId: order.id,
-      customerId: order.customerId,
-      sellerId: order.sellerId,
-      paypalOrderId: order.paypalOrderId,
-      paypalCaptureId: providerCapture.captureId,
-      intent: order.paypalIntent,
-      status: mappedStatus,
-      currency: order.currency,
-      grossMinor: order.totalMinor,
-      paypalFeeMinor: feeBreakdown.paypalFeeMinor,
-      netMinor: feeBreakdown.netAmountMinor,
-      feesFromProvider: feeBreakdown.feesFromProvider,
-      verifiedByServer,
-      providerRawStatus: providerCapture.providerStatus,
-      createdAt: now,
-      updatedAt: now,
+      try {
+        const providerCapture = await this.provider.captureOrder({
+          paypalOrderId: order.paypalOrderId,
+          idempotencyKey: input.idempotencyKey,
+          currency: order.currency,
+          expectedTotalMinor: order.totalMinor,
+          simulateOutcome: input.simulateOutcome,
+        });
+
+        // Strict validation of provider capture invariants:
+        if (providerCapture.providerStatus === 'COMPLETED') {
+          if (!providerCapture.captureId || typeof providerCapture.captureId !== 'string' || providerCapture.captureId.trim() === '') {
+            throw new Error('INVARIANT_VIOLATION: Provider marked capture COMPLETED without valid capture ID');
+          }
+          if (
+            this.orderIdByCaptureId.has(providerCapture.captureId) &&
+            this.orderIdByCaptureId.get(providerCapture.captureId) !== order.id
+          ) {
+            const err = new Error(
+              `PAYPAL_CAPTURE_REUSED: Capture ID '${providerCapture.captureId}' has already been credited to order '${this.orderIdByCaptureId.get(providerCapture.captureId)}'.`
+            );
+            (err as any).code = 'PAYPAL_CAPTURE_REUSED';
+            (err as any).statusCode = 409;
+            throw err;
+          }
+          if (providerCapture.capturedAmountMinor !== undefined && providerCapture.capturedAmountMinor !== order.totalMinor) {
+            throw new Error(
+              `INVARIANT_VIOLATION: Amount mismatch: Provider captured minor ${providerCapture.capturedAmountMinor}, expected ${order.totalMinor}`
+            );
+          }
+          if (providerCapture.capturedCurrency !== undefined && providerCapture.capturedCurrency !== order.currency) {
+            throw new Error(
+              `INVARIANT_VIOLATION: Currency mismatch: Provider captured ${providerCapture.capturedCurrency}, expected ${order.currency}`
+            );
+          }
+        }
+
+        const now = new Date().toISOString();
+        const feeBreakdown = extractProviderFeeBreakdown(providerCapture, order.currency);
+
+        let mappedStatus: ServerPaymentStatus = 'Pending';
+        let verifiedByServer = false;
+        let retryAllowed = false;
+
+        switch (providerCapture.providerStatus) {
+          case 'COMPLETED':
+            mappedStatus = 'Captured';
+            verifiedByServer = true;
+            retryAllowed = false;
+            break;
+          case 'PENDING':
+            mappedStatus = 'Pending';
+            verifiedByServer = false;
+            retryAllowed = true;
+            break;
+          case 'DECLINED':
+            mappedStatus = 'Failed';
+            verifiedByServer = false;
+            retryAllowed = true;
+            break;
+          case 'CANCELLED':
+            mappedStatus = 'Cancelled';
+            verifiedByServer = false;
+            retryAllowed = false;
+            break;
+          case 'TIMEOUT':
+            mappedStatus = 'Pending';
+            verifiedByServer = false;
+            retryAllowed = true;
+            break;
+        }
+
+        order.paymentStatus = mappedStatus;
+        order.verifiedByServer = verifiedByServer;
+        order.captureIdempotencyKey = input.idempotencyKey;
+        order.paypalCaptureId = providerCapture.captureId;
+        order.paypalFeeMinor = feeBreakdown.paypalFeeMinor;
+        order.netPayoutMinor = feeBreakdown.netAmountMinor;
+        order.feesFromProvider = feeBreakdown.feesFromProvider;
+        order.failureReason = providerCapture.errorMessage;
+        order.captureInProgress = false;
+        order.updatedAt = now;
+
+        if (mappedStatus === 'Captured' && verifiedByServer && providerCapture.captureId) {
+          this.orderIdByCaptureId.set(providerCapture.captureId, order.id);
+        }
+
+        // Transition escrow `created -> funded` ONLY when server verified COMPLETED capture
+        const events = this.escrowEventsByOrderId.get(order.id) || [];
+        if (mappedStatus === 'Captured' && verifiedByServer && order.escrowState === 'created') {
+          const transition = transitionEscrowState({
+            orderId: order.id,
+            currentState: order.escrowState,
+            nextState: 'funded',
+            actorId: 'system',
+            actorRole: 'system',
+            reason: `Server verified PayPal Sandbox capture (${providerCapture.captureId})`,
+            timestamp: now,
+          });
+          if (transition.ok && transition.event) {
+            order.escrowState = transition.nextState;
+            events.push(transition.event);
+            this.escrowEventsByOrderId.set(order.id, events);
+          }
+        }
+
+        const payment: ServerPaymentRecord = {
+          id: `pay-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
+          orderId: order.id,
+          customerId: order.customerId,
+          sellerId: order.sellerId,
+          paypalOrderId: order.paypalOrderId,
+          paypalCaptureId: providerCapture.captureId,
+          intent: order.paypalIntent,
+          status: mappedStatus,
+          currency: order.currency,
+          grossMinor: order.totalMinor,
+          paypalFeeMinor: feeBreakdown.paypalFeeMinor,
+          netMinor: feeBreakdown.netAmountMinor,
+          feesFromProvider: feeBreakdown.feesFromProvider,
+          verifiedByServer,
+          providerRawStatus: providerCapture.providerStatus,
+          isDemo: order.isDemo,
+          createdAt: now,
+          updatedAt: now,
+        };
+
+        this.paymentsById.set(payment.id, payment);
+
+        const captureResult = {
+          order,
+          payment,
+          escrowEvents: events,
+          idempotentReplay: false,
+          retryAllowed,
+        };
+
+        // Only lock idempotency key permanently for terminal/completed states
+        if (providerCapture.providerStatus === 'COMPLETED' || providerCapture.providerStatus === 'CANCELLED') {
+          this.captureResultByKey.set(input.idempotencyKey, captureResult);
+        }
+
+        return captureResult;
+      } catch (err: any) {
+        const now = new Date().toISOString();
+        order.paymentStatus = 'Failed';
+        order.verifiedByServer = false;
+        order.failureReason = err.message || 'Payment provider capture exception';
+        order.captureInProgress = false;
+        order.updatedAt = now;
+        throw err;
+      }
     };
 
-    this.paymentsById.set(payment.id, payment);
+    const promise = captureExecution();
+    this.activeCaptures.set(resolvedOrderId, { idempotencyKey: input.idempotencyKey, promise });
 
-    // Only lock idempotency key permanently for terminal/completed states; allow retry on TIMEOUT/DECLINED with new key
-    if (providerCapture.providerStatus === 'COMPLETED' || providerCapture.providerStatus === 'CANCELLED') {
-      this.captureResultByKey.set(input.idempotencyKey, {
-        order,
-        payment,
-        escrowEvents: events,
-        idempotentReplay: false,
-      });
+    try {
+      return await promise;
+    } finally {
+      this.activeCaptures.delete(resolvedOrderId);
     }
-
-    return {
-      order,
-      payment,
-      escrowEvents: events,
-      idempotentReplay: false,
-      retryAllowed,
-    };
   }
 
   /**
@@ -1006,10 +1287,34 @@ export class ServerPaymentLedger {
     return { order, escrowEvents, payments };
   }
 
+  hydrateOrderRecord(
+    order: ServerOrderRecord,
+    escrowEvents: EscrowEventRecord[] = [],
+    payments: ServerPaymentRecord[] = []
+  ): void {
+    this.ordersById.set(order.id, order);
+    if (order.paypalOrderId) this.orderIdByPaypalId.set(order.paypalOrderId, order.id);
+    if (order.createIdempotencyKey) this.orderIdByCreateKey.set(order.createIdempotencyKey, order.id);
+    if (order.paypalCaptureId) this.orderIdByCaptureId.set(order.paypalCaptureId, order.id);
+    if (!this.escrowEventsByOrderId.has(order.id)) {
+      this.escrowEventsByOrderId.set(order.id, escrowEvents);
+    }
+    for (const payment of payments) {
+      if (payment.id && !this.paymentsById.has(payment.id)) {
+        this.paymentsById.set(payment.id, payment);
+      }
+    }
+  }
+
   listOrdersForActor(actor: AuthenticatedActor): ServerOrderRecord[] {
-    const all = Array.from(this.ordersById.values()).sort(
+    const isProduction = process.env.NODE_ENV === 'production' && process.env.DEMO_MODE !== 'true';
+    let all = Array.from(this.ordersById.values()).sort(
       (a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()
     );
+
+    if (isProduction) {
+      all = all.filter((ord) => !ord.isDemo);
+    }
 
     return all.filter((ord) => {
       const decision = evaluateRoleAccess(actor, 'orders', 'read', {
@@ -1021,11 +1326,17 @@ export class ServerPaymentLedger {
   }
 
   listAllOrdersInternal(): ServerOrderRecord[] {
-    return Array.from(this.ordersById.values());
+    const isProduction = process.env.NODE_ENV === 'production' && process.env.DEMO_MODE !== 'true';
+    const all = Array.from(this.ordersById.values());
+    return isProduction ? all.filter((ord) => !ord.isDemo) : all;
   }
 
   listPaymentsForActor(actor: AuthenticatedActor): ServerPaymentRecord[] {
-    const all = Array.from(this.paymentsById.values());
+    const isProduction = process.env.NODE_ENV === 'production' && process.env.DEMO_MODE !== 'true';
+    let all = Array.from(this.paymentsById.values());
+    if (isProduction) {
+      all = all.filter((pay) => !pay.isDemo);
+    }
     return all.filter((pay) => {
       const decision = evaluateRoleAccess(actor, 'payments', 'read', {
         customerId: pay.customerId,

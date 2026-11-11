@@ -284,7 +284,7 @@ export const SmartCartScreen: React.FC<SmartCartScreenProps> = ({
                   const rankedMeta = optResult?.rankedItems.find((r) => r.sku === item.sku);
                   return (
                     <div
-                      key={item.sku}
+                      key={`${item.sku}-${idx}`}
                       className={`p-4 rounded-xl border transition-colors ${
                         item.selected
                           ? 'bg-surface-container-lowest border-surface-container-high'
@@ -391,9 +391,9 @@ export const SmartCartScreen: React.FC<SmartCartScreenProps> = ({
               </div>
 
               <div className="space-y-2.5">
-                {optResult.suggestedAlternatives.map((alt) => (
+                {optResult.suggestedAlternatives.map((alt, altIdx) => (
                   <div
-                    key={alt.alternativeSku}
+                    key={`${alt.replacesSku || 'alt'}-${alt.alternativeSku}-${altIdx}`}
                     className="p-3.5 rounded-xl bg-surface-container-lowest border border-surface-container-high flex flex-col sm:flex-row sm:items-center justify-between gap-3 text-xs"
                   >
                     <div className="space-y-1">

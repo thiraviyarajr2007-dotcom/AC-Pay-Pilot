@@ -172,8 +172,8 @@ export function calculateAuthoritativeOrderTotalsMinor(
 
   for (const reqItem of requestedItems) {
     const qty = Math.floor(reqItem.quantity);
-    if (qty <= 0) {
-      throw new Error(`Invalid quantity for SKU ${reqItem.sku}: must be a positive integer.`);
+    if (qty <= 0 || !Number.isSafeInteger(qty) || qty > 10000) {
+      throw new Error(`Invalid quantity for SKU ${reqItem.sku}: must be a positive integer between 1 and 10000.`);
     }
 
     const normalizedReqSku = reqItem.sku.replace(/^#/, '').trim().toLowerCase();
@@ -311,6 +311,7 @@ export interface DatedOrderRecord {
   totalMinor: number;
   escrowState: string;
   createdAtIso: string;
+  isDemo?: boolean;
 }
 
 export interface ExecutiveKpiReport {
@@ -331,20 +332,24 @@ export function computeExecutiveKpisForDateRange(
   records: DatedOrderRecord[],
   startIso: string,
   endIso: string,
-  currency: SupportedCurrency = 'INR'
+  currency: SupportedCurrency = 'INR',
+  options?: { includeDemo?: boolean }
 ): ExecutiveKpiReport {
+  const isDemoAllowed = options?.includeDemo ?? (process.env.DEMO_MODE === 'true' || process.env.NODE_ENV === 'test');
+  const eligibleRecords = isDemoAllowed ? records : records.filter((r) => !r.isDemo);
+
   const startMs = new Date(startIso).getTime();
   const endMs = new Date(endIso).getTime();
   const windowDurationMs = Math.max(1, endMs - startMs);
   const prevStartMs = startMs - windowDurationMs;
   const prevEndMs = startMs - 1;
 
-  const currentRecords = records.filter((r) => {
+  const currentRecords = eligibleRecords.filter((r) => {
     const t = new Date(r.createdAtIso).getTime();
     return t >= startMs && t <= endMs;
   });
 
-  const previousRecords = records.filter((r) => {
+  const previousRecords = eligibleRecords.filter((r) => {
     const t = new Date(r.createdAtIso).getTime();
     return t >= prevStartMs && t <= prevEndMs;
   });

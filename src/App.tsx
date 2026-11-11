@@ -13,32 +13,79 @@ import { Header } from './components/Header';
 import { RoleRouteGuard } from './components/RoleRouteGuard';
 import { ScreenDataSourceBanner } from './components/ScreenDataSourceBanner';
 import { useRole } from './context/RoleContext';
-import { DashboardScreen } from './components/screens/DashboardScreen';
-import { DiscoveryScreen } from './components/screens/DiscoveryScreen';
-import { SmartCartScreen } from './components/screens/SmartCartScreen';
-import { InvoiceIQScreen } from './components/screens/InvoiceIQScreen';
-import { ListingGeneratorScreen } from './components/screens/ListingGeneratorScreen';
-import { ProductDetailARScreen } from './components/screens/ProductDetailARScreen';
-import { ExecutiveScreen } from './components/screens/ExecutiveScreen';
-import { TransactionsScreen } from './components/screens/TransactionsScreen';
-import { ReconciliationScreen } from './components/screens/ReconciliationScreen';
-import { FinancialReportsScreen } from './components/screens/FinancialReportsScreen';
-import { SettingsScreen } from './components/screens/SettingsScreen';
-import { OrdersScreen, OrderRecord } from './components/screens/OrdersScreen';
-import { AssistantScreen } from './components/screens/AssistantScreen';
-import { CheckoutResultScreen, NotFoundScreen } from './components/screens/CheckoutResultScreen';
-import { HealthScreen } from './components/screens/HealthScreen';
-import { StorefrontBuilderScreen } from './components/screens/StorefrontBuilderScreen';
-import { CustomersScreen } from './components/screens/CustomersScreen';
-import { SellerCommandCenterScreen } from './components/screens/SellerCommandCenterScreen';
-import { CreativeStudioScreen } from './components/screens/CreativeStudioScreen';
-import { LoginScreen } from './components/screens/LoginScreen';
+import type { OrderRecord } from './components/screens/OrdersScreen';
+
+const DashboardScreen = React.lazy(() =>
+  import('./components/screens/DashboardScreen').then((m) => ({ default: m.DashboardScreen }))
+);
+const DiscoveryScreen = React.lazy(() =>
+  import('./components/screens/DiscoveryScreen').then((m) => ({ default: m.DiscoveryScreen }))
+);
+const SmartCartScreen = React.lazy(() =>
+  import('./components/screens/SmartCartScreen').then((m) => ({ default: m.SmartCartScreen }))
+);
+const InvoiceIQScreen = React.lazy(() =>
+  import('./components/screens/InvoiceIQScreen').then((m) => ({ default: m.InvoiceIQScreen }))
+);
+const ListingGeneratorScreen = React.lazy(() =>
+  import('./components/screens/ListingGeneratorScreen').then((m) => ({ default: m.ListingGeneratorScreen }))
+);
+const ProductDetailARScreen = React.lazy(() =>
+  import('./components/screens/ProductDetailARScreen').then((m) => ({ default: m.ProductDetailARScreen }))
+);
+const ExecutiveScreen = React.lazy(() =>
+  import('./components/screens/ExecutiveScreen').then((m) => ({ default: m.ExecutiveScreen }))
+);
+const TransactionsScreen = React.lazy(() =>
+  import('./components/screens/TransactionsScreen').then((m) => ({ default: m.TransactionsScreen }))
+);
+const ReconciliationScreen = React.lazy(() =>
+  import('./components/screens/ReconciliationScreen').then((m) => ({ default: m.ReconciliationScreen }))
+);
+const FinancialReportsScreen = React.lazy(() =>
+  import('./components/screens/FinancialReportsScreen').then((m) => ({ default: m.FinancialReportsScreen }))
+);
+const SettingsScreen = React.lazy(() =>
+  import('./components/screens/SettingsScreen').then((m) => ({ default: m.SettingsScreen }))
+);
+const OrdersScreen = React.lazy(() =>
+  import('./components/screens/OrdersScreen').then((m) => ({ default: m.OrdersScreen }))
+);
+const AssistantScreen = React.lazy(() =>
+  import('./components/screens/AssistantScreen').then((m) => ({ default: m.AssistantScreen }))
+);
+const CheckoutResultScreen = React.lazy(() =>
+  import('./components/screens/CheckoutResultScreen').then((m) => ({ default: m.CheckoutResultScreen }))
+);
+const NotFoundScreen = React.lazy(() =>
+  import('./components/screens/CheckoutResultScreen').then((m) => ({ default: m.NotFoundScreen }))
+);
+const HealthScreen = React.lazy(() =>
+  import('./components/screens/HealthScreen').then((m) => ({ default: m.HealthScreen }))
+);
+const StorefrontBuilderScreen = React.lazy(() =>
+  import('./components/screens/StorefrontBuilderScreen').then((m) => ({ default: m.StorefrontBuilderScreen }))
+);
+const CustomersScreen = React.lazy(() =>
+  import('./components/screens/CustomersScreen').then((m) => ({ default: m.CustomersScreen }))
+);
+const SellerCommandCenterScreen = React.lazy(() =>
+  import('./components/screens/SellerCommandCenterScreen').then((m) => ({ default: m.SellerCommandCenterScreen }))
+);
+const CreativeStudioScreen = React.lazy(() =>
+  import('./components/screens/CreativeStudioScreen').then((m) => ({ default: m.CreativeStudioScreen }))
+);
+const LoginScreen = React.lazy(() =>
+  import('./components/screens/LoginScreen').then((m) => ({ default: m.LoginScreen }))
+);
 const PublicStorefrontApp = React.lazy(() =>
   import('./components/storefront/PublicStorefrontApp').then((m) => ({
     default: m.PublicStorefrontApp,
   }))
 );
-import { OnboardingWizard } from './components/onboarding/OnboardingWizard';
+const OnboardingWizard = React.lazy(() =>
+  import('./components/onboarding/OnboardingWizard').then((m) => ({ default: m.OnboardingWizard }))
+);
 import {
   DEFAULT_BIZ_ID,
   emitOrderPlacedNotification,
@@ -46,13 +93,27 @@ import {
   subscribeStoreOrders,
 } from './services/storefrontService';
 import { StorefrontOrder } from './types/storefront';
-import { CopilotModal } from './components/modals/CopilotModal';
-import { FeeAuditModal } from './components/modals/FeeAuditModal';
-import { PayPalCheckoutModal } from './components/modals/PayPalCheckoutModal';
-import { QRModal } from './components/modals/QRModal';
-import { ARPreviewModal } from './components/modals/ARPreviewModal';
-import { AuthModal } from './components/modals/AuthModal';
-import { ProfileOnboardingModal } from './components/modals/ProfileOnboardingModal';
+const CopilotModal = React.lazy(() =>
+  import('./components/modals/CopilotModal').then((m) => ({ default: m.CopilotModal }))
+);
+const FeeAuditModal = React.lazy(() =>
+  import('./components/modals/FeeAuditModal').then((m) => ({ default: m.FeeAuditModal }))
+);
+const PayPalCheckoutModal = React.lazy(() =>
+  import('./components/modals/PayPalCheckoutModal').then((m) => ({ default: m.PayPalCheckoutModal }))
+);
+const QRModal = React.lazy(() =>
+  import('./components/modals/QRModal').then((m) => ({ default: m.QRModal }))
+);
+const ARPreviewModal = React.lazy(() =>
+  import('./components/modals/ARPreviewModal').then((m) => ({ default: m.ARPreviewModal }))
+);
+const AuthModal = React.lazy(() =>
+  import('./components/modals/AuthModal').then((m) => ({ default: m.AuthModal }))
+);
+const ProfileOnboardingModal = React.lazy(() =>
+  import('./components/modals/ProfileOnboardingModal').then((m) => ({ default: m.ProfileOnboardingModal }))
+);
 import { ScreenId, UserRole } from './types';
 import { CanonicalPaymentState } from './components/ui/HonestTrustComponents';
 import {
@@ -623,7 +684,7 @@ export default function App() {
   );
 
   return (
-    <div className="min-h-screen flex flex-col bg-surface text-on-surface font-body selection:bg-primary-fixed selection:text-on-primary-fixed">
+    <div className="min-h-screen flex flex-col bg-surface text-on-surface font-body selection:bg-primary-fixed selection:text-on-primary-fixed overflow-x-clip">
       <Header
         searchQuery={searchQuery}
         onSearchChange={setSearchQuery}
@@ -641,6 +702,13 @@ export default function App() {
         <main className="flex-1 min-w-0">
           <div className="p-3 sm:p-4 md:p-5 max-w-[1600px] mx-auto">
             <ScreenDataSourceBanner />
+            <React.Suspense
+              fallback={
+                <div className="flex items-center justify-center py-24">
+                  <div className="w-8 h-8 border-3 border-primary border-t-transparent rounded-full animate-spin" />
+                </div>
+              }
+            >
             <Routes>
             <Route path="/" element={<RoleHomeRedirect />} />
             <Route path="/login" element={<LoginScreen />} />
@@ -995,11 +1063,13 @@ export default function App() {
             {/* 404 Catch-all Route */}
             <Route path="*" element={<NotFoundScreen />} />
           </Routes>
+            </React.Suspense>
           </div>
         </main>
       </div>
 
       {/* URL-Synced Modals (?modal=copilot|fee-audit|checkout|qr|ar) */}
+      <React.Suspense fallback={null}>
       <CopilotModal
         isOpen={activeModal === 'copilot'}
         onClose={closeModalParam}
@@ -1084,6 +1154,8 @@ export default function App() {
         onClose={dismissProfileOnboarding}
         showToast={showToast}
       />
+
+      </React.Suspense>
 
       {/* Global Toast Notification */}
       {toastMessage && (

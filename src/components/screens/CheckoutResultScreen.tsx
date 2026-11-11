@@ -102,22 +102,55 @@ export const CheckoutResultScreen: React.FC<CheckoutResultScreenProps> = ({ stat
             Loading your order confirmation...
           </div>
         ) : error || !serverData ? (
-          <div className="space-y-4">
-            <PaymentStateBadge state="Failed" size="md" />
-            <h1 className="text-lg font-bold font-headline text-on-surface">
-              Order Details Unavailable
-            </h1>
-            <p className="text-xs text-secondary">
-              {error || 'We could not find a matching order record.'}
-            </p>
-            <button
-              type="button"
-              onClick={() => navigate('/customer/cart')}
-              className="py-2.5 px-4 rounded-xl bg-primary text-on-primary text-xs font-semibold cursor-pointer"
-            >
-              Return to SmartCart
-            </button>
-          </div>
+          status === 'cancel' ? (
+            <>
+              <PaymentStateBadge state="Cancelled" size="md" />
+              <div className="flex flex-col gap-1.5">
+                <span className="text-xs uppercase tracking-wider text-secondary font-bold">
+                  Checkout Cancelled
+                </span>
+                <h1 className="text-xl font-bold font-headline text-on-surface">
+                  No Payment Was Charged
+                </h1>
+                <p className="text-xs text-secondary">
+                  You cancelled the checkout session. Your cart items are still safely saved.
+                </p>
+              </div>
+              <div className="flex flex-col sm:flex-row gap-3 w-full pt-2">
+                <button
+                  type="button"
+                  onClick={() => navigate('/customer/cart')}
+                  className="flex-1 py-3 px-4 rounded-xl bg-primary text-on-primary text-xs font-semibold hover:bg-primary-container transition-colors cursor-pointer"
+                >
+                  Return to SmartCart
+                </button>
+                <button
+                  type="button"
+                  onClick={() => navigate('/customer/discover')}
+                  className="py-3 px-4 rounded-xl bg-surface-container-low text-on-surface text-xs font-semibold hover:bg-surface-container transition-colors cursor-pointer"
+                >
+                  Browse Products
+                </button>
+              </div>
+            </>
+          ) : (
+            <div className="space-y-4">
+              <PaymentStateBadge state="Failed" size="md" />
+              <h1 className="text-lg font-bold font-headline text-on-surface">
+                Order Details Unavailable
+              </h1>
+              <p className="text-xs text-secondary">
+                {error || 'We could not find a matching order record.'}
+              </p>
+              <button
+                type="button"
+                onClick={() => navigate('/customer/cart')}
+                className="py-2.5 px-4 rounded-xl bg-primary text-on-primary text-xs font-semibold cursor-pointer"
+              >
+                Return to SmartCart
+              </button>
+            </div>
+          )
         ) : status === 'success' ? (
           <>
             <PaymentStateBadge

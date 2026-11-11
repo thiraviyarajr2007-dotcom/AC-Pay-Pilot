@@ -103,10 +103,8 @@ export async function saveMerchantProfileToFirestore(
     await setDoc(
       userRef,
       {
-        uid: profile.uid,
         email: profile.email,
         displayName: profile.storeName,
-        role: profile.role,
         storeName: profile.storeName,
         gstin: profile.gstin,
         settlementAccount: profile.settlementAccount,

@@ -1,4 +1,6 @@
-import { initializeApp, getApps, App } from 'firebase-admin/app';
+import fs from 'node:fs';
+import crypto from 'node:crypto';
+import { cert, initializeApp, getApps, App } from 'firebase-admin/app';
 import { getAuth, Auth } from 'firebase-admin/auth';
 import { getFirestore, Firestore } from 'firebase-admin/firestore';
 import { Request } from 'express';
@@ -19,16 +21,83 @@ export const FIREBASE_PROJECT_ID = firebaseConfig.projectId; // "ai-studio-apple
 export const FIRESTORE_DATABASE_ID = firebaseConfig.firestoreDatabaseId; // "ai-studio-paypilotaiautono-5cf5c897-94de-4d92-83f5-3c2d5e3761dd"
 export const DEFAULT_BIZ_ID = 'biz-aerocool';
 
+const INLINE_SERVICE_ACCOUNT_ENV_VARS = [
+  'FIREBASE_SERVICE_ACCOUNT',
+  'FIREBASE_SERVICE_ACCOUNT_JSON',
+  'GOOGLE_APPLICATION_CREDENTIALS_JSON',
+] as const;
+
+function parseInlineServiceAccount(): Record<string, any> | null {
+  for (const envName of INLINE_SERVICE_ACCOUNT_ENV_VARS) {
+    const raw = process.env[envName];
+    if (!raw || raw.trim() === '') continue;
+    try {
+      const parsed = JSON.parse(raw);
+      if (parsed?.client_email && parsed?.private_key) {
+        return parsed;
+      }
+    } catch {
+      // Invalid JSON in one variable should not mask a valid later variable.
+    }
+  }
+  return null;
+}
+
+export function hasInlineServiceAccountCredentials(): boolean {
+  return Boolean(parseInlineServiceAccount());
+}
+
 let adminApp: App;
 let adminAuth: Auth;
 let adminDb: Firestore;
 
+export class PersistenceError extends Error {
+  code: string;
+  statusCode: number;
+  details?: any;
+  constructor(message: string, code = 'DURABLE_WRITE_FAILED', statusCode = 500, details?: any) {
+    super(message);
+    this.name = 'PersistenceError';
+    this.code = code;
+    this.statusCode = statusCode;
+    this.details = details;
+  }
+}
+
+let forceDurablePersistence = false;
+let simulatedFirestoreError: Error | null = null;
+
+export function setForceDurablePersistence(force: boolean) {
+  forceDurablePersistence = force;
+}
+
+export function setSimulatedFirestoreError(err: Error | null) {
+  simulatedFirestoreError = err;
+}
+
+export function isDurablePersistenceRequired(): boolean {
+  if (forceDurablePersistence) return true;
+  return process.env.NODE_ENV === 'production' && process.env.DEMO_MODE !== 'true';
+}
+
 export function getPersistenceMode(): 'firestore-admin' | 'memory-volatile' {
-  const hasGoogleCredentials =
-    Boolean(process.env.GOOGLE_APPLICATION_CREDENTIALS) ||
+  if (hasInlineServiceAccountCredentials()) {
+    return 'firestore-admin';
+  }
+  if (process.env.GOOGLE_APPLICATION_CREDENTIALS) {
+    try {
+      if (!fs.existsSync(process.env.GOOGLE_APPLICATION_CREDENTIALS)) {
+        return 'memory-volatile';
+      }
+    } catch {
+      return 'memory-volatile';
+    }
+    return 'firestore-admin';
+  }
+  const hasGcpService =
     Boolean(process.env.K_SERVICE) ||
     Boolean(process.env.GAE_SERVICE);
-  return hasGoogleCredentials ? 'firestore-admin' : 'memory-volatile';
+  return hasGcpService ? 'firestore-admin' : 'memory-volatile';
 }
 
 export function getAdminApp(): App {
@@ -37,26 +106,30 @@ export function getAdminApp(): App {
     if (existingApps.length > 0) {
       adminApp = existingApps[0];
     } else {
-      const hasGoogleCredentials =
-        Boolean(process.env.GOOGLE_APPLICATION_CREDENTIALS) ||
-        Boolean(process.env.K_SERVICE) ||
-        Boolean(process.env.GAE_SERVICE);
-
-      if (!hasGoogleCredentials) {
-        // Prevents unhandled GoogleAuth metadata probe crashes when running outside GCP without service account
+      const inlineCredential = parseInlineServiceAccount();
+      if (inlineCredential) {
         adminApp = initializeApp({
           projectId: FIREBASE_PROJECT_ID,
-          credential: {
-            getAccessToken: async () => ({
-              access_token: 'local-dev-fallback-token',
-              expires_in: 3600,
-            }),
-          },
+          credential: cert(inlineCredential),
         });
       } else {
-        adminApp = initializeApp({
-          projectId: FIREBASE_PROJECT_ID,
-        });
+        const mode = getPersistenceMode();
+        if (mode === 'memory-volatile') {
+          // Prevents unhandled GoogleAuth metadata probe crashes when running outside GCP without valid service account
+          adminApp = initializeApp({
+            projectId: FIREBASE_PROJECT_ID,
+            credential: {
+              getAccessToken: async () => ({
+                access_token: 'local-dev-fallback-token',
+                expires_in: 3600,
+              }),
+            },
+          });
+        } else {
+          adminApp = initializeApp({
+            projectId: FIREBASE_PROJECT_ID,
+          });
+        }
       }
     }
   }
@@ -127,11 +200,23 @@ export async function authenticateRequest(req: Request): Promise<AuthenticatedUs
           401
         );
       }
-      const parts = token.split('-');
-      // format: mock-token-{role}-{uid}-{bizId}
-      const role = (parts[2] as AppUserRole) || 'customer';
-      const uid = parts[3] || 'mock-user-1';
-      const bizId = parts[4] || DEFAULT_BIZ_ID;
+      let role: AppUserRole = 'customer';
+      let uid = 'mock-user-1';
+      let bizId = DEFAULT_BIZ_ID;
+
+      const match = token.match(
+        /^(?:mock|demo)-token-(customer|seller|finance|business_head)-(.*?)-(biz-[a-zA-Z0-9_-]+|[a-zA-Z0-9_]+)$/
+      );
+      if (match) {
+        role = match[1] as AppUserRole;
+        uid = match[2];
+        bizId = match[3];
+      } else {
+        const parts = token.split('-');
+        role = (parts[2] as AppUserRole) || 'customer';
+        uid = parts[3] || 'mock-user-1';
+        bizId = parts.slice(4).join('-') || DEFAULT_BIZ_ID;
+      }
       return {
         uid,
         email: `${uid}@paypilot.in`,
@@ -346,16 +431,13 @@ export async function getProductsForBiz(bizId: string): Promise<any[]> {
   }
 
   const localStore = getTenantStore(tenantProductsStore, bizId);
-  if (localStore.size > 0) {
-    return Array.from(localStore.values());
+  // Ensure default products are always available in local store alongside custom products
+  for (const item of SEED_STORE_PRODUCTS) {
+    if (!localStore.has(item.id)) {
+      localStore.set(item.id, { ...item, bizId });
+    }
   }
-
-  // Seed default items for bizId
-  const initial = SEED_STORE_PRODUCTS.map((p) => ({ ...p, bizId }));
-  for (const item of initial) {
-    localStore.set(item.id, item);
-  }
-  return initial;
+  return Array.from(localStore.values());
 }
 
 /**
@@ -393,7 +475,18 @@ export async function getProductBySkuForBiz(bizId: string, rawSku: string): Prom
  * Saves or updates a product in businesses/{bizId}/products/{productId}.
  */
 export async function saveProductForBiz(bizId: string, productData: any): Promise<any> {
-  const prodId = productData.id || `prod-${Date.now()}`;
+  const localStore = getTenantStore(tenantProductsStore, bizId);
+  let resolvedProdId = productData.id;
+  if (!resolvedProdId && productData.sku) {
+    const clean = productData.sku.replace(/^#/, '');
+    for (const [key, prod] of localStore.entries()) {
+      if (prod.sku?.replace(/^#/, '') === clean || prod.id === clean) {
+        resolvedProdId = key;
+        break;
+      }
+    }
+  }
+  const prodId = resolvedProdId || `prod-${Date.now()}`;
   const now = new Date().toISOString();
   const record = {
     ...productData,
@@ -403,9 +496,22 @@ export async function saveProductForBiz(bizId: string, productData: any): Promis
   };
   if (!record.createdAt) record.createdAt = now;
 
-  getTenantStore(tenantProductsStore, bizId).set(prodId, record);
+  // Deduplicate any stale entries with the same SKU under different keys in tenant store
+  if (productData.sku) {
+    const clean = productData.sku.replace(/^#/, '');
+    for (const [key, prod] of localStore.entries()) {
+      if ((prod.sku?.replace(/^#/, '') === clean || prod.id === clean) && key !== prodId) {
+        localStore.delete(key);
+      }
+    }
+  }
+
+  const durableRequired = isDurablePersistenceRequired();
 
   try {
+    if (simulatedFirestoreError && durableRequired) {
+      throw simulatedFirestoreError;
+    }
     const db = getAdminDb();
     await db
       .collection('businesses')
@@ -413,11 +519,20 @@ export async function saveProductForBiz(bizId: string, productData: any): Promis
       .collection('products')
       .doc(prodId)
       .set(record, { merge: true });
-  } catch (err) {
-    // Handled in tenant storage
-  }
 
-  return record;
+    getTenantStore(tenantProductsStore, bizId).set(prodId, record);
+    return record;
+  } catch (err: any) {
+    if (durableRequired) {
+      throw new PersistenceError(
+        `Durable product write failed for ${prodId}: ${err.message || 'Write failed'}`,
+        'DURABLE_WRITE_FAILED',
+        500
+      );
+    }
+    getTenantStore(tenantProductsStore, bizId).set(prodId, record);
+    return record;
+  }
 }
 
 /**
@@ -433,22 +548,36 @@ export async function deleteProductBySkuForBiz(bizId: string, rawSku: string): P
       break;
     }
   }
-  if (foundKey) {
-    localStore.delete(foundKey);
-  }
+
+  const durableRequired = isDurablePersistenceRequired();
 
   try {
+    if (simulatedFirestoreError && durableRequired) {
+      throw simulatedFirestoreError;
+    }
     const db = getAdminDb();
     const prodRef = db.collection('businesses').doc(bizId).collection('products');
     const snap = await prodRef.where('sku', 'in', [cleanSku, `#${cleanSku}`]).get();
     for (const doc of snap.docs) {
       await doc.ref.delete();
     }
-  } catch (err) {
-    // Admin SDK ADC
+    if (foundKey) {
+      localStore.delete(foundKey);
+    }
+    return Boolean(foundKey || !snap.empty);
+  } catch (err: any) {
+    if (durableRequired) {
+      throw new PersistenceError(
+        `Durable product deletion failed for ${cleanSku}: ${err.message || 'Delete failed'}`,
+        'DURABLE_WRITE_FAILED',
+        500
+      );
+    }
+    if (foundKey) {
+      localStore.delete(foundKey);
+    }
+    return Boolean(foundKey);
   }
-
-  return Boolean(foundKey);
 }
 
 /**
@@ -511,6 +640,7 @@ export async function getOrderByIdForBiz(bizId: string, orderIdOrPaypalId: strin
 
 /**
  * Saves or updates an order in businesses/{bizId}/orders/{orderId}.
+ * Fails closed in production if durable write fails.
  */
 export async function saveOrderForBiz(bizId: string, orderData: any): Promise<any> {
   const orderId = orderData.id || `ord-${Date.now()}`;
@@ -521,9 +651,12 @@ export async function saveOrderForBiz(bizId: string, orderData: any): Promise<an
     updatedAt: new Date().toISOString(),
   };
 
-  getTenantStore(tenantOrdersStore, bizId).set(orderId, record);
+  const durableRequired = isDurablePersistenceRequired();
 
   try {
+    if (simulatedFirestoreError && durableRequired) {
+      throw simulatedFirestoreError;
+    }
     const db = getAdminDb();
     await db
       .collection('businesses')
@@ -531,11 +664,20 @@ export async function saveOrderForBiz(bizId: string, orderData: any): Promise<an
       .collection('orders')
       .doc(orderId)
       .set(record, { merge: true });
-  } catch (err) {
-    // Handled in tenant storage
-  }
 
-  return record;
+    getTenantStore(tenantOrdersStore, bizId).set(orderId, record);
+    return record;
+  } catch (err: any) {
+    if (durableRequired) {
+      throw new PersistenceError(
+        `Durable Firestore order write failed for order ${orderId}: ${err.message || 'Write failed'}`,
+        'DURABLE_WRITE_FAILED',
+        500
+      );
+    }
+    getTenantStore(tenantOrdersStore, bizId).set(orderId, record);
+    return record;
+  }
 }
 
 /**
@@ -557,6 +699,7 @@ export async function getPaymentsForBiz(bizId: string): Promise<any[]> {
 
 /**
  * Saves a payment record in businesses/{bizId}/payments/{paymentId}.
+ * Fails closed in production if durable write fails.
  */
 export async function savePaymentForBiz(bizId: string, paymentData: any): Promise<any> {
   const paymentId = paymentData.id || `pay-${Date.now()}`;
@@ -567,9 +710,12 @@ export async function savePaymentForBiz(bizId: string, paymentData: any): Promis
     createdAt: paymentData.createdAt || new Date().toISOString(),
   };
 
-  getTenantStore(tenantPaymentsStore, bizId).set(paymentId, record);
+  const durableRequired = isDurablePersistenceRequired();
 
   try {
+    if (simulatedFirestoreError && durableRequired) {
+      throw simulatedFirestoreError;
+    }
     const db = getAdminDb();
     await db
       .collection('businesses')
@@ -577,15 +723,25 @@ export async function savePaymentForBiz(bizId: string, paymentData: any): Promis
       .collection('payments')
       .doc(paymentId)
       .set(record, { merge: true });
-  } catch (err) {
-    // Handled in tenant storage
-  }
 
-  return record;
+    getTenantStore(tenantPaymentsStore, bizId).set(paymentId, record);
+    return record;
+  } catch (err: any) {
+    if (durableRequired) {
+      throw new PersistenceError(
+        `Durable Firestore payment write failed for payment ${paymentId}: ${err.message || 'Write failed'}`,
+        'DURABLE_WRITE_FAILED',
+        500
+      );
+    }
+    getTenantStore(tenantPaymentsStore, bizId).set(paymentId, record);
+    return record;
+  }
 }
 
 /**
  * Records an escrow state transition event in businesses/{bizId}/escrowEvents/{eventId}.
+ * Fails closed in production if durable write fails.
  */
 export async function recordEscrowEventForBiz(bizId: string, eventData: any): Promise<any> {
   const eventId = eventData.id || `esc-evt-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`;
@@ -596,9 +752,12 @@ export async function recordEscrowEventForBiz(bizId: string, eventData: any): Pr
     timestamp: eventData.timestamp || new Date().toISOString(),
   };
 
-  getTenantStore(tenantEscrowEventsStore, bizId).set(eventId, record);
+  const durableRequired = isDurablePersistenceRequired();
 
   try {
+    if (simulatedFirestoreError && durableRequired) {
+      throw simulatedFirestoreError;
+    }
     const db = getAdminDb();
     await db
       .collection('businesses')
@@ -606,11 +765,20 @@ export async function recordEscrowEventForBiz(bizId: string, eventData: any): Pr
       .collection('escrowEvents')
       .doc(eventId)
       .set(record);
-  } catch (err) {
-    // Handled in tenant storage
-  }
 
-  return record;
+    getTenantStore(tenantEscrowEventsStore, bizId).set(eventId, record);
+    return record;
+  } catch (err: any) {
+    if (durableRequired) {
+      throw new PersistenceError(
+        `Durable Firestore escrow event write failed for ${eventId}: ${err.message || 'Write failed'}`,
+        'DURABLE_WRITE_FAILED',
+        500
+      );
+    }
+    getTenantStore(tenantEscrowEventsStore, bizId).set(eventId, record);
+    return record;
+  }
 }
 
 /**
@@ -685,16 +853,28 @@ export async function updateMerchantProfileForBiz(bizId: string, updateData: any
     ...updateData,
     updatedAt: now,
   };
-  tenantBizStore.set(bizId, updated);
+
+  const durableRequired = isDurablePersistenceRequired();
 
   try {
+    if (simulatedFirestoreError && durableRequired) {
+      throw simulatedFirestoreError;
+    }
     const db = getAdminDb();
     await db.collection('businesses').doc(bizId).set(updated, { merge: true });
-  } catch (err) {
-    // Handled
+    tenantBizStore.set(bizId, updated);
+    return updated;
+  } catch (err: any) {
+    if (durableRequired) {
+      throw new PersistenceError(
+        `Durable merchant profile update failed for ${bizId}: ${err.message || 'Write failed'}`,
+        'DURABLE_WRITE_FAILED',
+        500
+      );
+    }
+    tenantBizStore.set(bizId, updated);
+    return updated;
   }
-
-  return updated;
 }
 
 /**
@@ -712,21 +892,30 @@ export async function performFirestoreHealthCheck(): Promise<{
   const url = `https://firestore.googleapis.com/v1/projects/${FIREBASE_PROJECT_ID}/databases/${FIRESTORE_DATABASE_ID}/documents/_health/${testId}?key=${firebaseConfig.apiKey}`;
 
   try {
-    // 1. Live Firestore Write
-    const writeRes = await fetch(url, {
-      method: 'PATCH',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        fields: {
-          ping: { stringValue: 'pong' },
-          service: { stringValue: 'AC_PayPilot_API' },
-          timestamp: { stringValue: new Date().toISOString() },
-        },
-      }),
-    });
-    const writeData = (await writeRes.json()) as any;
-    if (!writeRes.ok || !writeData.fields?.ping) {
-      throw new Error(writeData.error?.message || 'Firestore write failed');
+    // 1. Live Firestore Write (with transient network retry)
+    let writeRes: Response | null = null;
+    for (let attempt = 0; attempt < 2; attempt++) {
+      try {
+        writeRes = await fetch(url, {
+          method: 'PATCH',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            fields: {
+              ping: { stringValue: 'pong' },
+              service: { stringValue: 'AC_PayPilot_API' },
+              timestamp: { stringValue: new Date().toISOString() },
+            },
+          }),
+        });
+        if (writeRes && writeRes.ok) break;
+      } catch (netErr: any) {
+        if (attempt === 1) throw netErr;
+        await new Promise((r) => setTimeout(r, 400));
+      }
+    }
+    const writeData = (await writeRes?.json().catch(() => ({}))) as any;
+    if (!writeRes?.ok || !writeData?.fields?.ping) {
+      throw new Error(writeData?.error?.message || 'Firestore write failed');
     }
 
     // 2. Live Firestore Read
@@ -779,14 +968,185 @@ export async function saveUserProfileToDb(uid: string, profileData: any): Promis
     uid,
     updatedAt: new Date().toISOString(),
   };
-  tenantUsersStore.set(uid, merged);
+
+  const durableRequired = isDurablePersistenceRequired();
+
+  try {
+    if (simulatedFirestoreError && durableRequired) {
+      throw simulatedFirestoreError;
+    }
+    const db = getAdminDb();
+    await db.collection('users').doc(uid).set(merged, { merge: true });
+    tenantUsersStore.set(uid, merged);
+    return merged;
+  } catch (err: any) {
+    if (durableRequired) {
+      throw new PersistenceError(
+        `Durable user profile write failed for ${uid}: ${err.message || 'Write failed'}`,
+        'DURABLE_WRITE_FAILED',
+        500
+      );
+    }
+    tenantUsersStore.set(uid, merged);
+    return merged;
+  }
+}
+
+// ============================================================================
+// Durable Webhook Deduplication & Event Store
+// ============================================================================
+
+const tenantWebhookStore = new Map<string, any>();
+
+export async function isWebhookEventProcessed(eventId: string): Promise<boolean> {
+  try {
+    const db = getAdminDb();
+    const doc = await db.collection('processedWebhooks').doc(eventId).get();
+    if (doc.exists) return true;
+  } catch {
+    // In local/demo mode, fall back to memory store
+  }
+  return tenantWebhookStore.has(eventId);
+}
+
+export async function recordWebhookEvent(eventId: string, eventData: any): Promise<void> {
+  const durableRequired = isDurablePersistenceRequired();
+
+  try {
+    if (simulatedFirestoreError && durableRequired) {
+      throw simulatedFirestoreError;
+    }
+    const db = getAdminDb();
+    await db.collection('processedWebhooks').doc(eventId).set({
+      eventId,
+      ...eventData,
+      processedAt: new Date().toISOString(),
+    });
+    tenantWebhookStore.set(eventId, eventData);
+  } catch (err: any) {
+    if (durableRequired) {
+      throw new PersistenceError(
+        `Failed to durably record webhook event ${eventId}: ${err.message || 'Write failed'}`,
+        'DURABLE_WRITE_FAILED',
+        500
+      );
+    }
+    tenantWebhookStore.set(eventId, eventData);
+  }
+}
+
+// ============================================================================
+// Durable Atomic Capture Lock & Guest Token Consumption
+// ============================================================================
+
+export async function atomicLockOrderForCapture(
+  bizId: string,
+  orderId: string,
+  idempotencyKey: string,
+  candidateGuestToken?: string
+): Promise<{ ok: boolean; order?: any; reason?: string; statusCode?: number; alreadyCaptured?: boolean }> {
+  const durableRequired = isDurablePersistenceRequired();
+
+  if (simulatedFirestoreError && durableRequired) {
+    throw simulatedFirestoreError;
+  }
 
   try {
     const db = getAdminDb();
-    await db.collection('users').doc(uid).set(merged, { merge: true });
-  } catch {
-    // volatile memory fallback
+    const orderRef = db.collection('businesses').doc(bizId).collection('orders').doc(orderId);
+
+    return await db.runTransaction(async (transaction) => {
+      const snap = await transaction.get(orderRef);
+      if (!snap.exists) {
+        return { ok: false, reason: `Order '${orderId}' was not found.`, statusCode: 404 };
+      }
+
+      const order = snap.data()!;
+
+      // If already captured, allow idempotent return
+      if (order.paymentStatus === 'Captured') {
+        return { ok: true, order, alreadyCaptured: true };
+      }
+
+      // If cancelled, reject capture immediately
+      if (order.paymentStatus === 'Cancelled') {
+        return { ok: false, reason: 'Cannot capture payment on an order that has been cancelled.', statusCode: 400 };
+      }
+
+      // If guest checkout, validate token
+      if (order.isGuestCheckout) {
+        if (!candidateGuestToken) {
+          return { ok: false, reason: 'Guest checkout requires a valid guest capture token.', statusCode: 401 };
+        }
+
+        if (order.guestTokenUsed) {
+          return { ok: false, reason: 'Guest capture token has already been used and is invalidated.', statusCode: 403 };
+        }
+
+        if (order.guestExpiresAt && new Date(order.guestExpiresAt).getTime() < Date.now()) {
+          return { ok: false, reason: 'Guest capture token has expired.', statusCode: 403 };
+        }
+
+        if (!order.guestCaptureTokenHash) {
+          return { ok: false, reason: 'Order has no guest capture token hash configured.', statusCode: 403 };
+        }
+
+        // Constant-time hash comparison
+        const candidateHash = crypto.createHash('sha256').update(candidateGuestToken.trim()).digest('hex');
+        const storedBuf = Buffer.from(order.guestCaptureTokenHash, 'hex');
+        const candidateBuf = Buffer.from(candidateHash, 'hex');
+
+        if (storedBuf.length !== candidateBuf.length || !crypto.timingSafeEqual(storedBuf, candidateBuf)) {
+          return { ok: false, reason: 'Invalid guest capture token for this order.', statusCode: 403 };
+        }
+      }
+
+      // Prevent concurrent duplicate capture with different idempotency key
+      if (order.captureInProgress && order.captureLockKey !== idempotencyKey) {
+        return {
+          ok: false,
+          reason: 'A capture operation is already in progress for this order with a different idempotency key.',
+          statusCode: 409,
+        };
+      }
+
+      // Atomically acquire capture lock
+      const updates: Record<string, any> = {
+        captureInProgress: true,
+        captureLockKey: idempotencyKey,
+        updatedAt: new Date().toISOString(),
+      };
+      if (order.isGuestCheckout) {
+        updates.guestTokenUsed = true;
+      }
+
+      transaction.update(orderRef, updates);
+
+      return {
+        ok: true,
+        order: { ...order, ...updates },
+      };
+    });
+  } catch (err: any) {
+    if (durableRequired) {
+      throw new PersistenceError(
+        `Atomic transaction failed for capture lock on order ${orderId}: ${err.message || 'Transaction error'}`,
+        'TRANSACTION_FAILED',
+        500
+      );
+    }
+
+    // In local/demo/test mode without durable DB: handled safely by in-memory ledger
+    return { ok: true };
   }
-  return merged;
+}
+
+export async function atomicConsumeGuestTokenAndLockOrder(
+  bizId: string,
+  orderId: string,
+  candidateToken: string,
+  idempotencyKey: string
+): Promise<{ ok: boolean; order?: any; reason?: string; statusCode?: number }> {
+  return atomicLockOrderForCapture(bizId, orderId, idempotencyKey, candidateToken);
 }
 

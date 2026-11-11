@@ -1,10 +1,10 @@
 # AC PayPilot — Test Execution Results & Verification Matrix
 
-**Execution Date:** 2026-10-28  
+**Execution Date:** 2026-10-29  
 **Environment:** Windows 11, Node.js v24.15.0, Vite 8.3.5, TypeScript 5.9.3, Express 4.21.2  
 **Test Framework:** Node.js native test runner (`node:test`) + Browser Subagent Automation + HTTP Integration  
-**Total Automated Regression Tests:** 60  
-**Passing Automated Tests:** 60 (100% Pass)  
+**Total Automated Regression Tests:** 79  
+**Passing Automated Tests:** 79 (100% Pass)  
 **Failing Automated Tests:** 0  
 **Live Provider API Checks:** 6 Verified Live  
 **Browser End-to-End Journeys:** 8 Verified with Video & Screenshots  
@@ -18,10 +18,11 @@
 Layer 1: Static Type Check (TypeScript 5.9.3) ──────────────> 100% PASS (0 Errors)
 Layer 2: Financial Math & Fail-Closed Invariants (Unit) ────> 100% PASS (17/17 Tests)
 Layer 3: Security, RBAC, Webhook, Dual-Auth & Persistence ──> 100% PASS (43/43 Tests)
-Layer 4: Real Live External Sandbox APIs (PayPal & Gemini) ──> 100% PASS (6 Live API Probes)
-Layer 5: Production Bundle (Vite Build) ─────────────────────> 100% PASS (dist/ in 9.05s)
-Layer 6: Browser End-to-End User Journeys ───────────────────> 100% PASS (8/8 Workflows)
-Layer 7: Physical Mobile Device Camera Hardware ─────────────> BLOCKED (Desktop Environment)
+Layer 4: Financial Integrity, Concurrency & ADC (Integ) ────> 100% PASS (19/19 Tests)
+Layer 5: Real Live External Sandbox APIs (PayPal & Gemini) ──> 100% PASS (6 Live API Probes)
+Layer 6: Production Bundle (Vite Build) ─────────────────────> 100% PASS (dist/ in 6.35s)
+Layer 7: Browser End-to-End User Journeys ───────────────────> 100% PASS (8/8 Workflows)
+Layer 8: Physical Mobile Device Camera Hardware ─────────────> BLOCKED (Desktop Environment)
 ```
 
 ---
@@ -107,6 +108,25 @@ Layer 7: Physical Mobile Device Camera Hardware ──────────�
 | **TC-075** | Startup config validator in production | Unit/Config | Missing env vars | `npm test` (`security...test.ts`) | Throws ConfigurationError listing each missing variable by name | ConfigurationError thrown with exact missing keys | **PASS** | `✔ CONFIG: validateStartupConfig in production... (2.4ms)` |
 | **TC-076** | Forbid test webhook bypass outside test | Unit/Config | `ALLOW_TEST_SIGNATURE_BYPASS` | `npm test` (`security...test.ts`) | Throws ConfigurationError on bypass outside `NODE_ENV=test` | Throws security violation error | **PASS** | `✔ CONFIG: validateStartupConfig forbids... (1.8ms)` |
 | **TC-077** | /api/health persistenceMode reporting | Integration | GET `/api/health` | `npm test` (`security...test.ts`) | Returns `persistenceMode: "firestore-admin" | "memory-volatile"` | HTTP 200 with persistenceMode | **PASS** | `✔ HEALTH: /api/health reports persistenceMode... (8.1ms)` |
+| **TC-078** | Single authoritative catalog calculation | Security Integ | Tampered client price | `npm test` (`financial...test.ts`) | Provider, order, and capture match authoritative catalog exactly | Client price ignored, matches catalog | **PASS** | `✔ P0 ORDER CALC: Server uses single... (4.78s)` |
+| **TC-079** | Idempotent create-order retry immutability | Security Integ | Same idempotency key | `npm test` (`financial...test.ts`) | Returns original order, pricing, and guest token without alteration | Idempotent replay preserved | **PASS** | `✔ P0 ORDER CALC: Idempotent create-order... (5.94s)` |
+| **TC-080** | Deliberate Firestore vs static catalog price override | Security Integ | Firestore catalog update | `npm test` (`financial...test.ts`) | Server authoritative calculation uses Firestore catalog over static fallback | Exact Firestore price used | **PASS** | `✔ P0 ORDER CALC: Deliberately different... (2.90s)` |
+| **TC-081** | Strict provider capture validation | Unit/Adapter | Malformed/mismatched captures | `npm test` (`financial...test.ts`) | Rejects missing object, ID, status, amount, currency, malformed value, mismatch | Invariant violations rejected | **PASS** | `✔ P0 STRICT CAPTURE: PayPal adapter rejects... (4.8ms)` |
+| **TC-082** | Production persistence fails closed | Unit/Storage | Simulated write errors | `npm test` (`financial...test.ts`) | Throws PersistenceError on product, order, payment, escrow event failure | Fails closed, no memory fallback | **PASS** | `✔ P0 PERSISTENCE: Production persistence fails... (1.7ms)` |
+| **TC-083** | Provider capture succeeded but DB write failed reconciliation | Security Integ | Capture success, DB failure | `npm test` (`financial...test.ts`) | Returns 502 PAYMENT_CAPTURED_RECONCILIATION_REQUIRED, never fails payment, holds escrow | Recoverable state produced | **PASS** | `✔ P0 RECONCILIATION: Provider capture succeeded... (3.97s)` |
+| **TC-084** | Read-after-write verification on durable Firestore storage | Unit/Storage | Saved product & order | `npm test` (`financial...test.ts`) | Field-by-field verification of saved product and order from database | Exact match read back | **PASS** | `✔ P0 PERSISTENCE: Read-after-write... (2.9ms)` |
+| **TC-085** | Server restart simulation across order lifecycle | Security Integ | Server restart simulation | `npm test` (`financial...test.ts`) | Orders and tokens persist across instances; capture succeeds against durable total | State preserved across restart | **PASS** | `✔ P0 PERSISTENCE: Server restart simulation... (3.61s)` |
+| **TC-086** | Invalid supplied Bearer token rejected with 401 | Security Integ | Invalid Bearer header | `npm test` (`financial...test.ts`) | Rejects with HTTP 401 instead of silent guest checkout fallback | HTTP 401 returned | **PASS** | `✔ P1 AUTH & GUEST: Invalid Bearer token... (11.5ms)` |
+| **TC-087** | Cryptographically secure guest UID entropy | Security Integ | Unauthenticated checkout | `npm test` (`financial...test.ts`) | Generates UID with 16 bytes (32 hex chars) of cryptographic randomness | High entropy UID generated | **PASS** | `✔ P1 GUEST ENTROPY: Guest UID is generated... (2.24s)` |
+| **TC-088** | Simultaneous captures with different idempotency keys | Concurrency | Concurrent capture calls | `npm test` (`financial...test.ts`) | One succeeds (200), conflicting concurrent call rejected with 409 conflict | Race condition blocked | **PASS** | `✔ P1 CONCURRENCY: Simultaneous captures... (2.40s)` |
+| **TC-089** | Ledger in-flight capture lock conflict | Unit/Ledger | In-flight promise overlap | `npm test` (`financial...test.ts`) | Throws CONCURRENT_CAPTURE_CONFLICT on in-flight race condition | Conflict exception thrown | **PASS** | `✔ P1 CONCURRENCY: ServerPaymentLedger throws... (2.53s)` |
+| **TC-090** | Simultaneous create-order calls with different keys | Concurrency | Parallel create calls | `npm test` (`financial...test.ts`) | Produces distinct non-colliding order IDs and tokens | Independent orders created | **PASS** | `✔ P1 CONCURRENCY: Simultaneous create-order... (3.05s)` |
+| **TC-091** | Replay of consumed guest capture token rejected | Security Integ | Reused guest token | `npm test` (`financial...test.ts`) | Rejects replay attempt with HTTP 403 GUEST_TOKEN_REUSED | HTTP 403 returned | **PASS** | `✔ P1 LIFECYCLE: Replay of consumed guest... (2.79s)` |
+| **TC-092** | Expired guest capture token rejected | Security Integ | Expired token (>2 hours) | `npm test` (`financial...test.ts`) | Rejects with HTTP 403 GUEST_TOKEN_EXPIRED | HTTP 403 returned | **PASS** | `✔ P1 LIFECYCLE: Expired guest capture token... (5.2ms)` |
+| **TC-093** | Production starts with 0 fabricated payment records | Unit/Isolation | NODE_ENV=production | `npm test` (`financial...test.ts`) | Ledger seeds 0 orders and 0 payments in production mode | Clean zero baseline in prod | **PASS** | `✔ P1 DEMO ISOLATION: Production starts with 0... (1.1ms)` |
+| **TC-094** | Seeded demo records isolated from production KPIs | Unit/Isolation | NODE_ENV=production | `npm test` (`financial...test.ts`) | Demo records strictly excluded from GMV and order counts in production | Demo data isolated | **PASS** | `✔ P1 DEMO ISOLATION: Seeded demo records do not... (1.5ms)` |
+| **TC-095** | Startup config rejects missing/nonexistent credentials | Unit/Config | Invalid file path | `npm test` (`financial...test.ts`) | Throws ConfigurationError listing GOOGLE_APPLICATION_CREDENTIALS | ConfigurationError thrown | **PASS** | `✔ P1 CONFIG: Production rejects missing or... (1.2ms)` |
+| **TC-096** | Startup config supports Google Cloud ADC | Unit/Config | K_SERVICE present | `npm test` (`financial...test.ts`) | Accepts Google Cloud ADC without requiring local JSON file path | Validated firestore-admin mode | **PASS** | `✔ P1 CONFIG: Production supports Google Cloud... (0.3ms)` |
 
 ---
 
