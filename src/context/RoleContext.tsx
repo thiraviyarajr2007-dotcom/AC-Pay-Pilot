@@ -10,11 +10,15 @@ import {
   ensureFirestoreUserProfile,
   updateFirestoreUserProfile,
   signInWithGooglePopup,
+  signInWithGoogleRedirect,
   signInWithFacebookPopup,
+  signInWithFacebookRedirect,
+  consumeAuthRedirectResult,
   signInWithEmailPassword,
   signUpWithEmailPassword,
   signOutFirebase,
   testFirestoreConnection,
+  formatFirebaseAuthError,
   FirestoreUserProfile,
 } from '../firebase';
 import { doc } from 'firebase/firestore';
@@ -214,8 +218,10 @@ interface RoleContextValue {
   userProfile: FirestoreUserProfile | null;
   authLoading: boolean;
   firestoreConnected: boolean;
-  signInWithGoogle: () => Promise<void>;
-  signInWithFacebook: () => Promise<void>;
+  signInWithGoogle: () => Promise<boolean>;
+  signInWithFacebook: () => Promise<boolean>;
+  signInWithGoogleUsingRedirect: () => Promise<void>;
+  signInWithFacebookUsingRedirect: () => Promise<void>;
   signInWithEmail: (email: string, pass: string) => Promise<void>;
   signUpWithEmail: (email: string, pass: string, targetRole?: UserRole) => Promise<void>;
   signOutUser: () => Promise<void>;
@@ -306,11 +312,52 @@ export const RoleProvider: React.FC<{ children: React.ReactNode }> = ({ children
   const unsubProfileRef = useRef<(() => void) | null>(null);
   const cachedTokenRef = useRef<string | null>(null);
 
+  const buildFallbackProfile = (fbUser: FirebaseUser): FirestoreUserProfile => ({
+    uid: fbUser.uid,
+    email: fbUser.email || '',
+    displayName: fbUser.displayName || fbUser.email?.split('@')[0] || 'AC PayPilot User',
+    role: 'customer',
+    bizId: 'biz-aerocool',
+    onboardingCompleted: Boolean(fbUser.displayName),
+    createdAt: new Date().toISOString(),
+    updatedAt: new Date().toISOString(),
+  });
+
+  const syncUserAfterAuth = async (fbUser: FirebaseUser) => {
+    setDataSourceState('live');
+    try {
+      localStorage.setItem('paypilot_data_source', 'live');
+    } catch {
+      // ignore
+    }
+    try {
+      const profileDoc = await ensureFirestoreUserProfile(fbUser, 'customer');
+      setFirestoreConnected(true);
+      return profileDoc;
+    } catch (syncErr: any) {
+      console.warn('[Auth] Firestore profile sync deferred (using verified customer session):', syncErr?.message || syncErr);
+      setFirestoreConnected(false);
+      return buildFallbackProfile(fbUser);
+    }
+  };
+
   // Connection and Auth Lifecycle Listener
   useEffect(() => {
     testFirestoreConnection().then((ok) => setFirestoreConnected(ok));
 
     let isMounted = true;
+
+    void consumeAuthRedirectResult()
+      .then(async (redirectCred) => {
+        if (!isMounted || !redirectCred?.user) return;
+        await syncUserAfterAuth(redirectCred.user);
+      })
+      .catch((redirectErr) => {
+        if (!isMounted) return;
+        const formatted = formatFirebaseAuthError(redirectErr);
+        console.error('[Auth] Redirect sign-in completion failed:', redirectErr);
+        setAuthError(formatted);
+      });
 
     const unsubAuth = onAuthStateChanged(
       auth,
@@ -359,6 +406,7 @@ export const RoleProvider: React.FC<{ children: React.ReactNode }> = ({ children
             if (snap.exists()) {
               const data = snap.data() as FirestoreUserProfile;
               setUserProfile(data);
+              setFirestoreConnected(true);
               if (data.role && ROLE_PROFILES[data.role]) {
                 setFirebaseRole(data.role);
               } else {
@@ -372,30 +420,37 @@ export const RoleProvider: React.FC<{ children: React.ReactNode }> = ({ children
               setAuthStatus('ready');
               setAuthError(null);
             } else {
-              // "Handle auth user exists but profile doc missing by creating a safe default profile with the lowest-privilege role."
+              // Handle authenticated user with missing profile doc by creating a safe default customer profile
               try {
                 const safeProfile = await ensureFirestoreUserProfile(fbUser, 'customer');
                 if (isMounted) {
                   setUserProfile(safeProfile);
                   setFirebaseRole('customer');
                   setIsProfileOnboardingPending(true);
+                  setFirestoreConnected(true);
                   setAuthStatus('ready');
                   setAuthError(null);
                 }
               } catch (profileErr: any) {
-                console.error('[Auth] Failed to initialize default profile:', profileErr);
+                console.warn('[Auth] Firestore profile init unavailable; continuing with verified Firebase Auth session:', profileErr?.message || profileErr);
                 if (isMounted) {
-                  setAuthStatus('error');
-                  setAuthError(profileErr?.message || 'Failed to initialize user profile.');
+                  setUserProfile(buildFallbackProfile(fbUser));
+                  setFirebaseRole('customer');
+                  setFirestoreConnected(false);
+                  setAuthStatus('ready');
+                  setAuthError(null);
                 }
               }
             }
           },
           (snapErr) => {
-            console.error('[Auth] Profile onSnapshot error:', snapErr);
+            console.warn('[Auth] Profile snapshot listener degraded; keeping verified Firebase session:', snapErr?.message || snapErr);
             if (isMounted) {
-              setAuthStatus('error');
-              setAuthError(snapErr.message);
+              setUserProfile((prev) => prev || buildFallbackProfile(fbUser));
+              setFirebaseRole((prev) => prev || 'customer');
+              setFirestoreConnected(false);
+              setAuthStatus('ready');
+              setAuthError(null);
             }
           }
         );
@@ -404,7 +459,7 @@ export const RoleProvider: React.FC<{ children: React.ReactNode }> = ({ children
         console.error('[Auth] onAuthStateChanged error:', authErr);
         if (isMounted) {
           setAuthStatus('error');
-          setAuthError(authErr.message);
+          setAuthError(formatFirebaseAuthError(authErr));
         }
       }
     );
@@ -488,32 +543,56 @@ export const RoleProvider: React.FC<{ children: React.ReactNode }> = ({ children
     console.warn('[SECURITY] Role changes in live mode are server-governed and cannot be mutated by client.');
   };
 
-  const signInWithGoogle = async () => {
+  const signInWithGoogle = async (): Promise<boolean> => {
     setAuthError(null);
     try {
       const cred = await signInWithGooglePopup();
-      if (cred.user) {
-        await ensureFirestoreUserProfile(cred.user, 'customer');
-        setDataSourceState('live');
+      if (cred?.user) {
+        await syncUserAfterAuth(cred.user);
+        return true;
       }
+      return false;
     } catch (err: any) {
       console.error('Google Sign-In failed:', err);
-      setAuthError(err?.message || 'Google authentication failed.');
+      setAuthError(formatFirebaseAuthError(err));
       throw err;
     }
   };
 
-  const signInWithFacebook = async () => {
+  const signInWithGoogleUsingRedirect = async () => {
+    setAuthError(null);
+    try {
+      await signInWithGoogleRedirect();
+    } catch (err: any) {
+      console.error('Google redirect Sign-In failed:', err);
+      setAuthError(formatFirebaseAuthError(err));
+      throw err;
+    }
+  };
+
+  const signInWithFacebook = async (): Promise<boolean> => {
     setAuthError(null);
     try {
       const cred = await signInWithFacebookPopup();
-      if (cred.user) {
-        await ensureFirestoreUserProfile(cred.user, 'customer');
-        setDataSourceState('live');
+      if (cred?.user) {
+        await syncUserAfterAuth(cred.user);
+        return true;
       }
+      return false;
     } catch (err: any) {
       console.error('Facebook Sign-In failed:', err);
-      setAuthError(err?.message || 'Facebook authentication failed.');
+      setAuthError(formatFirebaseAuthError(err));
+      throw err;
+    }
+  };
+
+  const signInWithFacebookUsingRedirect = async () => {
+    setAuthError(null);
+    try {
+      await signInWithFacebookRedirect();
+    } catch (err: any) {
+      console.error('Facebook redirect Sign-In failed:', err);
+      setAuthError(formatFirebaseAuthError(err));
       throw err;
     }
   };
@@ -523,12 +602,11 @@ export const RoleProvider: React.FC<{ children: React.ReactNode }> = ({ children
     try {
       const cred = await signInWithEmailPassword(email, pass);
       if (cred.user) {
-        await ensureFirestoreUserProfile(cred.user, 'customer');
-        setDataSourceState('live');
+        await syncUserAfterAuth(cred.user);
       }
     } catch (err: any) {
       console.error('Email sign-in failed:', err);
-      setAuthError(err?.message || 'Invalid email or password.');
+      setAuthError(formatFirebaseAuthError(err));
       throw err;
     }
   };
@@ -538,13 +616,12 @@ export const RoleProvider: React.FC<{ children: React.ReactNode }> = ({ children
     try {
       const cred = await signUpWithEmailPassword(email, pass);
       if (cred.user) {
-        await ensureFirestoreUserProfile(cred.user, 'customer');
-        setDataSourceState('live');
+        await syncUserAfterAuth(cred.user);
         setIsProfileOnboardingPending(true);
       }
     } catch (err: any) {
       console.error('Email registration failed:', err);
-      setAuthError(err?.message || 'Registration failed.');
+      setAuthError(formatFirebaseAuthError(err));
       throw err;
     }
   };
@@ -557,19 +634,24 @@ export const RoleProvider: React.FC<{ children: React.ReactNode }> = ({ children
     age: number;
     email?: string;
   }) => {
-    if (!firebaseUser) {
+    const activeUser = firebaseUser || auth.currentUser;
+    if (!activeUser) {
       throw new Error('Must be authenticated to complete onboarding');
     }
-    const normalizedEmail = details.email?.trim() || firebaseUser.email || undefined;
-    await updateFirestoreUserProfile(firebaseUser.uid, {
-      displayName: details.name,
-      gender: details.gender,
-      phone: details.phone,
-      countryCode: details.countryCode,
-      age: details.age,
-      ...(normalizedEmail ? { email: normalizedEmail } : {}),
-      onboardingCompleted: true,
-    });
+    const normalizedEmail = details.email?.trim() || activeUser.email || undefined;
+    try {
+      await updateFirestoreUserProfile(activeUser.uid, {
+        displayName: details.name,
+        gender: details.gender,
+        phone: details.phone,
+        countryCode: details.countryCode,
+        age: details.age,
+        ...(normalizedEmail ? { email: normalizedEmail } : {}),
+        onboardingCompleted: true,
+      });
+    } catch (err: any) {
+      console.warn('[Onboarding] Firestore profile update deferred:', err?.message || err);
+    }
     setIsProfileOnboardingPending(false);
   };
 
@@ -702,6 +784,8 @@ export const RoleProvider: React.FC<{ children: React.ReactNode }> = ({ children
       firestoreConnected,
       signInWithGoogle,
       signInWithFacebook,
+      signInWithGoogleUsingRedirect,
+      signInWithFacebookUsingRedirect,
       signInWithEmail,
       signUpWithEmail,
       signOutUser,

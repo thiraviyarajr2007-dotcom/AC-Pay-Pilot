@@ -250,8 +250,8 @@ import {
  */
 async function checkDatabaseHealth(): Promise<HealthCheckItem> {
   const result = await performFirestoreHealthCheck();
-  const projectId = FIREBASE_PROJECT_ID; // "ai-studio-applet-webapp-4bdcd"
-  const dbId = FIRESTORE_DATABASE_ID; // "ai-studio-paypilotaiautono-5cf5c897-94de-4d92-83f5-3c2d5e3761dd"
+  const projectId = FIREBASE_PROJECT_ID;
+  const dbId = FIRESTORE_DATABASE_ID;
 
   if (result.ok) {
     return {

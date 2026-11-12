@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import { useRole } from '../../context/RoleContext';
 import { UserRole } from '../../types';
+import { formatFirebaseAuthError } from '../../firebase';
 
 interface AuthModalProps {
   isOpen: boolean;
@@ -37,11 +38,13 @@ export const AuthModal: React.FC<AuthModalProps> = ({
     setIsLoading(true);
     setAuthError(null);
     try {
-      await signInWithGoogle();
-      showToast('Signed in with Google securely.');
-      onClose();
+      const signedIn = await signInWithGoogle();
+      if (signedIn) {
+        showToast('Signed in with Google securely.');
+        onClose();
+      }
     } catch (err: any) {
-      setAuthError(err?.message || 'Google sign in failed. Please try again.');
+      setAuthError(formatFirebaseAuthError(err));
     } finally {
       setIsLoading(false);
     }
@@ -51,11 +54,13 @@ export const AuthModal: React.FC<AuthModalProps> = ({
     setIsLoading(true);
     setAuthError(null);
     try {
-      await signInWithFacebook();
-      showToast('Signed in with Facebook securely.');
-      onClose();
+      const signedIn = await signInWithFacebook();
+      if (signedIn) {
+        showToast('Signed in with Facebook securely.');
+        onClose();
+      }
     } catch (err: any) {
-      setAuthError(err?.message || 'Facebook authentication failed. Please try again.');
+      setAuthError(formatFirebaseAuthError(err));
     } finally {
       setIsLoading(false);
     }
@@ -84,7 +89,7 @@ export const AuthModal: React.FC<AuthModalProps> = ({
       }
       onClose();
     } catch (err: any) {
-      setAuthError(err?.message || 'Authentication failed. Please verify credentials.');
+      setAuthError(formatFirebaseAuthError(err));
     } finally {
       setIsLoading(false);
     }

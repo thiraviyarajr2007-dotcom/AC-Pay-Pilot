@@ -2,6 +2,7 @@ import React, { useState } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import { useRole } from '../../context/RoleContext';
 import { UserRole } from '../../types';
+import { formatFirebaseAuthError } from '../../firebase';
 
 const COUNTRY_CODES = [
   { code: '+91', country: 'India', flag: '🇮🇳' },
@@ -23,10 +24,10 @@ export const LoginScreen: React.FC = () => {
   const {
     signInWithGoogle,
     signInWithFacebook,
+    signInWithGoogleUsingRedirect,
     signInWithEmail,
     signUpWithEmail,
     completeProfileOnboarding,
-    setRole,
     role,
     profile,
     firebaseUser,
@@ -91,10 +92,12 @@ export const LoginScreen: React.FC = () => {
     setIsLoading(true);
     setErrorMsg(null);
     try {
-      await signInWithGoogle();
-      navigate(safeRedirectTarget);
+      const signedIn = await signInWithGoogle();
+      if (signedIn) {
+        navigate(safeRedirectTarget);
+      }
     } catch (err: any) {
-      setErrorMsg(err?.message || 'Google sign in failed. Please try again.');
+      setErrorMsg(formatFirebaseAuthError(err));
     } finally {
       setIsLoading(false);
     }
@@ -104,10 +107,12 @@ export const LoginScreen: React.FC = () => {
     setIsLoading(true);
     setErrorMsg(null);
     try {
-      await signInWithFacebook();
-      navigate(safeRedirectTarget);
+      const signedIn = await signInWithFacebook();
+      if (signedIn) {
+        navigate(safeRedirectTarget);
+      }
     } catch (err: any) {
-      setErrorMsg(err?.message || 'Facebook sign in failed. Please try again.');
+      setErrorMsg(formatFirebaseAuthError(err));
     } finally {
       setIsLoading(false);
     }
@@ -157,7 +162,7 @@ export const LoginScreen: React.FC = () => {
         navigate(safeRedirectTarget);
       }, 500);
     } catch (err: any) {
-      setErrorMsg(err?.message || 'Authentication error. Please check your credentials.');
+      setErrorMsg(formatFirebaseAuthError(err));
     } finally {
       setIsLoading(false);
     }
@@ -297,9 +302,23 @@ export const LoginScreen: React.FC = () => {
 
           {/* Alerts */}
           {errorMsg && (
-            <div className="p-3 mb-4 rounded-xl bg-rose-500/10 border border-rose-500/30 text-rose-600 text-xs font-semibold flex items-center gap-2">
-              <span className="material-symbols-outlined text-[16px]">error</span>
-              <span>{errorMsg}</span>
+            <div
+              role="alert"
+              className="p-3 mb-4 rounded-xl bg-rose-500/10 border border-rose-500/30 text-rose-600 text-xs font-semibold flex flex-col gap-2"
+            >
+              <div className="flex items-start gap-2">
+                <span className="material-symbols-outlined text-[16px] shrink-0 mt-0.5">error</span>
+                <span>{errorMsg}</span>
+              </div>
+              {errorMsg.toLowerCase().includes('popup') && (
+                <button
+                  type="button"
+                  onClick={() => void signInWithGoogleUsingRedirect()}
+                  className="self-start text-[11px] font-bold underline hover:text-rose-700 cursor-pointer"
+                >
+                  Continue with Google using redirect instead
+                </button>
+              )}
             </div>
           )}
 

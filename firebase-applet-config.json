@@ -1,12 +1,12 @@
 {
-  "projectId": "ai-studio-applet-webapp-4bdcd",
-  "appId": "1:920798490531:web:0308268700ebe8a272f416",
-  "apiKey": "AIzaSyCSpwYnyZdR7KbhNDFJgDHDAZgVtt2Ma9c",
-  "authDomain": "ai-studio-applet-webapp-4bdcd.firebaseapp.com",
-  "firestoreDatabaseId": "ai-studio-paypilotaiautono-5cf5c897-94de-4d92-83f5-3c2d5e3761dd",
-  "storageBucket": "ai-studio-applet-webapp-4bdcd.firebasestorage.app",
-  "messagingSenderId": "920798490531",
-  "measurementId": "",
-  "oAuthClientId": "920798490531-6qfvj8juo7nontu7shig1av8ht7fs6qp.apps.googleusercontent.com",
+  "projectId": "acpaypilot",
+  "appId": "1:597988312570:web:d408abb64fdd4f1f2a9043",
+  "apiKey": "AIzaSyBeOk0Y2Kaqs4GqS6J5YqGHal5yQrK3gms",
+  "authDomain": "acpaypilot.firebaseapp.com",
+  "firestoreDatabaseId": "(default)",
+  "storageBucket": "acpaypilot.firebasestorage.app",
+  "messagingSenderId": "597988312570",
+  "measurementId": "G-E08TP6E1R0",
+  "oAuthClientId": "",
   "recaptchaSiteKey": ""
 }

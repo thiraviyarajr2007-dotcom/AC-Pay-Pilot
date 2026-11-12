@@ -16,9 +16,14 @@ export interface AuthenticatedUserActor {
   isDemo?: boolean;
 }
 
-// Canonical Firebase project and database identifiers from firebase-applet-config.json
-export const FIREBASE_PROJECT_ID = firebaseConfig.projectId; // "ai-studio-applet-webapp-4bdcd"
-export const FIRESTORE_DATABASE_ID = firebaseConfig.firestoreDatabaseId; // "ai-studio-paypilotaiautono-5cf5c897-94de-4d92-83f5-3c2d5e3761dd"
+// Canonical Firebase project and database identifiers from env overrides or firebase-applet-config.json
+export const FIREBASE_PROJECT_ID =
+  process.env.FIREBASE_PROJECT_ID || process.env.VITE_FIREBASE_PROJECT_ID || firebaseConfig.projectId;
+export const FIRESTORE_DATABASE_ID =
+  process.env.FIRESTORE_DATABASE_ID ||
+  process.env.VITE_FIREBASE_DATABASE_ID ||
+  firebaseConfig.firestoreDatabaseId ||
+  '(default)';
 export const DEFAULT_BIZ_ID = 'biz-aerocool';
 
 const INLINE_SERVICE_ACCOUNT_ENV_VARS = [
@@ -145,7 +150,10 @@ export function getAdminAuth(): Auth {
 
 export function getAdminDb(): Firestore {
   if (!adminDb) {
-    adminDb = getFirestore(getAdminApp(), FIRESTORE_DATABASE_ID);
+    adminDb =
+      FIRESTORE_DATABASE_ID && FIRESTORE_DATABASE_ID !== '(default)'
+        ? getFirestore(getAdminApp(), FIRESTORE_DATABASE_ID)
+        : getFirestore(getAdminApp());
   }
   return adminDb;
 }

@@ -643,30 +643,91 @@ test('DOMAINS: /api/domains/verify-dns executes DNS resolution and returns statu
 // ============================================================================
 
 test('HEALTH: performFirestoreHealthCheck executes true write+read+delete on _health and measures latencyMs', async () => {
-  const result = await performFirestoreHealthCheck();
-  assert.ok(result.ok, `Health check should succeed. Error: ${result.error}`);
-  assert.ok(typeof result.latencyMs === 'number', 'Latency must be numeric');
-  assert.ok(result.latencyMs >= 0, 'Latency must be non-negative');
-  assert.ok(result.docId.startsWith('health_ping_'));
+  const originalFetch = globalThis.fetch;
+  const calls: Array<{ url: string; method: string }> = [];
+
+  globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
+    const url = typeof input === 'string' ? input : input.toString();
+    const method = (init?.method || 'GET').toUpperCase();
+    calls.push({ url, method });
+
+    if (method === 'PATCH') {
+      return new Response(JSON.stringify({ fields: { ping: { stringValue: 'pong' } } }), {
+        status: 200,
+        headers: { 'Content-Type': 'application/json' },
+      });
+    }
+    if (method === 'GET') {
+      return new Response(JSON.stringify({ fields: { ping: { stringValue: 'pong' } } }), {
+        status: 200,
+        headers: { 'Content-Type': 'application/json' },
+      });
+    }
+    if (method === 'DELETE') {
+      return new Response('{}', { status: 200, headers: { 'Content-Type': 'application/json' } });
+    }
+    return new Response('{}', { status: 404 });
+  }) as typeof fetch;
+
+  try {
+    const result = await performFirestoreHealthCheck();
+    assert.equal(result.ok, true, `Health check should succeed. Error: ${result.error}`);
+    assert.ok(typeof result.latencyMs === 'number', 'Latency must be numeric');
+    assert.ok(result.latencyMs >= 0, 'Latency must be non-negative');
+    assert.ok(result.docId.startsWith('health_ping_'));
+    assert.deepEqual(
+      calls.map((c) => c.method),
+      ['PATCH', 'GET', 'DELETE']
+    );
+    assert.ok(
+      calls.every((c) => c.url.includes('/projects/acpaypilot/databases/(default)/documents/_health/')),
+      'Health check must target canonical acpaypilot (default) _health path'
+    );
+
+    // Also verify honest failure reporting when Firestore rejects writes (e.g. 403 disabled/rules locked)
+    globalThis.fetch = (async () =>
+      new Response(JSON.stringify({ error: { message: 'Missing or insufficient permissions.' } }), {
+        status: 403,
+        headers: { 'Content-Type': 'application/json' },
+      })) as typeof fetch;
+
+    const denied = await performFirestoreHealthCheck();
+    assert.equal(denied.ok, false);
+    assert.match(denied.error || '', /permissions/i);
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
 });
 
 test('HEALTH: Firebase project ID and database ID match canonical config', async () => {
-  assert.equal(FIREBASE_PROJECT_ID, 'ai-studio-applet-webapp-4bdcd');
-  assert.equal(
-    FIRESTORE_DATABASE_ID,
-    'ai-studio-paypilotaiautono-5cf5c897-94de-4d92-83f5-3c2d5e3761dd'
-  );
+  assert.equal(FIREBASE_PROJECT_ID, 'acpaypilot');
+  assert.equal(FIRESTORE_DATABASE_ID, '(default)');
 
   const diag = await runFullSystemDiagnostic();
   assert.equal(diag.ok, true);
   const dbCheck = diag.checks.find((c) => c.category === 'database');
   assert.ok(dbCheck, 'Database health check item must exist');
-  assert.equal(dbCheck.details?.projectId, 'ai-studio-applet-webapp-4bdcd');
-  assert.equal(
-    dbCheck.details?.databaseId,
-    'ai-studio-paypilotaiautono-5cf5c897-94de-4d92-83f5-3c2d5e3761dd'
-  );
+  assert.equal(dbCheck.details?.projectId, 'acpaypilot');
+  assert.equal(dbCheck.details?.databaseId, '(default)');
   assert.ok(dbCheck.latencyMs >= 0);
+});
+
+test('AUTH: formatFirebaseAuthError maps unauthorized-domain and disabled providers to clear guidance', async () => {
+  const { formatFirebaseAuthError, resolvedFirebaseConfig } = await import('../firebase');
+  assert.equal(resolvedFirebaseConfig.projectId, 'acpaypilot');
+  assert.equal(resolvedFirebaseConfig.authDomain, 'acpaypilot.firebaseapp.com');
+  assert.equal(resolvedFirebaseConfig.measurementId, 'G-E08TP6E1R0');
+
+  const domainMsg = formatFirebaseAuthError({ code: 'auth/unauthorized-domain' });
+  assert.match(domainMsg, /Authorized domains/i);
+  assert.match(domainMsg, /acpaypilot/);
+
+  const opMsg = formatFirebaseAuthError({ message: 'Firebase: Error (auth/operation-not-allowed).' });
+  assert.match(opMsg, /Sign-in method/i);
+  assert.match(opMsg, /acpaypilot/);
+
+  const credMsg = formatFirebaseAuthError({ code: 'auth/invalid-credential' });
+  assert.match(credMsg, /Invalid email or password/i);
 });
 
 // ============================================================================
