@@ -38,7 +38,7 @@ interface ServerCheckoutStatusResponse {
 export const CheckoutResultScreen: React.FC<CheckoutResultScreenProps> = ({ status }) => {
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
-  const { lastServerOrderId, getActorHeaders } = useRole();
+  const { lastServerOrderId, authFetch } = useRole();
 
   const lookupId = searchParams.get('orderId') || lastServerOrderId || null;
 
@@ -58,14 +58,23 @@ export const CheckoutResultScreen: React.FC<CheckoutResultScreenProps> = ({ stat
       setLoading(true);
       setError(null);
       try {
-        const res = await fetch(
+        let guestToken = '';
+        try {
+          guestToken =
+            window.sessionStorage.getItem(`ac_paypilot_guest_token:${lookupId}`) || '';
+        } catch {
+          guestToken = '';
+        }
+        const res = await authFetch(
           `/api/orders/${encodeURIComponent(lookupId)}/checkout-status`,
-          { headers: getActorHeaders() }
+          guestToken ? { headers: { 'x-guest-capture-token': guestToken } } : undefined
         );
-        const data = (await res.json()) as ServerCheckoutStatusResponse & { error?: string };
+        const data = (await res.json().catch(() => null)) as
+          | (ServerCheckoutStatusResponse & { error?: string })
+          | null;
         if (!active) return;
-        if (!res.ok || !data.ok) {
-          setError(data.error || 'Could not load order details.');
+        if (!res.ok || !data?.ok) {
+          setError(data?.error || `Could not load order details (HTTP ${res.status}).`);
         } else {
           setServerData(data.order);
         }
@@ -80,7 +89,7 @@ export const CheckoutResultScreen: React.FC<CheckoutResultScreenProps> = ({ stat
     return () => {
       active = false;
     };
-  }, [lookupId]);
+  }, [lookupId, authFetch]);
 
   const subtotalMajor = serverData ? fromMinorUnits(serverData.subtotalMinor) : 0;
   const taxMajor = serverData ? fromMinorUnits(serverData.taxMinor) : 0;

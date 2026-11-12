@@ -61,78 +61,94 @@ export const ExecutiveScreen: React.FC<ExecutiveScreenProps> = ({
   onSelectPersona,
   showToast,
 }) => {
-  const { setRole, feesVerified, setFeesVerified, getActorHeaders } = useRole();
+  const { setRole, feesVerified, setFeesVerified, authFetch } = useRole();
   const [matrixState, setMatrixState] = useState<CollectionViewState>('ready');
 
   const [dateRange, setDateRange] = useState<'7d' | '30d' | '90d' | 'all'>('30d');
   const [includeComparisonWindow, setIncludeComparisonWindow] = useState<boolean>(false);
   const [serverKpis, setServerKpis] = useState<ServerKpiResponse | null>(null);
   const [loadingKpis, setLoadingKpis] = useState<boolean>(false);
+  const [kpiError, setKpiError] = useState<string | null>(null);
   const [execInsights, setExecInsights] = useState<ExecutiveInsightsResponse | null>(null);
   const [loadingInsights, setLoadingInsights] = useState<boolean>(false);
+  const [insightsError, setInsightsError] = useState<string | null>(null);
 
   const fetchExecutiveInsights = async (range: '7d' | '30d' | '90d' | 'all') => {
     setLoadingInsights(true);
+    setInsightsError(null);
     try {
-      const res = await fetch('/api/executive/insights', {
+      const res = await authFetch('/api/executive/insights', {
         method: 'POST',
-        headers: getActorHeaders(),
         body: JSON.stringify({ dateRange: range }),
       });
-      const data = await res.json();
-      if (data.ok) {
+      const data = await res.json().catch(() => null);
+      if (res.ok && data?.ok) {
         setExecInsights(data);
+      } else {
+        setExecInsights(null);
+        setInsightsError(
+          data?.error || `Failed to load executive insights (HTTP ${res.status}).`
+        );
       }
     } catch {
-      // ignore
+      setExecInsights(null);
+      setInsightsError('Network error loading executive insights.');
     } finally {
       setLoadingInsights(false);
     }
   };
 
-  useEffect(() => {
-    let active = true;
-    const fetchKpis = async () => {
-      setLoadingKpis(true);
-      try {
-        const res = await fetch(
-          `/api/executive/kpis?dateRange=${dateRange}&hasComparison=${
-            includeComparisonWindow ? 'true' : 'false'
-          }`,
-          { headers: getActorHeaders() }
-        );
-        const data = (await res.json()) as ServerKpiResponse;
-        if (active && data.ok) {
-          setServerKpis(data);
-        }
-      } catch {
-        // fallback to default values if offline
-      } finally {
-        if (active) setLoadingKpis(false);
+  const fetchKpis = async (activeRef?: { active: boolean }) => {
+    setLoadingKpis(true);
+    setKpiError(null);
+    try {
+      const res = await authFetch(
+        `/api/executive/kpis?dateRange=${dateRange}&hasComparison=${
+          includeComparisonWindow ? 'true' : 'false'
+        }`
+      );
+      const data = (await res.json().catch(() => null)) as (ServerKpiResponse & { error?: string }) | null;
+      if (activeRef && !activeRef.active) return;
+      if (res.ok && data?.ok) {
+        setServerKpis(data);
+      } else {
+        setServerKpis(null);
+        setKpiError(data?.error || `Failed to load executive KPIs (HTTP ${res.status}).`);
       }
-    };
-    void fetchKpis();
+    } catch {
+      if (activeRef && !activeRef.active) return;
+      setServerKpis(null);
+      setKpiError('Network error loading executive KPIs.');
+    } finally {
+      if (!activeRef || activeRef.active) setLoadingKpis(false);
+    }
+  };
+
+  useEffect(() => {
+    const activeRef = { active: true };
+    void fetchKpis(activeRef);
     void fetchExecutiveInsights(dateRange);
     return () => {
-      active = false;
+      activeRef.active = false;
     };
-  }, [dateRange, includeComparisonWindow]);
+  }, [dateRange, includeComparisonWindow, authFetch]);
 
-  const gmvMajor = serverKpis ? fromMinorUnits(serverKpis.kpis.gmvMinor) : 339978;
-  const subtotalMajor = serverKpis ? fromMinorUnits(serverKpis.kpis.subtotalMinor) : 288117;
-  const taxMajor = serverKpis ? fromMinorUnits(serverKpis.kpis.taxMinor) : 51861;
-  const escrowMajor = serverKpis ? fromMinorUnits(serverKpis.kpis.authorizedEscrowMinor) : 14990;
+  const hasKpis = Boolean(serverKpis && !kpiError);
+  const gmvMajor = serverKpis ? fromMinorUnits(serverKpis.kpis.gmvMinor) : 0;
+  const subtotalMajor = serverKpis ? fromMinorUnits(serverKpis.kpis.subtotalMinor) : 0;
+  const taxMajor = serverKpis ? fromMinorUnits(serverKpis.kpis.taxMinor) : 0;
+  const escrowMajor = serverKpis ? fromMinorUnits(serverKpis.kpis.authorizedEscrowMinor) : 0;
   const providerFeesAvailable = Boolean(
     serverKpis?.kpis.feesFromProvider && serverKpis.kpis.verifiedPaypalFeeMinor !== null
   );
   const feeMajor =
     providerFeesAvailable && serverKpis?.kpis.verifiedPaypalFeeMinor != null
       ? fromMinorUnits(serverKpis.kpis.verifiedPaypalFeeMinor)
-      : 11877;
+      : 0;
   const netMajor =
     providerFeesAvailable && serverKpis?.kpis.verifiedNetPayoutMinor != null
       ? fromMinorUnits(serverKpis.kpis.verifiedNetPayoutMinor)
-      : gmvMajor - feeMajor;
+      : Math.max(0, gmvMajor - feeMajor);
 
   const handleJump = (targetRole: UserRole) => {
     setRole(targetRole);
@@ -218,6 +234,25 @@ export const ExecutiveScreen: React.FC<ExecutiveScreenProps> = ({
       </div>
 
       {/* 5-Card KPI Bento (Matches Image_13 / Image_14) */}
+      {kpiError && (
+        <div
+          role="alert"
+          data-testid="exec-kpi-error"
+          className="p-4 rounded-xl bg-error-container/30 border border-error/40 flex flex-wrap items-center justify-between gap-3"
+        >
+          <div className="text-xs text-on-surface">
+            <strong className="font-bold">KPI telemetry unavailable:</strong> {kpiError}
+          </div>
+          <button
+            type="button"
+            onClick={() => void fetchKpis()}
+            className="px-3 py-1.5 rounded-lg bg-primary text-on-primary text-xs font-semibold cursor-pointer"
+          >
+            Retry KPIs
+          </button>
+        </div>
+      )}
+
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-4">
         <div
           data-testid="exec-kpi-gmv"
@@ -227,10 +262,10 @@ export const ExecutiveScreen: React.FC<ExecutiveScreenProps> = ({
             Gross Volume ({dateRange})
           </span>
           <span className="text-xl font-bold font-headline text-on-surface font-tabular-nums mt-1 block">
-            {loadingKpis ? '...' : formatINR(gmvMajor)}
+            {loadingKpis ? '...' : hasKpis ? formatINR(gmvMajor) : '—'}
           </span>
           <span className="text-[11px] text-secondary mt-1 block">
-            {serverKpis?.comparisonNote || 'No comparison data'}
+            {serverKpis?.comparisonNote || (kpiError ? 'Server data unavailable' : 'No comparison data')}
           </span>
         </div>
 
@@ -242,7 +277,13 @@ export const ExecutiveScreen: React.FC<ExecutiveScreenProps> = ({
             Net Settled Payout
           </span>
           <span className="text-xl font-bold font-headline text-on-surface font-tabular-nums mt-1 block">
-            {providerFeesAvailable || feesVerified ? formatINR(netMajor) : 'Estimated'}
+            {loadingKpis
+              ? '...'
+              : !hasKpis
+              ? '—'
+              : providerFeesAvailable || feesVerified
+              ? formatINR(netMajor)
+              : 'Estimated'}
           </span>
           <span className="text-[11px] text-secondary mt-1 block">
             After PayPal fees
@@ -257,10 +298,18 @@ export const ExecutiveScreen: React.FC<ExecutiveScreenProps> = ({
             PayPal Fees
           </span>
           <span className="text-xl font-bold font-headline text-on-surface font-tabular-nums mt-1 block">
-            {providerFeesAvailable || feesVerified ? formatINR(feeMajor) : 'Not available'}
+            {loadingKpis
+              ? '...'
+              : !hasKpis
+              ? '—'
+              : providerFeesAvailable || feesVerified
+              ? formatINR(feeMajor)
+              : 'Not available'}
           </span>
           <span className="text-[11px] text-secondary mt-1 block">
-            {providerFeesAvailable || feesVerified ? 'From settlement records' : 'Pending settlement'}
+            {hasKpis && (providerFeesAvailable || feesVerified)
+              ? 'From settlement records'
+              : 'Pending settlement'}
           </span>
         </div>
 
@@ -272,7 +321,7 @@ export const ExecutiveScreen: React.FC<ExecutiveScreenProps> = ({
             Active Escrow Hold
           </span>
           <span className="text-xl font-bold font-headline text-primary font-tabular-nums mt-1 block">
-            {formatINR(escrowMajor)}
+            {loadingKpis ? '...' : hasKpis ? formatINR(escrowMajor) : '—'}
           </span>
           <span className="text-[11px] text-secondary mt-1 block">
             Awaiting delivery release
@@ -287,13 +336,34 @@ export const ExecutiveScreen: React.FC<ExecutiveScreenProps> = ({
             3D &amp; AR Conversion Lift
           </span>
           <span className="text-xl font-bold font-headline text-emerald-700 font-tabular-nums mt-1 block">
-            +41%
+            {loadingKpis ? '...' : hasKpis ? '+41%' : '—'}
           </span>
           <span className="text-[11px] text-secondary mt-1 block">
             On 3D-enabled products
           </span>
         </div>
       </div>
+
+      {/* Growth & Revenue Trajectory + AI Executive Synthesis (Matches Image_13 / Image_14) */}
+      {insightsError && !execInsights && (
+        <div
+          role="alert"
+          data-testid="exec-insights-error"
+          className="p-4 rounded-xl bg-surface-container-low border border-surface-container-high flex flex-wrap items-center justify-between gap-3"
+        >
+          <div className="text-xs text-secondary">
+            <strong className="text-on-surface">Executive synthesis unavailable:</strong>{' '}
+            {insightsError}
+          </div>
+          <button
+            type="button"
+            onClick={() => void fetchExecutiveInsights(dateRange)}
+            className="px-3 py-1.5 rounded-lg bg-primary text-on-primary text-xs font-semibold cursor-pointer"
+          >
+            Retry Insights
+          </button>
+        </div>
+      )}
 
       {/* Growth & Revenue Trajectory + AI Executive Synthesis (Matches Image_13 / Image_14) */}
       {execInsights && (

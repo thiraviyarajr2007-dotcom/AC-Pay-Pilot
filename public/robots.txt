@@ -1,0 +1,13 @@
+User-agent: *
+Allow: /
+Allow: /customer/discover
+Allow: /store/
+Allow: /s/
+Disallow: /api/
+Disallow: /health
+Disallow: /seller/
+Disallow: /finance/
+Disallow: /executive
+Disallow: /exec/
+
+Sitemap: https://acpaypilot.app/sitemap.xml

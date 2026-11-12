@@ -44,13 +44,14 @@ export const Header: React.FC<HeaderProps> = ({
   invoices,
   transactions,
   orders,
-  activeCartCount = 3,
+  activeCartCount = 0,
 }) => {
   const navigate = useNavigate();
   const location = useLocation();
   const {
     role,
     profile,
+    sessionPresentation,
     setRole,
     dataSource,
     setDataSource,
@@ -617,28 +618,52 @@ export const Header: React.FC<HeaderProps> = ({
           </div>
 
           {/* Active Persona Profile Pill */}
-          <div
-            onClick={() => navigate(role === 'customer' ? '/customer/orders' : '/settings')}
-            className="flex items-center gap-2 pl-1.5 sm:pl-2 border-l border-surface-container-high cursor-pointer group"
-            title={`Signed in as ${profile.userName} (${profile.label})`}
-          >
-            <div
-              className={`w-8 h-8 rounded-full font-bold text-xs flex items-center justify-center shadow-2xs transition-colors ${profile.accentChipClass}`}
+          {sessionPresentation === 'unauthenticated' ? (
+            <button
+              type="button"
+              onClick={() => navigate('/login')}
+              className="flex items-center gap-2 pl-1.5 sm:pl-2 border-l border-surface-container-high cursor-pointer group text-left"
+              title="Sign in or register an account"
             >
-              {profile.avatarInitials}
-            </div>
-            <div className="hidden xl:flex flex-col text-left">
-              <span
-                data-testid="active-persona-name"
-                className="font-label-md text-xs font-semibold text-on-surface leading-none group-hover:text-primary transition-colors"
+              <div className="w-8 h-8 rounded-full font-bold text-xs flex items-center justify-center shadow-2xs bg-surface-container-high text-on-surface-variant">
+                <span className="material-symbols-outlined text-[16px]">person_outline</span>
+              </div>
+              <div className="hidden xl:flex flex-col text-left">
+                <span
+                  data-testid="active-persona-name"
+                  className="font-label-md text-xs font-semibold text-on-surface leading-none group-hover:text-primary transition-colors"
+                >
+                  Not Signed In
+                </span>
+                <span className="font-label-sm text-[10px] text-outline mt-0.5">
+                  Public Visitor
+                </span>
+              </div>
+            </button>
+          ) : (
+            <div
+              onClick={() => navigate(role === 'customer' ? '/customer/orders' : '/settings')}
+              className="flex items-center gap-2 pl-1.5 sm:pl-2 border-l border-surface-container-high cursor-pointer group"
+              title={`${sessionPresentation === 'demo' ? 'Demo Persona' : 'Signed in as'}: ${profile.userName} (${profile.label})`}
+            >
+              <div
+                className={`w-8 h-8 rounded-full font-bold text-xs flex items-center justify-center shadow-2xs transition-colors ${profile.accentChipClass}`}
               >
-                {profile.userName}
-              </span>
-              <span className="font-label-sm text-[10px] text-outline mt-0.5">
-                {profile.label}
-              </span>
+                {profile.avatarInitials}
+              </div>
+              <div className="hidden xl:flex flex-col text-left">
+                <span
+                  data-testid="active-persona-name"
+                  className="font-label-md text-xs font-semibold text-on-surface leading-none group-hover:text-primary transition-colors"
+                >
+                  {profile.userName}
+                </span>
+                <span className="font-label-sm text-[10px] text-outline mt-0.5">
+                  {profile.label}
+                </span>
+              </div>
             </div>
-          </div>
+          )}
         </div>
       </div>
 
@@ -871,19 +896,38 @@ export const Header: React.FC<HeaderProps> = ({
             />
           </div>
 
-          <div className="flex items-center justify-between p-2.5 rounded-xl bg-surface-container-low">
-            <div className="flex flex-col">
-              <span className="text-[10px] uppercase font-bold text-secondary">
-                Active Persona ({profile.label})
-              </span>
-              <span className="text-xs font-bold text-on-surface">{profile.userName}</span>
-            </div>
-            <span
-              className={`px-2.5 py-1 rounded-full text-[10px] font-bold ${profile.accentChipClass}`}
+          {sessionPresentation === 'unauthenticated' ? (
+            <button
+              type="button"
+              onClick={() => {
+                setMobileMenuOpen(false);
+                navigate('/login');
+              }}
+              className="w-full flex items-center justify-between p-2.5 rounded-xl bg-surface-container-low hover:bg-surface-container text-left cursor-pointer"
             >
-              {profile.accentChipLabel}
-            </span>
-          </div>
+              <div className="flex flex-col">
+                <span className="text-[10px] uppercase font-bold text-secondary">Account</span>
+                <span className="text-xs font-bold text-on-surface">Not Signed In</span>
+              </div>
+              <span className="px-2.5 py-1 rounded-full text-[10px] font-bold bg-blue-600 text-white">
+                Sign In
+              </span>
+            </button>
+          ) : (
+            <div className="flex items-center justify-between p-2.5 rounded-xl bg-surface-container-low">
+              <div className="flex flex-col">
+                <span className="text-[10px] uppercase font-bold text-secondary">
+                  Active Persona ({profile.label})
+                </span>
+                <span className="text-xs font-bold text-on-surface">{profile.userName}</span>
+              </div>
+              <span
+                className={`px-2.5 py-1 rounded-full text-[10px] font-bold ${profile.accentChipClass}`}
+              >
+                {profile.accentChipLabel}
+              </span>
+            </div>
+          )}
 
           <div className="grid grid-cols-2 gap-2 text-xs">
             <NavLink

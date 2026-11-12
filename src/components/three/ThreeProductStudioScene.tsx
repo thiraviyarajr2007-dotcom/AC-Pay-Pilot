@@ -486,6 +486,8 @@ export const ThreeProductStudioScene: React.FC<ThreeProductStudioSceneProps> = (
   const [spinSpeed, setSpinSpeed] = useState<number>(1.2);
   const [isFullscreen, setIsFullscreen] = useState<boolean>(false);
   const [dockCollapsed, setDockCollapsed] = useState<boolean>(false);
+  const [webglUnavailable, setWebglUnavailable] = useState<boolean>(false);
+  const [fallbackYaw, setFallbackYaw] = useState<number>(20);
 
   // Refs synced into the animation loop so React state changes don't remount the WebGL context
   const spinSpeedRef = useRef<number>(spinSpeed);
@@ -527,10 +529,21 @@ export const ThreeProductStudioScene: React.FC<ThreeProductStudioSceneProps> = (
     const camera = new THREE.PerspectiveCamera(42, width / height, 0.1, 100);
     camera.position.set(3.8, 2.8, 4.6);
 
-    const renderer = new THREE.WebGLRenderer({
-      antialias: !isSoftwareGl,
-      powerPreference: 'high-performance',
-    });
+    let renderer: THREE.WebGLRenderer;
+    try {
+      renderer = new THREE.WebGLRenderer({
+        antialias: !isSoftwareGl,
+        powerPreference: 'high-performance',
+      });
+      if (!renderer.getContext()) {
+        renderer.dispose();
+        throw new Error('WebGL context unavailable');
+      }
+    } catch (err) {
+      console.warn('[ThreeProductStudioScene] WebGL unavailable, switching to interactive fallback:', err);
+      setWebglUnavailable(true);
+      return;
+    }
     renderer.outputColorSpace = THREE.SRGBColorSpace;
     renderer.toneMapping = THREE.ACESFilmicToneMapping;
     renderer.toneMappingExposure = 1.12;
@@ -777,6 +790,38 @@ export const ThreeProductStudioScene: React.FC<ThreeProductStudioSceneProps> = (
     >
       {/* Stable WebGL Canvas Container outside React UI re-renders */}
       <div ref={mountRef} className="w-full h-full" />
+
+      {webglUnavailable && (
+        <div
+          data-testid="threejs-webgl-fallback"
+          onClick={() => setFallbackYaw((prev) => (prev + 45) % 360)}
+          role="region"
+          aria-label="Interactive 3D fallback preview"
+          className="absolute inset-0 flex flex-col items-center justify-center p-6 text-center bg-gradient-to-br from-slate-950 via-slate-900 to-slate-950 text-slate-100 cursor-pointer select-none"
+        >
+          <div
+            className="w-44 h-44 rounded-3xl border border-sky-400/40 bg-gradient-to-tr from-sky-500/20 via-indigo-500/20 to-emerald-400/20 shadow-2xl flex flex-col items-center justify-center transition-transform duration-500"
+            style={{
+              transform: `perspective(900px) rotateX(-14deg) rotateY(${fallbackYaw}deg) scale(${spinSpeed > 0 ? 1.04 : 1})`,
+              boxShadow:
+                lightingPreset === 'cyber-dusk'
+                  ? '0 20px 50px rgba(244, 63, 94, 0.25)'
+                  : lightingPreset === 'daylight-lab'
+                    ? '0 20px 50px rgba(147, 197, 253, 0.28)'
+                    : '0 20px 50px rgba(56, 189, 248, 0.25)',
+            }}
+          >
+            <span className="material-symbols-outlined text-[48px] text-sky-300">view_in_ar</span>
+            <span className="mt-2 text-xs font-mono uppercase tracking-wider text-sky-200">
+              {meta.partsCount}-Part Spatial Blueprint
+            </span>
+            <span className="mt-1 text-[11px] font-bold text-white px-2">{meta.title}</span>
+          </div>
+          <p className="mt-4 text-xs text-slate-300 max-w-md">
+            Hardware WebGL context is unavailable in this environment — interactive spatial fallback active (click card to rotate {fallbackYaw}°).
+          </p>
+        </div>
+      )}
 
       {/* Top-Left Minimal Model Readout */}
       <div className="absolute top-4 left-4 pointer-events-none select-none bg-slate-900/90 border border-slate-700/80 rounded-xl px-3.5 py-2.5 text-slate-100 max-w-xs">

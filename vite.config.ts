@@ -17,18 +17,51 @@ export default defineConfig(() => {
     },
     build: {
       chunkSizeWarningLimit: 600,
-      rollupOptions: {
+      rolldownOptions: {
         output: {
-          manualChunks(id) {
-            if (id.includes('node_modules/three')) {
-              return 'vendor-three';
-            }
-            if (id.includes('node_modules/lucide-react')) {
-              return 'vendor-lucide';
-            }
-            if (id.includes('node_modules/firebase/')) {
-              return 'vendor-firebase';
-            }
+          codeSplitting: {
+            groups: [
+              {
+                name: 'vendor-react',
+                priority: 50,
+                test: /[\\/]node_modules[\\/](react|react-dom|react-router|scheduler)[\\/]/,
+              },
+              {
+                name: 'vendor-firebase-firestore',
+                priority: 40,
+                test: /[\\/]node_modules[\\/](@firebase[\\/]firestore|firebase[\\/]firestore)/,
+              },
+              {
+                name: 'vendor-firebase-core',
+                priority: 35,
+                test: /[\\/]node_modules[\\/](firebase|@firebase)[\\/]/,
+              },
+              {
+                name: 'vendor-three',
+                priority: 30,
+                test: /[\\/]node_modules[\\/]three[\\/]/,
+              },
+              {
+                name: 'vendor-recharts',
+                priority: 30,
+                test: /[\\/]node_modules[\\/](recharts|d3)/,
+              },
+              {
+                name: 'vendor-ag-charts',
+                priority: 20,
+                test: /[\\/]node_modules[\\/]ag-charts-/,
+              },
+              {
+                name: 'vendor-ag-grid',
+                priority: 20,
+                test: /[\\/]node_modules[\\/]ag-grid-/,
+              },
+              {
+                name: 'vendor-ag-studio',
+                priority: 10,
+                test: /[\\/]node_modules[\\/](ag-studio|ag-stack)/,
+              },
+            ],
           },
         },
       },

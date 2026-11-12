@@ -1,77 +1,255 @@
-================================================================================
-AC PayPilot — Automated Test Suite Execution Evidence (npm test)
-Date: 2026-10-28
-Command: node node_modules/tsx/dist/cli.mjs --test src/utils/finance.test.ts src/test/securityAndSingleSource.test.ts
-Environment: Node.js (Windows), NODE_ENV=test, DEMO_MODE=off
-Result: 60 passed, 0 failed, 0 skipped, duration 80.05s
-================================================================================
+=== AC PayPilot Automated Test, Coverage & Firestore Rules Evidence ===
+Timestamp: 2026-11-12T11:19:38+05:30
+Commands: npm run test:coverage (103/103 PASS, 74.89% lines) + npm run test:rules (5/5 PASS)
+Exit Code: 0
 
-✔ AUTH: /api/products rejects spoofed x-actor headers with 401 when Authorization header is absent (3222.7542ms)
-✔ AUTH: /api/orders/:id/escrow-transition rejects spoofed x-actor headers with 401 (165.2801ms)
-✔ AUTH: /api/payments rejects spoofed x-actor headers with 401 (44.362ms)
-✔ AUTH: /api/merchants/profile rejects spoofed x-actor headers with 401 (59.929ms)
-✔ AUTH: Valid Bearer token succeeds and derives role and bizId correctly (57.0331ms)
-✔ AUTH: Role-based authorization rejects non-seller customer attempting product mutation with 403 (44.4253ms)
-✔ AUTH: /api/paypal/create-order forces authenticated UID and ignores forged customerId (3299.7475ms)
-✔ AUTH: /api/paypal/create-order generates unforgeable guest UID when unauthenticated (2019.3522ms)
-✔ PROVIDER FAIL-CLOSED: /api/paypal/create-order fails closed and rejects unsupported currency with 400 (2523.8758ms)
-✔ AUTH: /api/paypal/capture-order/:id rejects unauthenticated request with 401 (139.7609ms)
-✔ AUTH: /api/paypal/capture-order/:id rejects cross-user capture with 403 ROLE_ACCESS_DENIED (68.1117ms)
-✔ AUTH: /api/paypal/refund-order/:id rejects customer role attempting refund with 403 (61.1049ms)
-✔ AUTH: /api/orders/:id/escrow-transition rejects seller self-releasing escrow to released with 403 (71.7296ms)
-✔ SINGLE SOURCE: Products are persisted to and scoped by bizId (17.3594ms)
-✔ SINGLE SOURCE: Orders are scoped to bizId and customer role (12.5471ms)
-✔ PAYPAL: Webhook rejects unsigned requests with missing signature headers (229.2702ms)
-✔ PAYPAL: Webhook accepts valid signature headers and dedupes repeated event IDs (203.9277ms)
-✔ PAYPAL: Webhook rejects unknown order with 404 ORDER_NOT_FOUND (48.2975ms)
-✔ PAYPAL: Webhook rejects currency mismatch with 400 WEBHOOK_CURRENCY_MISMATCH (71.5117ms)
-✔ PAYPAL: Webhook rejects amount mismatch with 400 WEBHOOK_AMOUNT_MISMATCH (102.7287ms)
-✔ PAYPAL: Webhook safely ignores unsupported event types with 200 (38.5851ms)
-✔ PAYPAL: Webhook rejects forged/untrusted signature headers with 401 (34.4424ms)
-✔ PAYPAL: Webhook rejects non-PayPal cert URL with 401 (20.6816ms)
-✔ DOMAINS: /api/domains/check labels results as "estimate" and never returns isAvailable: true from static data (64.2776ms)
-✔ DOMAINS: /api/domains/verify-dns executes DNS resolution and returns status and expectedRecord (227.5174ms)
-✔ HEALTH: performFirestoreHealthCheck executes true write+read+delete on _health and measures latencyMs (1029.3661ms)
-✔ HEALTH: Firebase project ID and database ID match canonical config (1097.0306ms)
-✔ AUTH: /api/users/profile rejects self-escalation attempt with 400 VALIDATION_ERROR (39.5367ms)
-✔ AUTH: /api/users/profile accepts valid profile field update (86.0566ms)
-✔ AUTH: /api/users/profile returns 401 TOKEN_EXPIRED on expired ID token (11.5053ms)
-✔ AUTH: /api/users/profile returns 401 TOKEN_REVOKED on revoked ID token (23.29ms)
-✔ AUTH: updateFirestoreUserRole throws forbidden error on client role change attempt (5234.2105ms)
-✔ AUTH: ensureFirestoreUserProfile assigns lowest-privilege customer role idempotently (21.0935ms)
-✔ AUTH: authenticatedFetch auto-attaches headers and executes clean API request (1714.7001ms)
-✔ PAYMENTS: Guest create-order generates single-use guestCaptureToken (2645.8943ms)
-✔ PAYMENTS: Guest capture happy path succeeds with valid guestCaptureToken (2550.7875ms)
-✔ PAYMENTS: Guest capture rejected with 403 INVALID_GUEST_TOKEN on wrong token (2738.2794ms)
-✔ PAYMENTS: Reused guest capture token rejected with 403 GUEST_TOKEN_REUSED (2958.8621ms)
-✔ PAYMENTS: Expired guest capture token rejected with 403 GUEST_TOKEN_EXPIRED (2050.5578ms)
-✔ PAYMENTS: Token for Order A cannot capture Order B (403 INVALID_GUEST_TOKEN) (5185.7259ms)
-✔ CONFIG: validateStartupConfig in production throws ConfigurationError listing missing env vars (9.9162ms)
-✔ CONFIG: validateStartupConfig forbids test webhook bypass outside test environment (15.6844ms)
-✔ HEALTH: /api/health reports persistenceMode and system status (1457.4143ms)
-✔ Integer minor units conversion and formatting (INR paise & USD cents) (109.4007ms)
-✔ Server-grade invoice minor-unit math keeps invoiceStatus separate from paymentStatus (21.7108ms)
-✔ Cart and budget math in integer minor units detects headroom and over-budget accurately (1.1743ms)
-✔ Authoritative server order calculation uses stored catalog prices and rejects unknown SKUs (2.3865ms)
-✔ PayPal fee extraction shows fees ONLY when present in provider payload; otherwise "Not available" (3.1324ms)
-✔ Executive KPI calculation returns "No baseline" when comparison period has no data (1.5517ms)
-✔ Escrow state machine enforces created -> funded -> in_delivery -> released | disputed | refunded (1.885ms)
-✔ Server payment engine ignores tampered client total and enforces idempotent create & capture (23.026ms)
-✔ FAIL CLOSED: createPayPalSandboxAdapter throws in production mode when credentials missing (9.6062ms)
-✔ FAIL CLOSED: Capture invariant violations (currency & amount) fail closed and never fund escrow (6.428ms)
-✔ FAIL CLOSED: Provider outcomes PENDING, TIMEOUT, CANCELLED, and fee omission never claim verified capture (19.8554ms)
-✔ RBAC enforces customer, seller, finance, and business_head boundaries across collections (28.8806ms)
-✔ Deterministic GSTIN format check and Place-of-Supply (CGST/SGST vs IGST) validation (25.1029ms)
-✔ Binary glTF 2.0 (.glb) generator produces valid magic header and upload validator checks format/size (26.001ms)
-✔ Copilot tools enforce RBAC and Product Q&A returns "not provided" for unknown attributes (24.6368ms)
-✔ Legacy calculateInvoiceTotals and calculatePayPalFee remain backward-compatible (1.0239ms)
-✔ optimizeCartWithGemini validates SmartCartScreen payload, computes minor units, and respects alternatives (38.4698ms)
+--- PART 1: npm run test:coverage ---
 
-ℹ tests 60
+> ac-paypilot@0.0.0 test:coverage
+> node --experimental-test-coverage --test-concurrency=1 --test-coverage-lines=65 --test-coverage-branches=50 --test-coverage-functions=55 --test-coverage-exclude="src/test/**" --test-coverage-exclude="**/*.test.*" --import tsx --test src/utils/finance.test.ts src/test/securityAndSingleSource.test.ts src/test/financialIntegrityAndConcurrency.test.ts src/test/productionReadiness.test.ts src/test/auditHardening.test.ts
+
+✔ SEC-001: /api/orders/stream rejects unauthenticated and spoofed requests with 401 (5721.0585ms)
+✔ SEC-012: AI and multimodal endpoints enforce authentication, role restrictions, and public Q&A validation (245.4532ms)
+✔ SEC-013: Global security headers, X-Request-Id, Cache-Control, and CORS allowlist are enforced (9.3318ms)
+✔ SEC-015 & FE-007: Product CRUD & 3D asset upload enforce role, SKU existence, and valid prices (42.6595ms)
+✔ BE-03/04/05: /health/live stays 200, /health reports degraded fallback honestly, and system-check requires auth (20.7838ms)
+✔ FE-005 & SEC-005: Public storefront create-order resolves storeSlug authoritatively and blocks direct escrow bypass (1870.0255ms)
+✔ PERF-02, PERF-04 & QA-003: SEO files, Vercel cache headers, and all-chunk bundle budgets pass (431.2394ms)
+✔ BE-06 & FE-008: Public storefront projection includes sanitized contact object and GET /api/executive/kpis enforces RBAC (26.281ms)
+✔ P0 ORDER CALC: Server uses single authoritative catalog calculation; provider, order, and capture match exactly (3177.7336ms)
+✔ P0 ORDER CALC: Idempotent create-order retries return original order without altering pricing or token binding (753.2803ms)
+✔ P0 ORDER CALC: Deliberately different Firestore vs static catalog price overrides static catalog price (1396.2166ms)
+✔ P0 STRICT CAPTURE: PayPal adapter rejects missing, malformed, or mismatched capture evidence (5.8339ms)
+✔ P0 PERSISTENCE: Production persistence fails closed without falling back to memory storage (1.9635ms)
+[CRITICAL FINANCIAL RECONCILIATION] Provider capture succeeded but durable persistence failed. DO NOT report payment failed. {
+  orderId: 'ord-1794461497082-sy8e',
+  paypalCaptureId: 'CAP-COMPL-MWD41LDR',
+  error: 'Durable Firestore order write failed for order ord-1794461497082-sy8e: Firestore cluster unavailable during capture commit'
+}
+✔ P0 RECONCILIATION: Provider capture succeeded but DB write failed produces 502 PAYMENT_CAPTURED_RECONCILIATION_REQUIRED (915.5034ms)
+✔ P0 PERSISTENCE: Read-after-write verifies durable Firestore data integrity (3.0452ms)
+✔ P0 PERSISTENCE: Server restart simulation preserves orders and tokens across server lifecycle (742.2141ms)
+✔ P1 AUTH & GUEST: Invalid Bearer token is rejected with 401 instead of silent guest checkout (27.858ms)
+✔ P1 GUEST ENTROPY: Guest UID is generated with high cryptographic entropy (1425.6678ms)
+✔ P1 CONCURRENCY: Simultaneous captures with different idempotency keys are rejected with 409 conflict (818.0197ms)
+✔ P1 CONCURRENCY: ServerPaymentLedger throws CONCURRENT_CAPTURE_CONFLICT on in-flight race condition (1745.7291ms)
+✔ P1 CONCURRENCY: Simultaneous create-order calls with different idempotency keys create independent non-colliding orders (1634.9355ms)
+✔ P1 CONCURRENCY: Simultaneous in-flight create-order calls with IDENTICAL idempotency key resolve to exact same order (1546.8332ms)
+✔ P1 LIFECYCLE: Replay of consumed guest capture token rejected with 403 GUEST_TOKEN_REUSED (1358.3873ms)
+✔ P1 LIFECYCLE: Expired guest capture token rejected with 403 GUEST_TOKEN_EXPIRED (18.6762ms)
+✔ P1 DEMO ISOLATION: Production starts with 0 fabricated verified payment records (1.7477ms)
+✔ P1 DEMO ISOLATION: Seeded demo records do not contaminate production executive KPIs (2.1527ms)
+✔ P1 CONFIG: Production rejects missing or nonexistent GOOGLE_APPLICATION_CREDENTIALS file (2.4073ms)
+✔ P1 CONFIG: Production supports Google Cloud ADC without local credential file (1.0679ms)
+✔ SECURITY: Partial capture (final_capture: false) is rejected with PAYPAL_PARTIAL_CAPTURE_NOT_SUPPORTED (0.9913ms)
+✔ SECURITY: Excessive item quantity (>10000 units) is rejected by calculator (1.0673ms)
+✔ SECURITY: Capture of cancelled order is rejected with 400 ORDER_CANCELLED (5.1738ms)
+✔ SECURITY: Capture ID reuse across distinct orders is rejected with 409 PAYPAL_CAPTURE_REUSED (7.7667ms)
+✔ SECURITY: Cross-tenant escrow transition is rejected with 403 TENANT_ACCESS_DENIED (1343.3677ms)
+✔ SECURITY: Cross-customer escrow release is rejected with 403 ORDER_ACCESS_DENIED (11.2015ms)
+✔ SECURITY: Cross-tenant refund is rejected with 403 TENANT_ACCESS_DENIED (743.0488ms)
+✔ SECURITY: Refund of uncaptured order is rejected with 400 INVALID_REFUND_STATE (11.328ms)
+✔ SECURITY: Refund of already-released escrow order is rejected with 400 INVALID_STATE_TRANSITION (12.5869ms)
+✔ ACP-RUNTIME-002: resolveServerPort defaults to 3000, honors valid ports, and rejects invalid values (8964.723ms)
+✔ ACP-RUNTIME-002: Subprocess startup honors PORT=4173 and fails cleanly on invalid PORT (17886.5989ms)
+✔ ACP-OPS-007: /health/live stays 200 while /health/ready returns 503 in volatile production and 200 when configured (53.5861ms)
+✔ ACP-OPS-007: ALL durable mutation routes fail closed with 503 PERSISTENCE_UNAVAILABLE in volatile production mode (116.9922ms)
+✔ ACP-DEP-001: vercel.json and api/index.ts serverless handler serve API & health routes cleanly (41.2119ms)
+✔ ACP-PERF-008: Production build splits routes lazily so initial index chunk stays under 500 kB (3.2757ms)
+✔ AUTH: /api/products rejects spoofed x-actor headers with 401 when Authorization header is absent (744.7016ms)
+✔ AUTH: /api/orders/:id/escrow-transition rejects spoofed x-actor headers with 401 (72.3521ms)
+✔ AUTH: /api/payments rejects spoofed x-actor headers with 401 (8.057ms)
+✔ AUTH: /api/merchants/profile rejects spoofed x-actor headers with 401 (7.2451ms)
+✔ AUTH: Valid Bearer token succeeds and derives role and bizId correctly (12.0846ms)
+✔ AUTH: Role-based authorization rejects non-seller customer attempting product mutation with 403 (9.6376ms)
+✔ AUTH: /api/paypal/create-order forces authenticated UID and ignores forged customerId (2443.812ms)
+✔ AUTH: /api/paypal/create-order generates unforgeable guest UID when unauthenticated (737.5543ms)
+✔ PROVIDER FAIL-CLOSED: /api/paypal/create-order fails closed and rejects unsupported currency with 400 (857.4891ms)
+✔ AUTH: /api/paypal/capture-order/:id rejects unauthenticated request with 401 (8.9065ms)
+✔ AUTH: /api/paypal/capture-order/:id rejects cross-user capture with 403 ROLE_ACCESS_DENIED (8.507ms)
+✔ AUTH: /api/paypal/refund-order/:id rejects customer role attempting refund with 403 (6.663ms)
+✔ AUTH: /api/orders/:id/escrow-transition rejects seller self-releasing escrow to released with 403 (8.4258ms)
+✔ SINGLE SOURCE: Products are persisted to and scoped by bizId (1.7196ms)
+✔ SINGLE SOURCE: Orders are scoped to bizId and customer role (1.5354ms)
+✔ PAYPAL: Webhook rejects unsigned requests with missing signature headers (8.0844ms)
+✔ PAYPAL: Webhook accepts valid signature headers and dedupes repeated event IDs (16.2805ms)
+✔ PAYPAL: Webhook rejects unknown order with 404 ORDER_NOT_FOUND (6.9884ms)
+✔ PAYPAL: Webhook rejects currency mismatch with 400 WEBHOOK_CURRENCY_MISMATCH (6.8477ms)
+✔ PAYPAL: Webhook rejects amount mismatch with 400 WEBHOOK_AMOUNT_MISMATCH (8.2227ms)
+✔ PAYPAL: Webhook safely ignores unsupported event types with 200 (5.821ms)
+✔ PAYPAL: Webhook rejects forged/untrusted signature headers with 401 (7.7761ms)
+✔ PAYPAL: Webhook rejects non-PayPal cert URL with 401 (6.1269ms)
+✔ DOMAINS: /api/domains/check labels results as "estimate" and never returns isAvailable: true from static data (11.0421ms)
+✔ DOMAINS: /api/domains/verify-dns executes DNS resolution and returns status and expectedRecord (85.673ms)
+✔ HEALTH: performFirestoreHealthCheck executes true write+read+delete on _health and measures latencyMs (969.3211ms)
+✔ HEALTH: Firebase project ID and database ID match canonical config (935.8256ms)
+✔ AUTH: /api/users/profile rejects self-escalation attempt with 400 VALIDATION_ERROR (10.7309ms)
+✔ AUTH: /api/users/profile accepts valid profile field update (6.6863ms)
+✔ AUTH: /api/users/profile returns 401 TOKEN_EXPIRED on expired ID token (6.3076ms)
+[SECURITY] Blocked client attempt to modify user role. Roles are server-governed.
+✔ AUTH: /api/users/profile returns 401 TOKEN_REVOKED on revoked ID token (4.2216ms)
+✔ AUTH: updateFirestoreUserRole throws forbidden error on client role change attempt (382.1418ms)
+✔ AUTH: ensureFirestoreUserProfile assigns lowest-privilege customer role idempotently (1.9622ms)
+✔ AUTH: authenticatedFetch auto-attaches headers and executes clean API request (12.8055ms)
+✔ PAYMENTS: Guest create-order generates single-use guestCaptureToken (771.4969ms)
+✔ PAYMENTS: Guest capture happy path succeeds with valid guestCaptureToken (799.991ms)
+✔ PAYMENTS: Guest capture rejected with 403 INVALID_GUEST_TOKEN on wrong token (768.649ms)
+✔ PAYMENTS: Reused guest capture token rejected with 403 GUEST_TOKEN_REUSED (734.4807ms)
+✔ PAYMENTS: Expired guest capture token rejected with 403 GUEST_TOKEN_EXPIRED (681.1629ms)
+✔ PAYMENTS: Token for Order A cannot capture Order B (403 INVALID_GUEST_TOKEN) (1430.2823ms)
+✔ CONFIG: validateStartupConfig in production throws ConfigurationError listing missing env vars (2.1836ms)
+✔ CONFIG: validateStartupConfig forbids test webhook bypass outside test environment (1.3689ms)
+✔ HEALTH: /api/health reports persistenceMode and system status (7.0961ms)
+✔ Integer minor units conversion and formatting (INR paise & USD cents) (41.3553ms)
+✔ Server-grade invoice minor-unit math keeps invoiceStatus separate from paymentStatus (11.9624ms)
+✔ Cart and budget math in integer minor units detects headroom and over-budget accurately (0.9615ms)
+✔ Authoritative server order calculation uses stored catalog prices and rejects unknown SKUs (1.8452ms)
+✔ PayPal fee extraction shows fees ONLY when present in provider payload; otherwise "Not available" (1.3465ms)
+✔ Executive KPI calculation returns "No baseline" when comparison period has no data (1.0459ms)
+✔ Escrow state machine enforces created -> funded -> in_delivery -> released | disputed | refunded (1.1078ms)
+✔ Server payment engine ignores tampered client total and enforces idempotent create & capture (14.7236ms)
+✔ FAIL CLOSED: createPayPalSandboxAdapter throws in production mode when credentials missing (3.392ms)
+✔ FAIL CLOSED: Capture invariant violations (currency & amount) fail closed and never fund escrow (2.6994ms)
+✔ FAIL CLOSED: Provider outcomes PENDING, TIMEOUT, CANCELLED, and fee omission never claim verified capture (1.9545ms)
+✔ RBAC enforces customer, seller, finance, and business_head boundaries across collections (1.3947ms)
+✔ Deterministic GSTIN format check and Place-of-Supply (CGST/SGST vs IGST) validation (6.2778ms)
+✔ Binary glTF 2.0 (.glb) generator produces valid magic header and upload validator checks format/size (5.5354ms)
+✔ Copilot tools enforce RBAC and Product Q&A returns "not provided" for unknown attributes (6.4038ms)
+✔ Legacy calculateInvoiceTotals and calculatePayPalFee remain backward-compatible (0.675ms)
+✔ optimizeCartWithGemini validates SmartCartScreen payload, computes minor units, and respects alternatives (6.5556ms)
+ℹ tests 103
 ℹ suites 0
-ℹ pass 60
+ℹ pass 103
 ℹ fail 0
 ℹ cancelled 0
 ℹ skipped 0
 ℹ todo 0
-ℹ duration_ms 80046.8168
+ℹ duration_ms 89328.7795
+ℹ start of coverage report
+ℹ -----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+ℹ file                          | line % | branch % | funcs % | uncovered lines
+ℹ -----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+ℹ api                           |        |          |         | 
+ℹ  index.ts                     | 100.00 |   100.00 |  100.00 | 
+ℹ firebase-applet-config.json   | 100.00 |   100.00 |  100.00 | 
+ℹ scripts                       |        |          |         | 
+ℹ  check-bundle-budget.mjs      |  65.61 |    63.64 |  100.00 | 39-44 63 66-69 71-74 80-83 85-88 97-100 102-105 111-114 120 125-126 141-156
+ℹ server.ts                     |  70.16 |    49.46 |   63.54 | 7-12 115-125 146-151 178-197 201 203-206 299 301-302 311-312 363-365 371-383 389 392 408-424 469-473 527-529 554-556 579-588 592 595-600 640 648-663 666-710 712-772 775-790 795-798 800-816 818 820-824 842-843 864-868 873 876-878 888-904 907 915-916 922-923 927 934-938 947-948 964-965 967-969 987-999 1008-1039 1043-1061 1098-1099 1138 1141-1143 1156 1168-1169 1172-1175 1177-1194 1209-1210 1220 1223-1253 1266-1269 1279-1280 1285-1286 1297-1302 1309-1316 1324-1331 1345 1348-1365 1368-1375 1378-1382 1384-1392 1417 1419-1423 1434 1437-1442 1450-1452 1462 1467-1489 1492-1496 1498-1505 1507-1511 1516-1517 1520-1533 1536-1537 1541-1545 1552-1557 1564-1576 1579-1590 1598-1601 1605-1610 1613-1618 1624-1625 1632-1652 1658-1661 1664 1702-1729 1811-1815 1821-1836 1842-1846 1849 1851-1855 1857-1858 1860-1865 1870-1875 1901-1903 1933-1937 1947-1949 1954 1956 1976 1985-1987 1992-2014 2028-2036 2065 2067-2072 2074 2079-2080 2082-2086 2088-2092 2098-2102 2104-2125 2130-2132 2169-2170 2182 2199-2200 2205-2206 2214-2216 2245-2377 2390-2396 2400-2401 2403-2411 2415-2416 2418-2427 2434 2437-2447 2450-2459 2466-2474 2477-2487 2489 2491-2497 2502-2507 2510-2531 2537
+ℹ src                           |        |          |         | 
+ℹ  data                         |        |          |         | 
+ℹ   mockData.ts                 | 100.00 |   100.00 |  100.00 | 
+ℹ   templateDefaults.ts         | 100.00 |    80.00 |  100.00 | 
+ℹ  firebase.ts                  |  71.00 |    50.00 |   33.33 | 45-58 75-80 83 96-128 139-140 149-151 154-155 157 162-166
+ℹ  server                       |        |          |         | 
+ℹ   configValidator.ts          |  98.52 |    92.31 |  100.00 | 71-72
+ℹ   firebaseAdmin.ts            |  73.36 |    54.19 |   67.35 | 23 71-74 87-88 96-97 125-128 133-136 160-165 178-179 182 187-214 216-222 229-231 236-242 246-279 383 386-389 396-400 416-423 446 456-461 470 479-480 509-510 525-536 539-550 554-558 565-583 610 631-643 647 652-657 669 680-697 715 723-725 733-737 742-749 763-767 769-770 778-779 790 793 805-809 811-813 819-904 907-911
+ℹ   geminiService.ts            |  51.39 |    41.33 |   45.24 | 34-40 53 58-70 191-228 244-289 291-464 468-549 645 651-652 668-717 736-741 756-871 875-1010 1031-1033 1038-1043 1055-1058 1060-1083 1113 1116-1120 1125-1151 1153-1160 1176-1297 1299-1436 1440-1499
+ℹ   glbGenerator.ts             |  93.16 |    75.76 |   75.00 | 87 212-213 251 253-266 305 313 315-319 339-349 353-356
+ℹ   healthService.ts            |  81.77 |    29.27 |   84.62 | 20-31 34 41 61-71 91-109 119-128 161-171 199-200 232-234 255 259
+ℹ   paymentEngine.ts            |  88.90 |    77.25 |   73.17 | 239-241 255-258 293-296 306 308-317 347-370 372-376 378-401 406-409 411-453 599 602 626-630 646-647 660-661 665-666 760 768-775 783 794-798 820 822-824 834-835 858-863
+ℹ  services                     |        |          |         | 
+ℹ   apiClient.ts                |  63.86 |    33.33 |   66.67 | 13-30 32 34 37 39 42-49
+ℹ  utils                        |        |          |         | 
+ℹ   escrow.ts                   |  82.84 |    85.71 |   66.67 | 42-44 67-90 95-102
+ℹ   finance.ts                  |  88.66 |    69.41 |   77.50 | 18 75-76 167-172 320-330 342 359-360 363-364 366-371 374-385 387-399 402-410 414-422 426-439 474 478 482-484 526-527
+ℹ   rbac.ts                     |  77.62 |    63.16 |  100.00 | 11-12 35-37 39-41 51-54 71-72 90 92-95 98-103 107 110-120 122-131
+ℹ -----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+ℹ all files                     |  74.89 |    57.49 |   66.67 | 
+ℹ -----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+ℹ end of coverage report
+
+--- PART 2: npm run test:rules ---
+
+> ac-paypilot@0.0.0 test:rules
+> firebase emulators:exec --only firestore "node node_modules/tsx/dist/cli.mjs --test src/test/firestoreRules.emulator.test.ts"
+
+i  emulators: Starting emulators: firestore
+i  emulators: Detected demo project ID "demo-no-project", emulated services will use a demo configuration and attempts to access non-emulated services for this project will fail.
+!  firestore: The edition configured in your firebase.json#firestore and firebase.json#emulators.firestore do not match. The latter will be used to start up the Firestore emulator.
+i  firestore: Firestore Emulator logging to firestore-debug.log
++  firestore: Firestore Emulator was started in enterprise edition.
++  firestore: Firestore Emulator UI websocket is running on 9150.
+i  Running script: node node_modules/tsx/dist/cli.mjs --test src/test/firestoreRules.emulator.test.ts
+[2026-11-12T05:31:52.463Z]  @firebase/firestore: Firestore (13.2.0): GrpcConnection RPC 'Write' stream 0x15ebfb62 error. Code: 7 Message: 7 PERMISSION_DENIED: 
+false for 'create' @ L171, evaluation error at L179:24 for 'update' @ L179, false for 'create' @ L171
+[2026-11-12T05:31:52.539Z]  @firebase/firestore: Firestore (13.2.0): GrpcConnection RPC 'Write' stream 0x15ebfb63 error. Code: 7 Message: 7 PERMISSION_DENIED: 
+false for 'create' @ L171, evaluation error at L179:24 for 'update' @ L179, false for 'create' @ L171
+[2026-11-12T05:31:52.612Z]  @firebase/firestore: Firestore (13.2.0): GrpcConnection RPC 'Write' stream 0x15ebfb64 error. Code: 7 Message: 7 PERMISSION_DENIED: 
+false for 'create' @ L171, evaluation error at L179:24 for 'update' @ L179, false for 'create' @ L171
+[2026-11-12T05:31:52.688Z]  @firebase/firestore: Firestore (13.2.0): GrpcConnection RPC 'Write' stream 0x15ebfb65 error. Code: 7 Message: 7 PERMISSION_DENIED: 
+false for 'create' @ L171, evaluation error at L179:24 for 'update' @ L179, false for 'create' @ L171
+[2026-11-12T05:31:52.804Z]  @firebase/firestore: Firestore (13.2.0): GrpcConnection RPC 'Write' stream 0x15ebfb66 error. Code: 7 Message: 7 PERMISSION_DENIED: 
+false for 'create' @ L171, evaluation error at L179:24 for 'update' @ L179, false for 'create' @ L171
+[2026-11-12T05:31:53.065Z]  @firebase/firestore: Firestore (13.2.0): GrpcConnection RPC 'Write' stream 0x15ebfb67 error. Code: 7 Message: 7 PERMISSION_DENIED: 
+evaluation error at L179:24 for 'update' @ L179, false for 'update' @ L179
+[2026-11-12T05:31:53.121Z]  @firebase/firestore: Firestore (13.2.0): GrpcConnection RPC 'Write' stream 0x15ebfb68 error. Code: 7 Message: 7 PERMISSION_DENIED: 
+evaluation error at L179:24 for 'update' @ L179, false for 'update' @ L179
+[2026-11-12T05:31:53.222Z]  @firebase/firestore: Firestore (13.2.0): GrpcConnection RPC 'Write' stream 0x15ebfb69 error. Code: 7 Message: 7 PERMISSION_DENIED: 
+evaluation error at L179:24 for 'update' @ L179, false for 'update' @ L179
+[2026-11-12T05:31:53.371Z]  @firebase/firestore: Firestore (13.2.0): GrpcConnection RPC 'Write' stream 0x15ebfb6a error. Code: 7 Message: 7 PERMISSION_DENIED: 
+evaluation error at L179:24 for 'update' @ L179, false for 'update' @ L179
+[2026-11-12T05:31:53.434Z]  @firebase/firestore: Firestore (13.2.0): GrpcConnection RPC 'Write' stream 0x15ebfb6b error. Code: 7 Message: 7 PERMISSION_DENIED: 
+evaluation error at L179:24 for 'update' @ L179, false for 'update' @ L179
+[2026-11-12T05:31:53.483Z]  @firebase/firestore: Firestore (13.2.0): GrpcConnection RPC 'Write' stream 0x15ebfb6c error. Code: 7 Message: 7 PERMISSION_DENIED: 
+evaluation error at L179:24 for 'update' @ L179, false for 'update' @ L179
+[2026-11-12T05:31:53.560Z]  @firebase/firestore: Firestore (13.2.0): GrpcConnection RPC 'Write' stream 0x15ebfb6d error. Code: 7 Message: 7 PERMISSION_DENIED: 
+evaluation error at L179:24 for 'update' @ L179, false for 'update' @ L179
+[2026-11-12T05:31:53.593Z]  @firebase/firestore: Firestore (13.2.0): GrpcConnection RPC 'Write' stream 0x15ebfb6e error. Code: 7 Message: 7 PERMISSION_DENIED: 
+false for 'update' @ L179
+✔ ACP-SEC-003: Rejects self-escalation on user create & update, while allowing safe profile edits (9502.3535ms)
+[2026-11-12T05:31:54.047Z]  @firebase/firestore: Firestore (13.2.0): GrpcConnection RPC 'Write' stream 0x15ebfb70 error. Code: 7 Message: 7 PERMISSION_DENIED: 
+false for 'create' @ L131, false for 'update' @ L131
+[2026-11-12T05:31:54.136Z]  @firebase/firestore: Firestore (13.2.0): GrpcConnection RPC 'Write' stream 0x15ebfb71 error. Code: 7 Message: 7 PERMISSION_DENIED: 
+false for 'create' @ L131, false for 'update' @ L131
+[2026-11-12T05:31:54.205Z]  @firebase/firestore: Firestore (13.2.0): GrpcConnection RPC 'Write' stream 0x15ebfb72 error. Code: 7 Message: 7 PERMISSION_DENIED: 
+false for 'update' @ L131
+[2026-11-12T05:31:54.293Z]  @firebase/firestore: Firestore (13.2.0): GrpcConnection RPC 'Write' stream 0x15ebfb73 error. Code: 7 Message: 7 PERMISSION_DENIED: 
+false for 'delete' @ L131
+[2026-11-12T05:31:54.328Z]  @firebase/firestore: Firestore (13.2.0): GrpcConnection RPC 'Write' stream 0x15ebfb74 error. Code: 7 Message: 7 PERMISSION_DENIED: 
+false for 'create' @ L131, false for 'update' @ L131
+[2026-11-12T05:31:54.360Z]  @firebase/firestore: Firestore (13.2.0): GrpcConnection RPC 'Write' stream 0x15ebfb75 error. Code: 7 Message: 7 PERMISSION_DENIED: 
+false for 'create' @ L264, false for 'update' @ L264
+[2026-11-12T05:31:54.381Z]  @firebase/firestore: Firestore (13.2.0): GrpcConnection RPC 'Write' stream 0x15ebfb76 error. Code: 7 Message: 7 PERMISSION_DENIED: 
+false for 'update' @ L264
+✔ ACP-SEC-004: Denies unauthenticated and client-forged orders in both nested and top-level collections (785.7083ms)
+✔ ACP-SEC-005: Enforces cross-tenant read isolation and blocks customers from listing all business orders (2518.3771ms)
+[2026-11-12T05:31:57.232Z]  @firebase/firestore: Firestore (13.2.0): GrpcConnection RPC 'Write' stream 0x15ebfb7f error. Code: 7 Message: 7 PERMISSION_DENIED: 
+false for 'create' @ L346, false for 'update' @ L346
+[2026-11-12T05:31:57.257Z]  @firebase/firestore: Firestore (13.2.0): GrpcConnection RPC 'Write' stream 0x15ebfb80 error. Code: 7 Message: 7 PERMISSION_DENIED: 
+false for 'update' @ L346
+[2026-11-12T05:31:57.288Z]  @firebase/firestore: Firestore (13.2.0): GrpcConnection RPC 'Write' stream 0x15ebfb81 error. Code: 7 Message: 7 PERMISSION_DENIED: 
+false for 'delete' @ L346
+[2026-11-12T05:31:57.317Z]  @firebase/firestore: Firestore (13.2.0): GrpcConnection RPC 'Write' stream 0x15ebfb82 error. Code: 7 Message: 7 PERMISSION_DENIED: 
+false for 'create' @ L143, false for 'update' @ L143
+[2026-11-12T05:31:57.345Z]  @firebase/firestore: Firestore (13.2.0): GrpcConnection RPC 'Write' stream 0x15ebfb83 error. Code: 7 Message: 7 PERMISSION_DENIED: 
+false for 'update' @ L143
+[2026-11-12T05:31:57.457Z]  @firebase/firestore: Firestore (13.2.0): GrpcConnection RPC 'Write' stream 0x15ebfb84 error. Code: 7 Message: 7 PERMISSION_DENIED: 
+false for 'create' @ L346, false for 'update' @ L346
+[2026-11-12T05:31:57.485Z]  @firebase/firestore: Firestore (13.2.0): GrpcConnection RPC 'Write' stream 0x15ebfb85 error. Code: 7 Message: 7 PERMISSION_DENIED: 
+false for 'update' @ L346
+[2026-11-12T05:31:57.506Z]  @firebase/firestore: Firestore (13.2.0): GrpcConnection RPC 'Write' stream 0x15ebfb86 error. Code: 7 Message: 7 PERMISSION_DENIED: 
+false for 'delete' @ L346
+[2026-11-12T05:31:57.540Z]  @firebase/firestore: Firestore (13.2.0): GrpcConnection RPC 'Write' stream 0x15ebfb87 error. Code: 7 Message: 7 PERMISSION_DENIED: 
+false for 'create' @ L143, false for 'update' @ L143
+[2026-11-12T05:31:57.563Z]  @firebase/firestore: Firestore (13.2.0): GrpcConnection RPC 'Write' stream 0x15ebfb88 error. Code: 7 Message: 7 PERMISSION_DENIED: 
+false for 'update' @ L143
+✔ ACP-SEC-006: Denies all client writes to nested and top-level escrowEvents (663.2859ms)
+[2026-11-12T05:31:58.075Z]  @firebase/firestore: Firestore (13.2.0): GrpcConnection RPC 'Write' stream 0x15ebfb8c error. Code: 7 Message: 7 PERMISSION_DENIED: 
+false for 'create' @ L149, false for 'update' @ L149
+[2026-11-12T05:31:58.209Z]  @firebase/firestore: Firestore (13.2.0): GrpcConnection RPC 'Write' stream 0x15ebfb8d error. Code: 7 Message: 7 PERMISSION_DENIED: 
+false for 'create' @ L149, false for 'update' @ L149
+✔ SEC-009 / SEC-010 / SEC-011: Locks _health, scopes businesses reads to members, and scopes root catalog collections by tenant (941.8544ms)
+ℹ tests 5
+ℹ suites 0
+ℹ pass 5
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 16773.0427
++  Script exited successfully (code 0)
+i  emulators: Shutting down emulators.
+i  firestore: Stopping Firestore Emulator
+!  Firestore Emulator has exited upon receiving signal: SIGINT
+i  hub: Stopping emulator hub
+i  logging: Stopping Logging Emulator

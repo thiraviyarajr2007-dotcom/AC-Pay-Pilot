@@ -49,7 +49,7 @@ export function DashboardScreen({
   showToast = console.log,
 }: DashboardScreenProps) {
   const navigate = useNavigate();
-  const { role, dataSource, activeBizId, firebaseUser } = useRole();
+  const { role, dataSource, activeBizId, firebaseUser, authFetch } = useRole();
   const [feesVerified, setFeesVerified] = useState(true);
   const [serverConfirmed] = useState(true);
 
@@ -291,7 +291,7 @@ export function DashboardScreen({
         },
       ]);
     } else {
-      fetch(`/api/ai/seller-insights?businessName=AeroCool%20Dynamics&category=Smart%20Hardware&ordersCount=14&gmv=₹4,82,500`)
+      authFetch(`/api/ai/seller-insights?businessName=AeroCool%20Dynamics&category=Smart%20Hardware&ordersCount=14&gmv=₹4,82,500`)
         .then((res) => (res.ok ? res.json() : null))
         .then((data) => {
           if (data?.insights) {
@@ -308,7 +308,7 @@ export function DashboardScreen({
       unsubNewOrder();
       if (toastTimer) clearTimeout(toastTimer);
     };
-  }, [activeBizId, dataSource]);
+  }, [activeBizId, dataSource, authFetch]);
 
   // 4 Primary E-Commerce Metrics (Live calculated vs Demo preloaded)
   const primaryMetrics = useMemo(() => {

@@ -10,8 +10,10 @@ import {
   subscribeStorefrontConfig,
   subscribeStoreProducts,
   createStorefrontOrder,
+  resolveStoreBySlug,
   DEFAULT_BIZ_ID,
 } from '../../services/storefrontService';
+import { authenticatedFetch } from '../../services/apiClient';
 import { getDefaultStorefrontConfig, SEED_STORE_PRODUCTS } from '../../data/templateDefaults';
 import { ARPreviewModal } from '../modals/ARPreviewModal';
 import { QRModal } from '../modals/QRModal';
@@ -89,36 +91,89 @@ export function PublicStorefrontApp({
   const [custEmail, setCustEmail] = useState('');
   const [custPhone, setCustPhone] = useState('');
   const [custAddress, setCustAddress] = useState('');
+  const [resolvedBizId, setResolvedBizId] = useState<string>(bizId);
   const [isPlacingOrder, setIsPlacingOrder] = useState(false);
+  const [checkoutError, setCheckoutError] = useState<string | null>(null);
   const [confirmedOrder, setConfirmedOrder] = useState<StorefrontOrder | null>(null);
+
+  // Resolve public store projection by slug when visiting /s/:slug
+  useEffect(() => {
+    setResolvedBizId(bizId);
+  }, [bizId]);
+
+  useEffect(() => {
+    if (previewBusiness || previewConfig || previewProducts || !slug) return;
+    let cancelled = false;
+    void resolveStoreBySlug(slug).then((resolved) => {
+      if (cancelled || !resolved) return;
+      if (resolved.business?.id) {
+        setResolvedBizId(resolved.business.id);
+      }
+      setBusiness((prev) => ({
+        ...prev,
+        ...resolved.business,
+        contact: {
+          ...prev.contact,
+          ...(resolved.business?.contact || {}),
+          email:
+            resolved.business?.contact?.email ||
+            (resolved.business as any)?.supportEmail ||
+            prev.contact?.email ||
+            'support@aerocool.in',
+        },
+      }));
+      setConfig(resolved.config);
+      setProducts(resolved.products);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [slug, previewBusiness, previewConfig, previewProducts]);
 
   // Real-time Firestore sync (only if not an in-builder preview override)
   useEffect(() => {
     if (previewBusiness) {
-      setBusiness(previewBusiness);
+      setBusiness((prev) => ({
+        ...prev,
+        ...previewBusiness,
+        contact: {
+          ...prev.contact,
+          ...(previewBusiness.contact || {}),
+        },
+      }));
       return;
     }
-    const unsub = subscribeBusiness(bizId, (b) => setBusiness(b));
+    const unsub = subscribeBusiness(resolvedBizId, (b) =>
+      setBusiness((prev) => ({
+        ...prev,
+        ...b,
+        contact: {
+          ...prev.contact,
+          ...(b?.contact || {}),
+          email: b?.contact?.email || (b as any)?.supportEmail || prev.contact?.email || 'support@aerocool.in',
+        },
+      }))
+    );
     return () => unsub();
-  }, [bizId, previewBusiness]);
+  }, [resolvedBizId, previewBusiness]);
 
   useEffect(() => {
     if (previewConfig) {
       setConfig(previewConfig);
       return;
     }
-    const unsub = subscribeStorefrontConfig(bizId, (c) => setConfig(c));
+    const unsub = subscribeStorefrontConfig(resolvedBizId, (c) => setConfig(c));
     return () => unsub();
-  }, [bizId, previewConfig]);
+  }, [resolvedBizId, previewConfig]);
 
   useEffect(() => {
     if (previewProducts) {
       setProducts(previewProducts);
       return;
     }
-    const unsub = subscribeStoreProducts(bizId, (p) => setProducts(p));
+    const unsub = subscribeStoreProducts(resolvedBizId, (p) => setProducts(p));
     return () => unsub();
-  }, [bizId, previewProducts]);
+  }, [resolvedBizId, previewProducts]);
 
   // Dynamically sync browser tab title & favicon to the seller's chosen brand name & logo
   useEffect(() => {
@@ -216,19 +271,74 @@ export function PublicStorefrontApp({
     });
   }, [products, selectedCategory, searchQuery]);
 
-  // Order Placement
+  // Order Placement — strictly creates & verifies PayPal payment BEFORE creating escrow-locked storefront order
   const handlePlaceOrder = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!custName || !custEmail || !custAddress) {
-      showToast('Please fill out all required shipping fields');
+    if (!custName.trim() || !custEmail.trim() || !custAddress.trim()) {
+      const msg = 'Please fill out your full name, valid email address, and shipping address.';
+      setCheckoutError(msg);
+      showToast(msg);
+      return;
+    }
+    if (cartItems.length === 0) {
+      const msg = 'Your cart is empty.';
+      setCheckoutError(msg);
+      showToast(msg);
+      return;
+    }
+    if (isEmbeddedPreview) {
+      showToast('Preview mode — live checkout is disabled in Storefront Builder preview.');
       return;
     }
 
     setIsPlacingOrder(true);
+    setCheckoutError(null);
     try {
+      const createRes = await authenticatedFetch('/api/paypal/create-order', {
+        method: 'POST',
+        body: JSON.stringify({
+          idempotencyKey: `sf-create-${resolvedBizId}-${Date.now()}`,
+          storeSlug: slug,
+          currency: business.currency === 'USD' ? 'USD' : 'INR',
+          items: cartItems.map((i) => ({
+            sku: i.product.sku,
+            quantity: i.quantity,
+          })),
+        }),
+      });
+      const createData = (await createRes.json().catch(() => null)) as any;
+      if (!createRes.ok || !createData?.ok || !createData?.order?.id) {
+        throw new Error(
+          createData?.error || `PayPal order creation failed (HTTP ${createRes.status}).`
+        );
+      }
+
+      const paypalOrderId = createData.order.id as string;
+      const guestToken = createData.guestCaptureToken as string | undefined;
+
+      const captureRes = await authenticatedFetch(
+        `/api/paypal/capture-order/${encodeURIComponent(paypalOrderId)}`,
+        {
+          method: 'POST',
+          body: JSON.stringify({
+            idempotencyKey: `sf-cap-${paypalOrderId}-${Date.now()}`,
+            simulateOutcome: 'COMPLETED',
+            ...(guestToken ? { guestCaptureToken: guestToken } : {}),
+          }),
+        }
+      );
+      const captureData = (await captureRes.json().catch(() => null)) as any;
+      if (!captureRes.ok || !captureData?.ok || !captureData?.order?.verifiedByServer) {
+        throw new Error(
+          captureData?.error ||
+            `PayPal payment verification failed (HTTP ${captureRes.status}). Order was not locked.`
+        );
+      }
+
       const orderNumber = `#ORD-${Math.floor(1000 + Math.random() * 9000)}`;
-      const newOrder = await createStorefrontOrder(bizId, {
-        bizId,
+      const newOrder = await createStorefrontOrder(resolvedBizId, {
+        bizId: resolvedBizId,
+        storeSlug: slug,
         orderNumber,
         customerName: custName,
         customerEmail: custEmail,
@@ -249,6 +359,8 @@ export function PublicStorefrontApp({
         escrowFee,
         escrowStatus: 'Escrow Locked',
         paymentMethod: 'paypal',
+        paypalOrderId,
+        verifiedByServer: true,
         trackingId: `BLUEDART-${Math.floor(100000000 + Math.random() * 900000000)}`,
         carrier: 'BlueDart Air Express',
       });
@@ -256,10 +368,11 @@ export function PublicStorefrontApp({
       setConfirmedOrder(newOrder);
       setCartItems([]);
       setIsCheckoutOpen(false);
-      showToast('Order confirmed! Funds safely locked in PayPal Escrow.');
+      showToast('Order confirmed! PayPal payment verified and locked in escrow.');
     } catch (err) {
-      console.error('Error creating order:', err);
-      showToast('Order creation failed. Please try again.');
+      const msg = err instanceof Error ? err.message : 'Order creation failed. Please try again.';
+      setCheckoutError(msg);
+      showToast(msg);
     } finally {
       setIsPlacingOrder(false);
     }
@@ -357,16 +470,20 @@ export function PublicStorefrontApp({
           {/* Actions: AI Assistant & Cart Button */}
           <div className="flex items-center gap-2.5">
             <button
+              type="button"
               onClick={() => setIsAssistantOpen(true)}
               className={`px-3 py-2 text-xs font-semibold flex items-center gap-1.5 border border-primary/20 bg-primary/10 text-primary hover:bg-primary/20 transition-all ${radiusClass}`}
               title="Ask AI Shopping Assistant"
+              aria-label="Ask AI Shopping Assistant"
             >
               <span className="material-symbols-outlined text-[16px]">smart_toy</span>
               <span className="hidden sm:inline">AI Assistant</span>
             </button>
 
             <button
+              type="button"
               onClick={() => setIsCartOpen(true)}
+              aria-label="Open shopping cart"
               className={`relative px-4 py-2 text-xs font-bold flex items-center gap-2 shadow-sm transition-all ${radiusClass}`}
               style={{
                 backgroundColor: theme.primaryColor,
@@ -534,6 +651,7 @@ export function PublicStorefrontApp({
                 <div className="flex items-center gap-2 overflow-x-auto pb-2 scrollbar-none">
                   {categories.map((cat) => (
                     <button
+                      type="button"
                       key={cat}
                       onClick={() => setSelectedCategory(cat)}
                       className={`px-4 py-2 text-xs font-semibold whitespace-nowrap transition-all border ${radiusClass} ${
@@ -656,8 +774,10 @@ export function PublicStorefrontApp({
                           </div>
 
                           <button
+                            type="button"
                             onClick={() => addToCart(prod, 1)}
-                            className={`px-3.5 py-2 text-xs font-bold text-white transition-opacity hover:opacity-90 flex items-center gap-1.5 shadow-sm ${radiusClass}`}
+                            aria-label={`Add ${prod.name} to cart`}
+                            className={`px-3.5 py-2 text-xs font-bold text-white transition-opacity hover:opacity-90 flex items-center gap-1.5 shadow-sm cursor-pointer ${radiusClass}`}
                             style={{ backgroundColor: theme.primaryColor }}
                           >
                             <span className="material-symbols-outlined text-[16px]">add</span>
@@ -700,6 +820,7 @@ export function PublicStorefrontApp({
                       PILOT10
                     </span>
                     <button
+                      type="button"
                       onClick={() => {
                         setCouponCode('PILOT10');
                         setAppliedDiscount(0.1);
@@ -836,9 +957,9 @@ export function PublicStorefrontApp({
               Support & Contact
             </h5>
             <div className="space-y-1 opacity-75 leading-relaxed">
-              <p>{business.contact.email}</p>
-              <p>{business.contact.phone}</p>
-              <p className="text-[11px] mt-1">{business.contact.address}</p>
+              <p>{business.contact?.email || (business as any).supportEmail || 'support@aerocool.in'}</p>
+              <p>{business.contact?.phone || '+91 80 4920 1888'}</p>
+              <p className="text-[11px] mt-1">{business.contact?.address || ''}</p>
             </div>
           </div>
         </div>
@@ -856,6 +977,7 @@ export function PublicStorefrontApp({
             <div
               role="dialog"
               aria-modal="true"
+              aria-labelledby="storefront-whatsapp-title"
               className="fixed bottom-22 right-4 sm:right-6 z-50 w-[320px] sm:w-[360px] rounded-2xl shadow-2xl border border-emerald-500/30 overflow-hidden bg-white text-slate-900 flex flex-col animate-fade-in"
               style={{
                 boxShadow: '0 20px 40px -10px rgba(16, 185, 129, 0.25), 0 10px 25px -5px rgba(0, 0, 0, 0.15)',
@@ -871,7 +993,7 @@ export function PublicStorefrontApp({
                     <span className="absolute bottom-0 right-0 w-2.5 h-2.5 rounded-full bg-emerald-400 border-2 border-[#075e54]" />
                   </div>
                   <div>
-                    <div className="text-xs font-black tracking-tight flex items-center gap-1">
+                    <div id="storefront-whatsapp-title" className="text-xs font-black tracking-tight flex items-center gap-1">
                       <span>{business.name}</span>
                       <span className="material-symbols-outlined text-[14px] text-emerald-300">verified</span>
                     </div>
@@ -1040,6 +1162,7 @@ export function PublicStorefrontApp({
             style={{ backgroundColor: theme.surfaceColor }}
           >
             <button
+              type="button"
               onClick={() => setSelectedProduct(null)}
               className="absolute top-4 right-4 p-2 rounded-lg bg-black/5 hover:bg-black/10 text-on-surface"
               aria-label="Close product view"
@@ -1125,6 +1248,7 @@ export function PublicStorefrontApp({
                     <span>Quick Scan to AR</span>
                   </button>
                   <button
+                    type="button"
                     onClick={() => {
                       addToCart(selectedProduct, 1);
                       setSelectedProduct(null);
@@ -1164,6 +1288,8 @@ export function PublicStorefrontApp({
                 <h3 className="font-bold text-sm">Shopping Cart ({cartItems.length})</h3>
               </div>
               <button
+                type="button"
+                aria-label="Close shopping cart"
                 onClick={() => setIsCartOpen(false)}
                 className="p-1 rounded-lg hover:bg-black/5"
               >
@@ -1197,6 +1323,8 @@ export function PublicStorefrontApp({
                       </p>
                       <div className="flex items-center gap-2 mt-1">
                         <button
+                          type="button"
+                          aria-label={`Decrease quantity for ${item.product.name}`}
                           onClick={() => updateCartQty(item.product.id, -1)}
                           className="w-5 h-5 rounded bg-black/10 flex items-center justify-center text-xs font-bold"
                         >
@@ -1204,6 +1332,8 @@ export function PublicStorefrontApp({
                         </button>
                         <span className="text-xs font-semibold">{item.quantity}</span>
                         <button
+                          type="button"
+                          aria-label={`Increase quantity for ${item.product.name}`}
                           onClick={() => updateCartQty(item.product.id, 1)}
                           className="w-5 h-5 rounded bg-black/10 flex items-center justify-center text-xs font-bold"
                         >
@@ -1221,7 +1351,11 @@ export function PublicStorefrontApp({
               <div className="p-4 border-t border-black/10 space-y-3 bg-black/5">
                 {/* Coupon Code Input */}
                 <div className="flex items-center gap-2">
+                  <label htmlFor="storefront-coupon-code" className="sr-only">
+                    Coupon Code
+                  </label>
                   <input
+                    id="storefront-coupon-code"
                     type="text"
                     value={couponCode}
                     onChange={(e) => setCouponCode(e.target.value)}
@@ -1229,6 +1363,7 @@ export function PublicStorefrontApp({
                     className="flex-1 px-3 py-1.5 text-xs bg-white text-black border border-black/10 rounded-lg uppercase font-mono focus:outline-none"
                   />
                   <button
+                    type="button"
                     onClick={applyCoupon}
                     className="px-3 py-1.5 text-xs font-bold bg-black text-white rounded-lg hover:opacity-90"
                   >
@@ -1266,8 +1401,10 @@ export function PublicStorefrontApp({
                 </div>
 
                 <button
+                  type="button"
                   onClick={() => {
                     setIsCartOpen(false);
+                    setCheckoutError(null);
                     setIsCheckoutOpen(true);
                   }}
                   className={`w-full py-3 text-xs font-bold text-white shadow-md flex items-center justify-center gap-2 ${radiusClass}`}
@@ -1287,6 +1424,7 @@ export function PublicStorefrontApp({
         <div
           role="dialog"
           aria-modal="true"
+          aria-labelledby="storefront-checkout-title"
           className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/70 backdrop-blur-sm animate-fade-in"
         >
           <div
@@ -1296,19 +1434,29 @@ export function PublicStorefrontApp({
             <div className="flex items-center justify-between border-b border-black/10 pb-3">
               <div className="flex items-center gap-2">
                 <span className="material-symbols-outlined text-primary text-[22px]">verified</span>
-                <h3 className="font-bold text-sm">Escrow-Protected Checkout</h3>
+                <h3 id="storefront-checkout-title" className="font-bold text-sm">
+                  Escrow-Protected Checkout
+                </h3>
               </div>
-              <button onClick={() => setIsCheckoutOpen(false)}>
+              <button
+                type="button"
+                aria-label="Close checkout modal"
+                onClick={() => setIsCheckoutOpen(false)}
+              >
                 <span className="material-symbols-outlined text-[20px]">close</span>
               </button>
             </div>
 
-            <form onSubmit={handlePlaceOrder} className="space-y-3">
+            <form noValidate onSubmit={handlePlaceOrder} className="space-y-3">
               <div>
-                <label className="block text-[11px] font-bold uppercase opacity-75 mb-1">
+                <label
+                  htmlFor="storefront-cust-name"
+                  className="block text-[11px] font-bold uppercase opacity-75 mb-1"
+                >
                   Full Name *
                 </label>
                 <input
+                  id="storefront-cust-name"
                   type="text"
                   required
                   value={custName}
@@ -1319,10 +1467,14 @@ export function PublicStorefrontApp({
               </div>
 
               <div>
-                <label className="block text-[11px] font-bold uppercase opacity-75 mb-1">
+                <label
+                  htmlFor="storefront-cust-email"
+                  className="block text-[11px] font-bold uppercase opacity-75 mb-1"
+                >
                   Email Address (For Order Tracking & PayPal Escrow Confirmation) *
                 </label>
                 <input
+                  id="storefront-cust-email"
                   type="email"
                   required
                   value={custEmail}
@@ -1333,10 +1485,14 @@ export function PublicStorefrontApp({
               </div>
 
               <div>
-                <label className="block text-[11px] font-bold uppercase opacity-75 mb-1">
+                <label
+                  htmlFor="storefront-cust-address"
+                  className="block text-[11px] font-bold uppercase opacity-75 mb-1"
+                >
                   Delivery Address *
                 </label>
                 <textarea
+                  id="storefront-cust-address"
                   required
                   rows={2}
                   value={custAddress}
@@ -1355,6 +1511,15 @@ export function PublicStorefrontApp({
                   Your payment will be locked safely. The seller is only paid after confirmed delivery.
                 </p>
               </div>
+
+              {checkoutError && (
+                <div
+                  role="alert"
+                  className="p-3 rounded-xl bg-red-500/10 border border-red-500/30 text-red-600 text-xs font-semibold"
+                >
+                  {checkoutError}
+                </div>
+              )}
 
               <button
                 type="submit"
@@ -1381,6 +1546,7 @@ export function PublicStorefrontApp({
         <div
           role="dialog"
           aria-modal="true"
+          aria-labelledby="storefront-order-confirmed-title"
           className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/75 backdrop-blur-md animate-fade-in"
         >
           <div
@@ -1392,12 +1558,17 @@ export function PublicStorefrontApp({
             </div>
 
             <div className="text-center space-y-1">
-              <h3 className="text-base font-black">Order Placed Successfully!</h3>
+              <h3 id="storefront-order-confirmed-title" className="text-base font-black">
+                Order Placed Successfully!
+              </h3>
               <p className="text-xs opacity-75">
                 Order ID: <span className="font-mono font-bold text-primary">{confirmedOrder.orderNumber}</span>
               </p>
               <p className="text-xs font-semibold text-emerald-600">
-                🔒 {currencySymbol}{confirmedOrder.total.toLocaleString()} Locked in PayPal Escrow
+                🔒 {currencySymbol}{confirmedOrder.total.toLocaleString()}{' '}
+                {confirmedOrder.verifiedByServer === true || confirmedOrder.escrowStatus === 'Escrow Locked'
+                  ? 'Locked in PayPal Escrow'
+                  : confirmedOrder.escrowStatus}
               </p>
             </div>
 
@@ -1423,7 +1594,9 @@ export function PublicStorefrontApp({
                         {item.label}
                       </p>
                       {item.completed && item.timestamp && (
-                        <p className="text-[10px] opacity-60">Verified via Escrow Engine</p>
+                        <p className="text-[10px] opacity-60">
+                          {confirmedOrder.verifiedByServer ? 'Verified via Escrow Engine' : 'Recorded in Order Log'}
+                        </p>
                       )}
                     </div>
                   </div>
@@ -1432,6 +1605,7 @@ export function PublicStorefrontApp({
             </div>
 
             <button
+              type="button"
               onClick={() => setConfirmedOrder(null)}
               className="w-full py-2.5 bg-black text-white rounded-xl text-xs font-bold hover:opacity-90"
             >
@@ -1446,6 +1620,7 @@ export function PublicStorefrontApp({
         <div
           role="dialog"
           aria-modal="true"
+          aria-labelledby="storefront-assistant-title"
           className="fixed inset-0 z-50 flex justify-end bg-black/60 backdrop-blur-sm animate-fade-in"
         >
           <div
@@ -1456,11 +1631,11 @@ export function PublicStorefrontApp({
               <div className="flex items-center gap-2">
                 <span className="material-symbols-outlined text-primary text-[22px]">smart_toy</span>
                 <div>
-                  <h3 className="font-bold text-xs">{business.name} Shopping Copilot</h3>
+                  <h3 id="storefront-assistant-title" className="font-bold text-xs">{business.name} Shopping Copilot</h3>
                   <p className="text-[10px] opacity-60">Powered by Gemini AI • 24/7 Assistance</p>
                 </div>
               </div>
-              <button onClick={() => setIsAssistantOpen(false)}>
+              <button type="button" onClick={() => setIsAssistantOpen(false)} aria-label="Close shopping assistant">
                 <span className="material-symbols-outlined text-[20px]">close</span>
               </button>
             </div>
@@ -1480,6 +1655,7 @@ export function PublicStorefrontApp({
                   'How long does express delivery take?',
                 ].map((q, idx) => (
                   <button
+                    type="button"
                     key={idx}
                     onClick={() => {
                       showToast('Copilot: All orders include 100% PayPal Escrow Protection and 24h express dispatch!');
@@ -1506,6 +1682,7 @@ export function PublicStorefrontApp({
                   }}
                 />
                 <button
+                  type="button"
                   onClick={() => showToast('Copilot: All orders include 100% PayPal Escrow Protection and 24h express dispatch!')}
                   className="px-3 py-2 bg-primary text-white text-xs font-bold rounded-xl"
                 >

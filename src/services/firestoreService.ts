@@ -156,12 +156,15 @@ export async function getMerchantProfileFromFirestore(
 }
 
 /**
- * Saves a product to Firestore products collection.
+ * Saves a product to tenant-scoped Firestore businesses/{bizId}/products collection (SEC-011).
  */
-export async function saveProductToFirestore(product: FirestoreProduct): Promise<boolean> {
-  const path = `products/${product.id}`;
+export async function saveProductToFirestore(
+  product: FirestoreProduct,
+  bizId = 'biz-aerocool'
+): Promise<boolean> {
+  const path = `businesses/${bizId}/products/${product.id}`;
   try {
-    await setDoc(doc(db, 'products', product.id), product);
+    await setDoc(doc(db, 'businesses', bizId, 'products', product.id), { ...product, bizId });
     return true;
   } catch (err) {
     handleFirestoreError(err, OperationType.WRITE, path);
@@ -170,12 +173,15 @@ export async function saveProductToFirestore(product: FirestoreProduct): Promise
 }
 
 /**
- * Deletes a product from Firestore.
+ * Deletes a product from tenant-scoped Firestore businesses/{bizId}/products.
  */
-export async function deleteProductFromFirestore(productId: string): Promise<boolean> {
-  const path = `products/${productId}`;
+export async function deleteProductFromFirestore(
+  productId: string,
+  bizId = 'biz-aerocool'
+): Promise<boolean> {
+  const path = `businesses/${bizId}/products/${productId}`;
   try {
-    await deleteDoc(doc(db, 'products', productId));
+    await deleteDoc(doc(db, 'businesses', bizId, 'products', productId));
     return true;
   } catch (err) {
     handleFirestoreError(err, OperationType.DELETE, path);
@@ -184,12 +190,14 @@ export async function deleteProductFromFirestore(productId: string): Promise<boo
 }
 
 /**
- * Fetches all products from Firestore, with fallback.
+ * Fetches tenant-scoped products from Firestore businesses/{bizId}/products.
  */
-export async function fetchProductsFromFirestore(): Promise<FirestoreProduct[]> {
-  const path = 'products';
+export async function fetchProductsFromFirestore(
+  bizId = 'biz-aerocool'
+): Promise<FirestoreProduct[]> {
+  const path = `businesses/${bizId}/products`;
   try {
-    const snap = await getDocs(collection(db, path));
+    const snap = await getDocs(collection(db, 'businesses', bizId, 'products'));
     const list: FirestoreProduct[] = [];
     snap.forEach((d) => {
       list.push(d.data() as FirestoreProduct);
@@ -202,16 +210,17 @@ export async function fetchProductsFromFirestore(): Promise<FirestoreProduct[]> 
 }
 
 /**
- * Subscribes to live products collection updates.
+ * Subscribes to tenant-scoped live products collection updates.
  */
 export function subscribeToProducts(
   onUpdate: (products: FirestoreProduct[]) => void,
-  onError?: (err: unknown) => void
+  onError?: (err: unknown) => void,
+  bizId = 'biz-aerocool'
 ): () => void {
-  const path = 'products';
+  const path = `businesses/${bizId}/products`;
   try {
     return onSnapshot(
-      collection(db, path),
+      collection(db, 'businesses', bizId, 'products'),
       (snap) => {
         const list: FirestoreProduct[] = [];
         snap.forEach((d) => list.push(d.data() as FirestoreProduct));
@@ -229,12 +238,15 @@ export function subscribeToProducts(
 }
 
 /**
- * Saves an invoice to Firestore.
+ * Saves an invoice to tenant-scoped Firestore businesses/{bizId}/invoices.
  */
-export async function saveInvoiceToFirestore(invoice: FirestoreInvoice): Promise<boolean> {
-  const path = `invoices/${invoice.id}`;
+export async function saveInvoiceToFirestore(
+  invoice: FirestoreInvoice,
+  bizId = 'biz-aerocool'
+): Promise<boolean> {
+  const path = `businesses/${bizId}/invoices/${invoice.id}`;
   try {
-    await setDoc(doc(db, 'invoices', invoice.id), invoice);
+    await setDoc(doc(db, 'businesses', bizId, 'invoices', invoice.id), { ...invoice, bizId });
     return true;
   } catch (err) {
     handleFirestoreError(err, OperationType.WRITE, path);
@@ -243,12 +255,14 @@ export async function saveInvoiceToFirestore(invoice: FirestoreInvoice): Promise
 }
 
 /**
- * Fetches invoices from Firestore.
+ * Fetches tenant-scoped invoices from Firestore businesses/{bizId}/invoices.
  */
-export async function fetchInvoicesFromFirestore(): Promise<FirestoreInvoice[]> {
-  const path = 'invoices';
+export async function fetchInvoicesFromFirestore(
+  bizId = 'biz-aerocool'
+): Promise<FirestoreInvoice[]> {
+  const path = `businesses/${bizId}/invoices`;
   try {
-    const snap = await getDocs(collection(db, path));
+    const snap = await getDocs(collection(db, 'businesses', bizId, 'invoices'));
     const list: FirestoreInvoice[] = [];
     snap.forEach((d) => list.push(d.data() as FirestoreInvoice));
     return list;
@@ -259,14 +273,15 @@ export async function fetchInvoicesFromFirestore(): Promise<FirestoreInvoice[]> 
 }
 
 /**
- * Records an escrow audit event in Firestore append-only collection.
+ * Records an escrow audit event in tenant-scoped businesses/{bizId}/escrowEvents.
  */
 export async function recordEscrowEventInFirestore(
-  event: FirestoreEscrowEvent
+  event: FirestoreEscrowEvent,
+  bizId = 'biz-aerocool'
 ): Promise<boolean> {
-  const path = `escrowEvents/${event.id}`;
+  const path = `businesses/${bizId}/escrowEvents/${event.id}`;
   try {
-    await setDoc(doc(db, 'escrowEvents', event.id), event);
+    await setDoc(doc(db, 'businesses', bizId, 'escrowEvents', event.id), { ...event, bizId });
     return true;
   } catch (err) {
     handleFirestoreError(err, OperationType.WRITE, path);

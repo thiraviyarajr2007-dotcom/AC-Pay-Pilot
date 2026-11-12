@@ -7,9 +7,24 @@ import {
   CollectionViewState,
 } from '../ui/HonestTrustComponents';
 import { useRole } from '../../context/RoleContext';
+import { SAMPLE_CART_ITEMS } from '../../data/cartDefaults';
+
+export interface SmartCartItem {
+  sku: string;
+  name: string;
+  category: string;
+  hsCode: string;
+  unitPrice: number;
+  qty: number;
+  selected: boolean;
+  img: string;
+}
 
 interface SmartCartScreenProps {
+  items?: SmartCartItem[];
+  onUpdateItems?: React.Dispatch<React.SetStateAction<SmartCartItem[]>>;
   onOpenCheckout: () => void;
+  onStartCheckout?: (items: SmartCartItem[]) => void;
   onSelectProduct?: (product: any) => void;
   onOpenCopilot?: (query?: string) => void;
   showToast?: (msg: string) => void;
@@ -47,53 +62,31 @@ interface CartOptimizationResult {
 }
 
 export const SmartCartScreen: React.FC<SmartCartScreenProps> = ({
+  items: controlledItems,
+  onUpdateItems,
   onOpenCheckout,
+  onStartCheckout,
   onSelectProduct,
   onOpenCopilot,
   showToast,
 }) => {
-  const { serverConfirmed, feesVerified, setFeesVerified, getActorHeaders } = useRole();
+  const { serverConfirmed, feesVerified, setFeesVerified, authFetch } = useRole();
 
-  const [cartItems, setCartItems] = useState([
-    {
-      sku: '#FAN-BLDC-892',
-      name: 'AeroBreeze Stealth 1200mm Smart BLDC Ceiling Fan',
-      category: 'Smart Ceiling Fans • 28W BLDC',
-      hsCode: '8414.51.10',
-      unitPrice: 8499,
-      qty: 2,
-      selected: true,
-      img: 'https://lh3.googleusercontent.com/aida-public/AB6AXuAdZqURIDL_NaUXiAifTbLg4cem9jV1GV8iZOZph4aZvIM_kBIBsVSYaq0LFoeWQ1Xe11jOuDpYR0RHnVhSurjQprJuCqeXfR6luOW8JojolfW3AL3RlJG5cFe-YmAZaYz7-lll8h5sqcs83z5WRWhCSmB_-pIxVPGanujJtlcWqHaGPRDckKJmoCqqWoVmhA4SIWYCZ53ylY77gEHOrpObunEt2PyFUzIVJzYoOpMS9aQvgYTluWmbLg',
-    },
-    {
-      sku: '#SPO-YNX-99P',
-      name: 'Yonex Astrox 99 Pro Carbon Badminton Racket',
-      category: 'Sports & Fitness • 4U Carbon',
-      hsCode: '9506.59.10',
-      unitPrice: 14990,
-      qty: 1,
-      selected: true,
-      img: 'https://lh3.googleusercontent.com/aida-public/AB6AXuDURq8df1AvNhd6BXPOnLSDepBVFAZQQdhN7XCJzqUwmcV79SqYGalleVqm5XyenVa4nFesHY7jCNLROrqBHlgtE92aPFjCmcNoiYuJEPzJjul5AYdnnHkeKQevXmwyO8xozEtp1qExjA6sfd8tRUMhTAaE5rLBnqslJx9r-5JgtL82V5kmTgx9bt5QmOiAjh1sa5vjPP7EB5WSaeKeMK9zuVgCH8RJFezfeBmyvYUJuYqroAVrKuYT6A',
-    },
-    {
-      sku: '#AUD-ANC-99',
-      name: 'AcousticSphere ANC Wireless Earbuds',
-      category: 'Audio & Accessories',
-      hsCode: '8518.30.00',
-      unitPrice: 11499,
-      qty: 1,
-      selected: true,
-      img: 'https://lh3.googleusercontent.com/aida-public/AB6AXuATX6652NttkNvGUKx5jflqNG9RH8CT1bcmBhwPs5ONeLhU9pt_yu_fLrBW741KftvyB8iGKx74rvwQHwuPCAi3l4R3tYkHwBDG9n3OPdy9Mlu8L_I0x4OPz9BwauAkb1vv9Y9m6inErwdhjPUN3ppwCGPbYGt503flhtRIVgYmpxZIuYY_1j9Rm3YHrFW7YLzOu7wmGH2HMVU6LtZPoH8W80bhQ8Ax7MbgTzEynmMscW556GyOm__wiw',
-    },
-  ]);
+  const [uncontrolledCartItems, setUncontrolledCartItems] =
+    useState<SmartCartItem[]>(SAMPLE_CART_ITEMS);
+  const cartItems = controlledItems !== undefined ? controlledItems : uncontrolledCartItems;
+  const setCartItems: React.Dispatch<React.SetStateAction<SmartCartItem[]>> =
+    onUpdateItems ?? setUncontrolledCartItems;
 
   const [budgetCapInr, setBudgetCapInr] = useState<number>(38000);
   const [priorityGoal, setPriorityGoal] = useState<string>('Energy Savings & Essential Gear');
   const [optLoading, setOptLoading] = useState<boolean>(false);
+  const [optError, setOptError] = useState<string | null>(null);
   const [optResult, setOptResult] = useState<CartOptimizationResult | null>(null);
   const [listState, setListState] = useState<CollectionViewState>('ready');
 
   const activeItems = cartItems.filter((i) => i.selected && i.qty > 0);
+  const activeItemsKey = activeItems.map((i) => `${i.sku}:${i.qty}`).join(',');
   const grossTotal = activeItems.reduce((sum, i) => sum + i.unitPrice * i.qty, 0);
   const taxableSubtotal = Math.round(grossTotal / 1.18);
   const gstAmount = grossTotal - taxableSubtotal;
@@ -101,11 +94,16 @@ export const SmartCartScreen: React.FC<SmartCartScreenProps> = ({
   const budgetPct = Math.min(100, Math.round((grossTotal / Math.max(1, budgetCapInr)) * 100));
 
   const runCartOptimization = async (customBudget?: number) => {
+    if (activeItems.length === 0) {
+      setOptResult(null);
+      setOptError(null);
+      return;
+    }
     setOptLoading(true);
+    setOptError(null);
     try {
-      const res = await fetch('/api/cart/optimize', {
+      const res = await authFetch('/api/cart/optimize', {
         method: 'POST',
-        headers: getActorHeaders(),
         body: JSON.stringify({
           budgetInr: customBudget ?? budgetCapInr,
           items: activeItems.map((i) => ({
@@ -114,11 +112,14 @@ export const SmartCartScreen: React.FC<SmartCartScreenProps> = ({
           })),
         }),
       });
-      const data = await res.json();
-      if (data.ok) {
+      const data = await res.json().catch(() => null);
+      if (res.ok && data?.ok) {
         setOptResult(data);
+      } else {
+        setOptError(data?.error || `Could not optimize cart (HTTP ${res.status}).`);
       }
     } catch {
+      setOptError('Network error refreshing SmartCart ranking.');
       showToast?.('Could not refresh cart ranking right now.');
     } finally {
       setOptLoading(false);
@@ -126,8 +127,15 @@ export const SmartCartScreen: React.FC<SmartCartScreenProps> = ({
   };
 
   useEffect(() => {
-    void runCartOptimization();
-  }, []);
+    if (activeItems.length === 0) {
+      setOptResult(null);
+      return;
+    }
+    const timer = window.setTimeout(() => {
+      void runCartOptimization();
+    }, 350);
+    return () => window.clearTimeout(timer);
+  }, [budgetCapInr, activeItemsKey, authFetch]);
 
   const updateQty = (sku: string, delta: number) => {
     setCartItems((prev) =>
@@ -135,6 +143,11 @@ export const SmartCartScreen: React.FC<SmartCartScreenProps> = ({
         item.sku === sku ? { ...item, qty: Math.max(1, item.qty + delta) } : item
       )
     );
+  };
+
+  const removeItem = (sku: string) => {
+    setCartItems((prev) => prev.filter((item) => item.sku !== sku));
+    showToast?.(`Removed ${sku} from SmartCart.`);
   };
 
   const toggleSelect = (sku: string) => {
@@ -273,6 +286,42 @@ export const SmartCartScreen: React.FC<SmartCartScreenProps> = ({
               </span>
             </div>
 
+            {optError && (
+              <div
+                role="alert"
+                data-testid="smartcart-opt-error"
+                className="p-3 rounded-xl bg-error-container/30 border border-error/40 flex items-center justify-between gap-2 text-xs text-on-surface"
+              >
+                <span>{optError}</span>
+                <button
+                  type="button"
+                  onClick={() => void runCartOptimization()}
+                  className="px-2.5 py-1 rounded-lg bg-primary text-on-primary text-[11px] font-semibold cursor-pointer"
+                >
+                  Retry
+                </button>
+              </div>
+            )}
+
+            {cartItems.length === 0 ? (
+              <div className="p-6 rounded-xl border border-dashed border-surface-container-high bg-surface-container-low text-center space-y-3">
+                <p className="text-xs font-semibold text-on-surface">
+                  Your SmartCart is currently empty.
+                </p>
+                <p className="text-[11px] text-secondary">
+                  Add products from Discovery or load the starter bundle to test priority budget optimization.
+                </p>
+                <div className="flex flex-wrap items-center justify-center gap-2 pt-1">
+                  <button
+                    type="button"
+                    onClick={() => setCartItems(SAMPLE_CART_ITEMS)}
+                    className="px-3.5 py-2 rounded-xl bg-surface-container hover:bg-surface-container-high text-on-surface text-xs font-semibold cursor-pointer"
+                  >
+                    Load Starter Cart
+                  </button>
+                </div>
+              </div>
+            ) : (
             <DataCollectionBoundary
               title="SmartCart Items"
               state={activeItems.length === 0 && listState === 'ready' ? 'empty' : listState}
@@ -300,12 +349,18 @@ export const SmartCartScreen: React.FC<SmartCartScreenProps> = ({
                             aria-label={`Include ${item.name}`}
                             className="mt-1.5 w-4 h-4 accent-primary rounded cursor-pointer"
                           />
-                          <img
-                            src={item.img}
-                            alt={item.name}
+                          <button
+                            type="button"
                             onClick={() => onSelectProduct && onSelectProduct(item)}
-                            className="w-16 h-16 rounded-xl object-cover bg-surface-container shrink-0 cursor-pointer"
-                          />
+                            aria-label={`Inspect ${item.name}`}
+                            className="w-16 h-16 rounded-xl overflow-hidden bg-surface-container shrink-0 cursor-pointer"
+                          >
+                            <img
+                              src={item.img}
+                              alt={item.name}
+                              className="w-full h-full object-cover"
+                            />
+                          </button>
                           <div className="space-y-1">
                             <div className="flex flex-wrap items-center gap-1.5">
                               <span className="px-2 py-0.5 rounded bg-surface-container text-on-surface font-tabular-nums text-[10px] font-semibold">
@@ -343,25 +398,35 @@ export const SmartCartScreen: React.FC<SmartCartScreenProps> = ({
                           <div className="text-base font-bold font-headline text-on-surface font-tabular-nums">
                             {formatINR(item.unitPrice * item.qty)}
                           </div>
-                          <div className="flex items-center gap-1.5 bg-surface-container-low rounded-lg p-1 border border-surface-container-high">
+                          <div className="flex items-center gap-2">
+                            <div className="flex items-center gap-1.5 bg-surface-container-low rounded-lg p-1 border border-surface-container-high">
+                              <button
+                                type="button"
+                                onClick={() => updateQty(item.sku, -1)}
+                                aria-label={`Decrease quantity for ${item.name}`}
+                                className="w-6 h-6 rounded bg-surface-container-lowest text-on-surface font-bold text-xs cursor-pointer"
+                              >
+                                -
+                              </button>
+                              <span className="px-2 text-xs font-tabular-nums font-bold">
+                                {item.qty}
+                              </span>
+                              <button
+                                type="button"
+                                onClick={() => updateQty(item.sku, 1)}
+                                aria-label={`Increase quantity for ${item.name}`}
+                                className="w-6 h-6 rounded bg-surface-container-lowest text-on-surface font-bold text-xs cursor-pointer"
+                              >
+                                +
+                              </button>
+                            </div>
                             <button
                               type="button"
-                              onClick={() => updateQty(item.sku, -1)}
-                              aria-label={`Decrease quantity for ${item.name}`}
-                              className="w-6 h-6 rounded bg-surface-container-lowest text-on-surface font-bold text-xs cursor-pointer"
+                              onClick={() => removeItem(item.sku)}
+                              aria-label={`Remove ${item.name} from cart`}
+                              className="w-7 h-7 rounded-lg bg-surface-container-low hover:bg-error-container/40 text-secondary hover:text-error flex items-center justify-center cursor-pointer"
                             >
-                              -
-                            </button>
-                            <span className="px-2 text-xs font-tabular-nums font-bold">
-                              {item.qty}
-                            </span>
-                            <button
-                              type="button"
-                              onClick={() => updateQty(item.sku, 1)}
-                              aria-label={`Increase quantity for ${item.name}`}
-                              className="w-6 h-6 rounded bg-surface-container-lowest text-on-surface font-bold text-xs cursor-pointer"
-                            >
-                              +
+                              <span className="material-symbols-outlined text-[16px]">delete</span>
                             </button>
                           </div>
                         </div>
@@ -371,6 +436,7 @@ export const SmartCartScreen: React.FC<SmartCartScreenProps> = ({
                 })}
               </div>
             </DataCollectionBoundary>
+            )}
           </div>
 
           {/* Suggested Alternatives (Kept Strictly Separate from Real Cart Items) */}
@@ -450,7 +516,13 @@ export const SmartCartScreen: React.FC<SmartCartScreenProps> = ({
 
             <button
               type="button"
-              onClick={onOpenCheckout}
+              onClick={() => {
+                if (onStartCheckout) {
+                  onStartCheckout(activeItems);
+                } else {
+                  onOpenCheckout();
+                }
+              }}
               disabled={activeItems.length === 0}
               data-testid="smartcart-paypal-checkout-btn"
               className="w-full py-3.5 px-4 rounded-xl bg-primary hover:bg-primary-container disabled:opacity-50 text-on-primary font-bold text-sm flex items-center justify-center gap-2 transition-colors cursor-pointer"

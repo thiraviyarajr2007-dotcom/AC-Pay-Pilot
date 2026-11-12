@@ -24,10 +24,12 @@ import {
   CalculateInvoiceBodySchema,
   calculateInvoiceOnServer,
   defaultServerLedger,
+  getPayPalApiBaseUrl,
 } from './src/server/paymentEngine';
 import {
   computeExecutiveKpisForDateRange,
   calculateAuthoritativeOrderTotalsMinor,
+  fromMinorUnits,
   toMinorUnits,
 } from './src/utils/finance';
 import { AuthenticatedActor, evaluateRoleAccess } from './src/utils/rbac';
@@ -35,6 +37,7 @@ import {
   ESCROW_ARCHITECTURE_DECISION,
   transitionEscrowState,
   canTransitionEscrow,
+  EscrowState,
 } from './src/utils/escrow';
 import {
   answerProductQaWithGemini,
@@ -55,7 +58,7 @@ import {
   listAllSeller3DAssets,
   registerSeller3DAsset,
 } from './src/server/glbGenerator';
-import { runFullSystemDiagnostic } from './src/server/healthService';
+import { runFullSystemDiagnostic, runSystemStatusSummary } from './src/server/healthService';
 
 import dns from 'node:dns/promises';
 import {
@@ -75,6 +78,7 @@ import {
   getEscrowEventsForBiz,
   getMerchantProfileForBiz,
   updateMerchantProfileForBiz,
+  resolvePublicStorefrontBySlug,
   seedDefaultStorefrontInFirestore,
   getAdminDb,
   getPersistenceMode,
@@ -116,6 +120,48 @@ async function requireAuth(req: Request, res: Response): Promise<AuthenticatedUs
     const code = err instanceof AuthenticationError ? err.code : 'UNAUTHORIZED';
     sendTypedError(res, status, code, err.message || 'Authentication required');
     return null;
+  }
+}
+
+async function resolveOptionalAuth(req: Request): Promise<AuthenticatedUserActor | null> {
+  const authHeader = req.headers.authorization;
+  if (!authHeader?.startsWith('Bearer ')) return null;
+  try {
+    return await authenticateRequest(req);
+  } catch {
+    return null;
+  }
+}
+
+function verifyGuestToken(order: any, candidateToken: string | undefined): boolean {
+  if (!candidateToken || !order?.guestCaptureTokenHash) return false;
+  try {
+    const candidateHash = crypto.createHash('sha256').update(candidateToken.trim()).digest('hex');
+    const storedHashBuf = Buffer.from(String(order.guestCaptureTokenHash), 'hex');
+    const candidateHashBuf = Buffer.from(candidateHash, 'hex');
+    return (
+      storedHashBuf.length > 0 &&
+      storedHashBuf.length === candidateHashBuf.length &&
+      crypto.timingSafeEqual(storedHashBuf, candidateHashBuf)
+    );
+  } catch {
+    return false;
+  }
+}
+
+const ALLOWED_PAYPAL_CERT_HOSTS = new Set([
+  'api.paypal.com',
+  'api-m.paypal.com',
+  'api.sandbox.paypal.com',
+  'api-m.sandbox.paypal.com',
+]);
+
+function isAllowedPayPalCertUrl(certUrl: string): boolean {
+  try {
+    const parsed = new URL(certUrl);
+    return parsed.protocol === 'https:' && ALLOWED_PAYPAL_CERT_HOSTS.has(parsed.hostname.toLowerCase());
+  } catch {
+    return false;
   }
 }
 
@@ -211,7 +257,106 @@ export async function createAppServer() {
   }
 
   const app = express();
-  app.use(express.json({ limit: '25mb' }));
+  app.disable('x-powered-by');
+
+  const standardJsonParser = express.json({ limit: '1mb' });
+  const mediaJsonParser = express.json({ limit: '25mb' });
+  app.use((req: Request, res: Response, next: NextFunction) => {
+    if (
+      req.path === '/api/ai/transcribe' ||
+      req.path === '/api/ai/image' ||
+      req.path === '/api/ai/video'
+    ) {
+      return mediaJsonParser(req, res, next);
+    }
+    return standardJsonParser(req, res, next);
+  });
+
+  // Security headers, request correlation ID, CORS allowlist & API no-store cache policy
+  const configuredOrigins = (process.env.ALLOWED_ORIGINS || '')
+    .split(',')
+    .map((o) => o.trim().replace(/\/$/, ''))
+    .filter(Boolean);
+  const localDevOrigins = new Set([
+    'http://localhost:3000',
+    'http://127.0.0.1:3000',
+    'http://localhost:5173',
+    'http://127.0.0.1:5173',
+  ]);
+  const apiRateBuckets = new Map<string, { count: number; resetAt: number }>();
+
+  app.use((req: Request, res: Response, next: NextFunction) => {
+    const rawReqId = req.headers['x-request-id'];
+    const requestId =
+      typeof rawReqId === 'string' && /^[a-zA-Z0-9._-]{4,64}$/.test(rawReqId)
+        ? rawReqId
+        : crypto.randomUUID();
+    res.setHeader('X-Request-Id', requestId);
+    res.setHeader('X-Content-Type-Options', 'nosniff');
+    res.setHeader('X-Frame-Options', 'DENY');
+    res.setHeader('Referrer-Policy', 'strict-origin-when-cross-origin');
+    res.setHeader('Permissions-Policy', 'camera=(self), microphone=(self), geolocation=()');
+
+    const origin = req.headers.origin;
+    if (origin) {
+      const normalizedOrigin = origin.replace(/\/$/, '');
+      const host = req.headers.host;
+      const isSameOrigin =
+        Boolean(host) &&
+        (normalizedOrigin === `http://${host}` || normalizedOrigin === `https://${host}`);
+      const isAllowed =
+        isSameOrigin ||
+        configuredOrigins.includes(normalizedOrigin) ||
+        (process.env.NODE_ENV !== 'production' && localDevOrigins.has(normalizedOrigin));
+
+      if (isAllowed) {
+        res.setHeader('Access-Control-Allow-Origin', origin);
+        res.setHeader('Vary', 'Origin');
+        res.setHeader('Access-Control-Allow-Credentials', 'true');
+        res.setHeader(
+          'Access-Control-Allow-Headers',
+          'Content-Type, Authorization, x-guest-capture-token, x-request-id'
+        );
+        res.setHeader('Access-Control-Allow-Methods', 'GET, POST, PATCH, DELETE, OPTIONS');
+      } else if (req.method === 'OPTIONS') {
+        return sendTypedError(res, 403, 'CORS_ORIGIN_FORBIDDEN', 'Origin not permitted by CORS policy.');
+      }
+    }
+
+    if (req.method === 'OPTIONS') {
+      return res.status(204).end();
+    }
+
+    if (req.path.startsWith('/api/') || req.path.startsWith('/health')) {
+      res.setHeader('Cache-Control', 'no-store');
+    }
+
+    // General API rate limit (skipped in unit test mode & SSE/webhook/health checks)
+    if (
+      process.env.NODE_ENV !== 'test' &&
+      req.path.startsWith('/api/') &&
+      !req.path.startsWith('/api/health') &&
+      req.path !== '/api/paypal/webhook' &&
+      req.path !== '/api/orders/stream'
+    ) {
+      const ipKey = req.ip || req.socket.remoteAddress || 'local';
+      const nowMs = Date.now();
+      const windowMs = 60_000;
+      const maxReqs = 180;
+      const existing = apiRateBuckets.get(ipKey);
+      if (!existing || existing.resetAt <= nowMs) {
+        apiRateBuckets.set(ipKey, { count: 1, resetAt: nowMs + windowMs });
+      } else {
+        existing.count += 1;
+        if (existing.count > maxReqs) {
+          res.setHeader('Retry-After', String(Math.ceil((existing.resetAt - nowMs) / 1000)));
+          return sendTypedError(res, 429, 'RATE_LIMIT_EXCEEDED', 'Too many API requests. Please retry shortly.');
+        }
+      }
+    }
+
+    next();
+  });
 
   // Refuse ALL durable mutations in production when durable Firestore persistence is unavailable
   const persistenceCheckMiddleware = (_req: Request, res: Response, next: NextFunction) => {
@@ -240,14 +385,14 @@ export async function createAppServer() {
   // ==========================================================================
   app.get(['/health', '/api/health'], async (_req: Request, res: Response) => {
     try {
-      const diagnostic = await runFullSystemDiagnostic();
+      const summary = await runSystemStatusSummary();
       const persistenceMode = getPersistenceMode();
-      res.json({
-        ok: diagnostic.ok,
-        status: diagnostic.status,
+      res.status(summary.ok ? 200 : 503).json({
+        ok: summary.ok,
+        status: summary.status,
         persistenceMode,
-        serverTime: diagnostic.serverTime,
-        checks: diagnostic.checks,
+        serverTime: summary.serverTime,
+        checks: summary.checks,
       });
     } catch (err: any) {
       res.status(500).json({
@@ -275,7 +420,7 @@ export async function createAppServer() {
 
     res.json({
       ok: true,
-      paypalEnv: 'sandbox',
+      paypalEnv: process.env.PAYPAL_ENV === 'live' ? 'live' : 'sandbox',
       // In PayPal JS SDK, client-id is the public sandbox identifier for rendering buttons;
       // client-secret NEVER leaves the server. Uses PayPal's official "sb" sandbox test client-id fallback if unset.
       paypalClientId: hasPayPalClientId ? rawPaypalClientId : 'sb',
@@ -313,37 +458,72 @@ export async function createAppServer() {
   // ==========================================================================
   // 1b. Real-Time Seller Order Notification Stream (SSE + Storefront Notify)
   // ==========================================================================
-  const orderStreamClients = new Set<Response>();
+  const MAX_SSE_CLIENTS = 100;
+  const MAX_SSE_PER_UID = 5;
+  const orderStreamClients = new Map<
+    Response,
+    { uid: string; role: string; bizId: string }
+  >();
 
   const broadcastLiveOrderNotification = (notification: {
     id: string;
-    bizId?: string;
+    bizId: string;
+    customerId?: string;
     orderNumber: string;
-    customerName: string;
+    customerName?: string;
     productSummary: string;
     totalInr: number;
     escrowStatus: string;
     createdAt: string;
-    rawOrder?: Record<string, any>;
   }) => {
-    const payload = `data: ${JSON.stringify(notification)}\n\n`;
-    for (const client of orderStreamClients) {
+    const safeEvent = {
+      id: notification.id,
+      bizId: notification.bizId,
+      orderNumber: notification.orderNumber,
+      productSummary: notification.productSummary,
+      totalInr: notification.totalInr,
+      escrowStatus: notification.escrowStatus,
+      createdAt: notification.createdAt,
+    };
+    const payload = `data: ${JSON.stringify(safeEvent)}\n\n`;
+    for (const [clientRes, meta] of orderStreamClients.entries()) {
+      if (meta.bizId !== notification.bizId) continue;
+      if (meta.role === 'customer' && notification.customerId && meta.uid !== notification.customerId) {
+        continue;
+      }
+      if (meta.role === 'customer' && !notification.customerId) {
+        continue;
+      }
       try {
-        client.write(payload);
+        clientRes.write(payload);
       } catch {
-        orderStreamClients.delete(client);
+        orderStreamClients.delete(clientRes);
       }
     }
   };
 
-  app.get('/api/orders/stream', (req: Request, res: Response) => {
+  app.get('/api/orders/stream', async (req: Request, res: Response) => {
+    const actor = await requireAuth(req, res);
+    if (!actor) return;
+
+    if (orderStreamClients.size >= MAX_SSE_CLIENTS) {
+      return sendTypedError(res, 503, 'STREAM_CAPACITY_REACHED', 'Too many active notification streams.');
+    }
+    let userConnections = 0;
+    for (const meta of orderStreamClients.values()) {
+      if (meta.uid === actor.uid) userConnections += 1;
+    }
+    if (userConnections >= MAX_SSE_PER_UID) {
+      return sendTypedError(res, 429, 'STREAM_LIMIT_EXCEEDED', 'Too many open streams for current user.');
+    }
+
     res.setHeader('Content-Type', 'text/event-stream');
     res.setHeader('Cache-Control', 'no-cache, no-transform');
     res.setHeader('Connection', 'keep-alive');
     res.flushHeaders?.();
 
-    res.write(`data: ${JSON.stringify({ type: 'connected', timestamp: new Date().toISOString() })}\n\n`);
-    orderStreamClients.add(res);
+    res.write(`data: ${JSON.stringify({ type: 'connected', bizId: actor.bizId, timestamp: new Date().toISOString() })}\n\n`);
+    orderStreamClients.set(res, { uid: actor.uid, role: actor.role, bizId: actor.bizId });
 
     const keepAlive = setInterval(() => {
       try {
@@ -360,43 +540,46 @@ export async function createAppServer() {
     });
   });
 
-  app.post('/api/orders/notify', persistenceCheckMiddleware, async (req: Request, res: Response) => {
-    try {
-      const body = req.body || {};
-      const bizId = String(body.bizId || DEFAULT_BIZ_ID);
-      const id = String(body.id || `ord-${Date.now()}`);
-      const orderNumber = String(body.orderNumber || `#ORD-${Math.floor(1000 + Math.random() * 9000)}`);
-      const customerName = String(body.customerName || 'Verified Buyer');
-      const productSummary = String(body.productSummary || 'Storefront Order');
-      const totalInr = Number(body.totalInr ?? body.total ?? 0);
-      const escrowStatus = String(body.escrowStatus || 'Escrow Locked');
-      const createdAt = String(body.createdAt || new Date().toISOString());
+  const OrderNotifySchema = z.object({
+    id: z.string().min(1).max(120).optional(),
+    orderNumber: z.string().min(1).max(64).optional(),
+    productSummary: z.string().min(1).max(200).optional(),
+    totalInr: z.number().nonnegative().max(100_000_000).optional(),
+    escrowStatus: z.string().min(1).max(80).optional(),
+    createdAt: z.string().optional(),
+  });
 
-      if (body.rawOrder && typeof body.rawOrder === 'object') {
-        await saveOrderForBiz(bizId, {
-          ...body.rawOrder,
-          id,
-          bizId,
-        }).catch(() => {
-          // Non-fatal if Firestore rules block unauthenticated server client fallback
-        });
-      }
+  app.post('/api/orders/notify', persistenceCheckMiddleware, async (req: Request, res: Response) => {
+    const actor = await requireAuth(req, res);
+    if (!actor) return;
+
+    try {
+      const parsed = OrderNotifySchema.parse(req.body || {});
+      const bizId = actor.bizId;
+      const id = parsed.id || `ord-${Date.now()}`;
+      const orderNumber = parsed.orderNumber || `#ORD-${Math.floor(1000 + Math.random() * 9000)}`;
+      const productSummary = parsed.productSummary || 'Storefront Order';
+      const totalInr = Number(parsed.totalInr ?? 0);
+      const escrowStatus = parsed.escrowStatus || 'Escrow Locked';
+      const createdAt = parsed.createdAt || new Date().toISOString();
 
       const notification = {
         id,
         bizId,
+        customerId: actor.role === 'customer' ? actor.uid : undefined,
         orderNumber,
-        customerName,
         productSummary,
         totalInr,
         escrowStatus,
         createdAt,
-        rawOrder: body.rawOrder,
       };
 
       broadcastLiveOrderNotification(notification);
       res.status(201).json({ ok: true, notification });
     } catch (err: any) {
+      if (err instanceof ZodError) {
+        return sendTypedError(res, 400, 'VALIDATION_ERROR', 'Invalid order notification payload', err.issues);
+      }
       res.status(400).json({ ok: false, error: err?.message || 'Unable to broadcast order notification' });
     }
   });
@@ -435,7 +618,17 @@ export async function createAppServer() {
       guestCaptureTokenHash = crypto.createHash('sha256').update(guestCaptureToken).digest('hex');
       guestExpiresAt = new Date(Date.now() + 2 * 60 * 60 * 1000).toISOString(); // 2 hour expiry
     }
-    const bizId = actor.bizId || DEFAULT_BIZ_ID;
+    const requestedStoreSlug =
+      typeof req.body?.storeSlug === 'string' ? req.body.storeSlug.trim() : '';
+    let bizId = actor.bizId || DEFAULT_BIZ_ID;
+    if (isGuest && requestedStoreSlug) {
+      try {
+        const resolvedStore = await resolvePublicStorefrontBySlug(requestedStoreSlug);
+        bizId = resolvedStore.bizId;
+      } catch {
+        // Ignore unknown slug and validate against default tenant
+      }
+    }
 
     try {
       const parsedBody = CreatePayPalOrderSchema.parse({
@@ -749,7 +942,7 @@ export async function createAppServer() {
         const extraCount = (result.order.items?.length || 1) - 1;
         broadcastLiveOrderNotification({
           id: result.order.id,
-          bizId: actor.bizId,
+          bizId: actor.bizId || bizId,
           orderNumber: result.order.orderNumber || result.order.id,
           customerName: actor.email || 'Priya Patel (Apex Cloud Labs)',
           productSummary:
@@ -807,18 +1000,13 @@ export async function createAppServer() {
   // 4. PayPal Sandbox Cancel Order (POST /api/paypal/cancel-order/:id)
   // ==========================================================================
   app.post('/api/paypal/cancel-order/:id', persistenceCheckMiddleware, async (req: Request, res: Response) => {
-    let actor: AuthenticatedActor | null = null;
-    const authHeader = req.headers.authorization;
-    if (authHeader?.startsWith('Bearer ')) {
-      try {
-        actor = await authenticateRequest(req);
-      } catch {}
-    }
+    const actorResolved = await resolveOptionalAuth(req);
+    let actor: AuthenticatedActor | null = actorResolved;
 
     const orderOrPaypalId = req.params.id;
     let existing = defaultServerLedger.getOrderWithEvents(orderOrPaypalId);
     if (!existing) {
-      const firestoreOrder = await getOrderByIdForBiz(DEFAULT_BIZ_ID, orderOrPaypalId);
+      const firestoreOrder = await getOrderByIdForBiz(actor?.bizId || DEFAULT_BIZ_ID, orderOrPaypalId);
       if (firestoreOrder) {
         existing = {
           order: firestoreOrder,
@@ -843,13 +1031,7 @@ export async function createAppServer() {
       if (!guestToken || !order.guestCaptureTokenHash) {
         return sendTypedError(res, 401, 'MISSING_AUTH_TOKEN', 'Authentication required to cancel order.');
       }
-      const candidateHash = crypto.createHash('sha256').update(guestToken.trim()).digest('hex');
-      const storedHashBuf = Buffer.from(order.guestCaptureTokenHash, 'hex');
-      const candidateHashBuf = Buffer.from(candidateHash, 'hex');
-      if (
-        storedHashBuf.length !== candidateHashBuf.length ||
-        !crypto.timingSafeEqual(storedHashBuf, candidateHashBuf)
-      ) {
+      if (!verifyGuestToken(order, guestToken)) {
         return sendTypedError(res, 403, 'INVALID_GUEST_TOKEN', 'Invalid guest capture token.');
       }
       actor = {
@@ -889,11 +1071,23 @@ export async function createAppServer() {
   // 5. Server-Verified Checkout Result Lookup (GET /api/orders/:id/checkout-status)
   // ==========================================================================
   app.get('/api/orders/:id/checkout-status', async (req: Request, res: Response) => {
+    const actor = await resolveOptionalAuth(req);
+    const guestToken = req.headers['x-guest-capture-token'] as string | undefined;
+
+    if (!actor && !guestToken) {
+      return sendTypedError(
+        res,
+        401,
+        'MISSING_AUTH_TOKEN',
+        'Authentication or valid x-guest-capture-token header is required to inspect checkout status.'
+      );
+    }
+
     const orderOrPaypalId = req.params.id;
     let found = defaultServerLedger.getOrderWithEvents(orderOrPaypalId);
 
     if (!found) {
-      const firestoreOrder = await getOrderByIdForBiz(DEFAULT_BIZ_ID, orderOrPaypalId);
+      const firestoreOrder = await getOrderByIdForBiz(actor?.bizId || DEFAULT_BIZ_ID, orderOrPaypalId);
       if (firestoreOrder) {
         found = {
           order: firestoreOrder,
@@ -912,11 +1106,69 @@ export async function createAppServer() {
       );
     }
 
-    res.json({
+    if (actor) {
+      if (found.order.bizId && found.order.bizId !== actor.bizId) {
+        return sendTypedError(
+          res,
+          403,
+          'TENANT_ACCESS_DENIED',
+          'Cannot inspect an order belonging to another business tenant.'
+        );
+      }
+      const decision = evaluateRoleAccess(actor, 'orders', 'read', {
+        customerId: found.order.customerId,
+        sellerId: found.order.sellerId,
+      });
+      if (!decision.allowed) {
+        return sendTypedError(res, 403, 'ORDER_ACCESS_DENIED', 'Not authorized to inspect this order.');
+      }
+
+      return res.json({
+        ok: true,
+        order: found.order,
+        escrowEvents: found.escrowEvents,
+        payments: found.payments,
+        verifiedByServer: found.order.verifiedByServer,
+      });
+    }
+
+    if (!verifyGuestToken(found.order, guestToken)) {
+      return sendTypedError(
+        res,
+        403,
+        'INVALID_GUEST_TOKEN',
+        'Invalid guest capture token for this checkout order.'
+      );
+    }
+
+    // Minimal buyer-safe checkout projection for verified guest capture token
+    const safeOrder = {
+      id: found.order.id,
+      orderNumber: found.order.orderNumber,
+      paypalOrderId: found.order.paypalOrderId,
+      paypalCaptureId: found.order.paypalCaptureId,
+      currency: found.order.currency,
+      total: fromMinorUnits(found.order.totalMinor),
+      totalMinor: found.order.totalMinor,
+      subtotalMinor: found.order.subtotalMinor,
+      taxMinor: found.order.taxMinor,
+      paypalFeeMinor: found.order.paypalFeeMinor,
+      netPayoutMinor: found.order.netPayoutMinor,
+      feesFromProvider: found.order.feesFromProvider,
+      paymentStatus: found.order.paymentStatus,
+      escrowState: found.order.escrowState,
+      verifiedByServer: found.order.verifiedByServer,
+      failureReason: found.order.failureReason,
+      items: found.order.items,
+      createdAt: found.order.createdAt,
+      updatedAt: found.order.updatedAt,
+    };
+
+    return res.json({
       ok: true,
-      order: found.order,
+      order: safeOrder,
       escrowEvents: found.escrowEvents,
-      payments: found.payments,
+      payments: [],
       verifiedByServer: found.order.verifiedByServer,
     });
   });
@@ -1057,7 +1309,36 @@ export async function createAppServer() {
       );
     }
 
-    // Sync in-memory ledger if order is tracked in memory
+    // Never trust amounts coming from the client; derive strictly from authoritative server record
+    const refundAmountMinor =
+      typeof authoritativeOrder.totalMinor === 'number'
+        ? authoritativeOrder.totalMinor
+        : Math.round(Number(authoritativeOrder.total || authoritativeOrder.amountInr || 0) * 100);
+    const refundCurrency: 'INR' | 'USD' = authoritativeOrder.currency === 'USD' ? 'USD' : 'INR';
+    const refundIdempotencyKey =
+      (typeof req.body?.idempotencyKey === 'string' && req.body.idempotencyKey.trim()) ||
+      `refund-${authoritativeOrder.id}-${currentEscrow}`;
+
+    // Execute PayPal provider refund BEFORE mutating local or Firestore state (SEC-006)
+    let providerRefund: { refundId: string; status: 'COMPLETED' | 'PENDING'; mode: string };
+    try {
+      providerRefund = await defaultServerLedger.executeProviderRefund({
+        paypalCaptureId: authoritativeOrder.paypalCaptureId || '',
+        amountMinor: refundAmountMinor,
+        currency: refundCurrency,
+        reason,
+        idempotencyKey: refundIdempotencyKey,
+      });
+    } catch (providerErr: any) {
+      return sendTypedError(
+        res,
+        502,
+        'PAYPAL_REFUND_FAILED',
+        providerErr?.message || 'PayPal refund execution failed; escrow state was not mutated.'
+      );
+    }
+
+    // Sync in-memory ledger after verified provider refund
     if (ledgerEntry) {
       try {
         defaultServerLedger.transitionOrderEscrow(authoritativeOrder.id, {
@@ -1071,7 +1352,6 @@ export async function createAppServer() {
       }
     }
 
-    // Never trust amounts coming from the client; derive strictly from authoritative server record
     const authoritativeAmountInr =
       typeof authoritativeOrder.totalMinor === 'number'
         ? Math.round(authoritativeOrder.totalMinor / 100)
@@ -1085,12 +1365,16 @@ export async function createAppServer() {
       escrowStage: 'refunded',
       status: 'refunded',
       paymentStatus: 'Refunded',
+      paypalRefundId: providerRefund.refundId,
+      refundStatus: providerRefund.status,
+      refundProviderMode: providerRefund.mode,
       updatedAt: new Date().toISOString(),
     });
 
     const escrowEvent = await recordEscrowEventForBiz(actor.bizId, {
       orderId: updatedOrder.id,
       paypalOrderId: updatedOrder.paypalOrderId || orderOrPaypalId,
+      paypalRefundId: providerRefund.refundId,
       stage: 'refunded',
       previousStage,
       fromState: previousStage,
@@ -1108,6 +1392,7 @@ export async function createAppServer() {
       ok: true,
       order: updatedOrder,
       escrowEvent,
+      providerRefund,
       authoritativeAmountInr,
     });
   });
@@ -1339,8 +1624,154 @@ export async function createAppServer() {
   });
 
   // ==========================================================================
-  // 9. Executive KPI Calculation for Chosen Date Range (POST /api/executive/kpis)
+  // 9. Executive KPI Calculation for Chosen Date Range (GET & POST /api/executive/kpis)
   // ==========================================================================
+  async function loadScopedOrdersForActor(actor: { bizId: string; uid: string; role: any }) {
+    const firestoreOrders = await getOrdersForBiz(actor.bizId, actor as any);
+    const ledgerOrders = defaultServerLedger.listOrdersForActor(actor as any);
+    const mergedMap = new Map<string, any>();
+    for (const ord of firestoreOrders) {
+      if (!ord.bizId || ord.bizId === actor.bizId) mergedMap.set(ord.id, ord);
+    }
+    for (const ord of ledgerOrders) {
+      if (!mergedMap.has(ord.id) && (!ord.bizId || ord.bizId === actor.bizId)) {
+        mergedMap.set(ord.id, ord);
+      }
+    }
+    return Array.from(mergedMap.values());
+  }
+
+  app.get('/api/executive/kpis', async (req: Request, res: Response) => {
+    try {
+      const actor = await requireAuth(req, res);
+      if (!actor) return;
+      if (actor.role !== 'business_head' && actor.role !== 'finance') {
+        return sendTypedError(
+          res,
+          403,
+          'ROLE_ACCESS_DENIED',
+          'Only Business Head and Finance roles may query Executive KPI aggregates.'
+        );
+      }
+
+      const rawRange = String(req.query.dateRange || '30d');
+      const dateRange = (['7d', '30d', '90d', 'all'].includes(rawRange) ? rawRange : '30d') as
+        | '7d'
+        | '30d'
+        | '90d'
+        | 'all';
+      const hasComparisonRequested = String(req.query.hasComparison || 'false') === 'true';
+      const allowDemo =
+        actor.uid.startsWith('demo-') ||
+        process.env.DEMO_MODE === 'true' ||
+        process.env.NODE_ENV === 'test';
+
+      const scopedOrders = (await loadScopedOrdersForActor(actor)).filter(
+        (o) => allowDemo || !o.isDemo
+      );
+
+      const nowMs = Date.now();
+      const rangeDays = dateRange === '7d' ? 7 : dateRange === '30d' ? 30 : dateRange === '90d' ? 90 : 3650;
+      const cutoffMs = nowMs - rangeDays * 86400000;
+      const inWindowOrders =
+        dateRange === 'all'
+          ? scopedOrders
+          : scopedOrders.filter((o) => {
+              const t = new Date(o.createdAt || nowMs).getTime();
+              return Number.isFinite(t) && t >= cutoffMs;
+            });
+
+      const resolveTotalMinor = (o: any) =>
+        typeof o.totalMinor === 'number'
+          ? o.totalMinor
+          : Math.round(Number(o.total || o.amountInr || 0) * 100);
+
+      let gmvMinor = 0;
+      let subtotalMinor = 0;
+      let taxMinor = 0;
+      let capturedCount = 0;
+      let authorizedEscrowMinor = 0;
+      let refundedMinor = 0;
+      let verifiedPaypalFeeMinorSum = 0;
+      let hasProviderFees = false;
+
+      for (const o of inWindowOrders) {
+        const totalMinor = resolveTotalMinor(o);
+        const subMinor =
+          typeof o.subtotalMinor === 'number' ? o.subtotalMinor : Math.round((totalMinor * 100) / 118);
+        const oTaxMinor =
+          typeof o.taxMinor === 'number' ? o.taxMinor : Math.max(0, totalMinor - subMinor);
+
+        gmvMinor += totalMinor;
+        subtotalMinor += subMinor;
+        taxMinor += oTaxMinor;
+
+        const isCaptured =
+          o.paymentStatus === 'Captured' ||
+          o.escrowState === 'funded' ||
+          o.escrowState === 'in_delivery' ||
+          o.escrowState === 'released';
+        if (isCaptured) capturedCount += 1;
+
+        if (o.escrowState === 'funded' || o.escrowState === 'in_delivery') {
+          authorizedEscrowMinor += totalMinor;
+        }
+        if (o.escrowState === 'refunded' || o.paymentStatus === 'Refunded') {
+          refundedMinor += totalMinor;
+        }
+        if (o.feesFromProvider === true && typeof o.paypalFeeMinor === 'number') {
+          hasProviderFees = true;
+          verifiedPaypalFeeMinorSum += o.paypalFeeMinor;
+        }
+      }
+
+      const startIso = new Date(dateRange === 'all' ? 0 : cutoffMs).toISOString();
+      const endIso = new Date(nowMs).toISOString();
+      const comparisonReport = computeExecutiveKpisForDateRange(
+        scopedOrders.map((o) => ({
+          id: o.id,
+          totalMinor: resolveTotalMinor(o),
+          escrowState: (o.escrowState || 'created') as EscrowState,
+          createdAtIso: o.createdAt || endIso,
+          isDemo: Boolean(o.isDemo),
+        })),
+        startIso,
+        endIso,
+        'INR',
+        { includeDemo: allowDemo }
+      );
+
+      const hasComparisonData = hasComparisonRequested && comparisonReport.hasBaseline;
+      const comparisonNote = hasComparisonRequested
+        ? comparisonReport.hasBaseline
+          ? comparisonReport.growthLabel
+          : 'No prior-period baseline records available'
+        : 'Current window only (comparison off)';
+
+      return res.json({
+        ok: true,
+        dateRange,
+        currency: 'INR',
+        recordCount: inWindowOrders.length,
+        hasComparisonData,
+        comparisonNote,
+        kpis: {
+          gmvMinor,
+          subtotalMinor,
+          taxMinor,
+          capturedCount,
+          authorizedEscrowMinor,
+          refundedMinor,
+          verifiedPaypalFeeMinor: hasProviderFees ? verifiedPaypalFeeMinorSum : null,
+          verifiedNetPayoutMinor: hasProviderFees ? Math.max(0, gmvMinor - verifiedPaypalFeeMinorSum) : null,
+          feesFromProvider: hasProviderFees,
+        },
+      });
+    } catch {
+      return sendTypedError(res, 400, 'KPI_CALCULATION_ERROR', 'Failed to compute executive KPIs');
+    }
+  });
+
   app.post('/api/executive/kpis', async (req: Request, res: Response) => {
     try {
       const actor = await requireAuth(req, res);
@@ -1355,13 +1786,16 @@ export async function createAppServer() {
       }
 
       const parsed = ExecutiveKpiBodySchema.parse(req.body);
-      const allOrders = defaultServerLedger.listAllOrdersInternal();
+      const scopedOrders = await loadScopedOrdersForActor(actor);
       const report = computeExecutiveKpisForDateRange(
-        allOrders.map((o) => ({
+        scopedOrders.map((o) => ({
           id: o.id,
-          totalMinor: o.totalMinor,
-          escrowState: o.escrowState,
-          createdAtIso: o.createdAt,
+          totalMinor:
+            typeof o.totalMinor === 'number'
+              ? o.totalMinor
+              : Math.round(Number(o.total || o.amountInr || 0) * 100),
+          escrowState: (o.escrowState || 'created') as EscrowState,
+          createdAtIso: o.createdAt || new Date().toISOString(),
         })),
         parsed.startIso,
         parsed.endIso,
@@ -1370,6 +1804,7 @@ export async function createAppServer() {
 
       res.json({
         ok: true,
+        bizId: actor.bizId,
         report,
       });
     } catch (err) {
@@ -1391,9 +1826,9 @@ export async function createAppServer() {
   //     Every route returns { source: "live" | "fallback", ... }
   // ==========================================================================
 
-  function enforceAiRateLimit(req: Request, res: Response): boolean {
-    const actor = resolveActorFromRequest(req);
-    const key = `${actor.uid}:${req.ip || 'local'}`;
+  function enforceAiRateLimit(req: Request, res: Response, authenticatedUid?: string): boolean {
+    const actorUid = authenticatedUid || resolveActorFromRequest(req).uid;
+    const key = `${actorUid}:${req.ip || 'local'}`;
     const limit = checkAiRateLimit(key);
     res.setHeader('X-RateLimit-Remaining', String(limit.remaining));
     if (!limit.allowed) {
@@ -1410,9 +1845,10 @@ export async function createAppServer() {
 
   // 10a) POST /api/copilot (Streaming SSE + JSON support, Role-Aware Function Calling)
   app.post('/api/copilot', async (req: Request, res: Response) => {
-    if (!enforceAiRateLimit(req, res)) return;
+    const actor = await requireAuth(req, res);
+    if (!actor) return;
+    if (!enforceAiRateLimit(req, res, actor.uid)) return;
     try {
-      const actor = resolveActorFromRequest(req);
       const result = await runCopilotWithTools(actor, req.body);
 
       const wantsStream =
@@ -1467,7 +1903,12 @@ export async function createAppServer() {
 
   // 10b) POST /api/invoice/analyze (GSTIN regex + Place-of-Supply CGST/SGST vs IGST in code + AI draft)
   app.post('/api/invoice/analyze', async (req: Request, res: Response) => {
-    if (!enforceAiRateLimit(req, res)) return;
+    const actor = await requireAuth(req, res);
+    if (!actor) return;
+    if (actor.role !== 'seller' && actor.role !== 'finance' && actor.role !== 'business_head') {
+      return sendTypedError(res, 403, 'RBAC_FORBIDDEN', 'Only seller, finance, or business head may analyze GST invoices.');
+    }
+    if (!enforceAiRateLimit(req, res, actor.uid)) return;
     try {
       const result = await analyzeInvoiceWithGemini(req.body);
       return res.json(result);
@@ -1487,7 +1928,8 @@ export async function createAppServer() {
 
   // 10c) POST /api/cart/optimize (Ranking & explanation only; all money math from finance.ts)
   app.post('/api/cart/optimize', async (req: Request, res: Response) => {
-    if (!enforceAiRateLimit(req, res)) return;
+    const optActor = await resolveOptionalAuth(req);
+    if (!enforceAiRateLimit(req, res, optActor?.uid)) return;
     try {
       const result = await optimizeCartWithGemini(req.body);
       return res.json(result);
@@ -1507,7 +1949,12 @@ export async function createAppServer() {
 
   // 10d) POST /api/listing/generate (3 columns: Provided by seller, Generated, Missing information)
   app.post('/api/listing/generate', async (req: Request, res: Response) => {
-    if (!enforceAiRateLimit(req, res)) return;
+    const actor = await requireAuth(req, res);
+    if (!actor) return;
+    if (actor.role !== 'seller' && actor.role !== 'business_head') {
+      return sendTypedError(res, 403, 'RBAC_FORBIDDEN', 'Only sellers or business heads may generate product listings.');
+    }
+    if (!enforceAiRateLimit(req, res, actor.uid)) return;
     try {
       const result = await generateListingWithGemini(req.body);
       return res.json(result);
@@ -1527,7 +1974,12 @@ export async function createAppServer() {
 
   // 10e) POST /api/executive/insights (Validated analytics + record citations + "Forecast" labels)
   app.post('/api/executive/insights', async (req: Request, res: Response) => {
-    if (!enforceAiRateLimit(req, res)) return;
+    const actor = await requireAuth(req, res);
+    if (!actor) return;
+    if (actor.role !== 'business_head' && actor.role !== 'finance') {
+      return sendTypedError(res, 403, 'RBAC_FORBIDDEN', 'Only Finance and Business Head roles may generate executive insights.');
+    }
+    if (!enforceAiRateLimit(req, res, actor.uid)) return;
     try {
       const result = await generateExecutiveInsightsWithGemini(req.body);
       return res.json(result);
@@ -1547,7 +1999,12 @@ export async function createAppServer() {
 
   // 10f) POST /api/escrow/recommend (AI Release Agent: release | hold | dispute + confidence + reasons)
   app.post('/api/escrow/recommend', async (req: Request, res: Response) => {
-    if (!enforceAiRateLimit(req, res)) return;
+    const actor = await requireAuth(req, res);
+    if (!actor) return;
+    if (actor.role !== 'seller' && actor.role !== 'finance' && actor.role !== 'business_head') {
+      return sendTypedError(res, 403, 'RBAC_FORBIDDEN', 'Only merchant staff may query escrow recommendations.');
+    }
+    if (!enforceAiRateLimit(req, res, actor.uid)) return;
     try {
       const result = await recommendEscrowWithGemini(req.body);
       return res.json(result);
@@ -1567,7 +2024,8 @@ export async function createAppServer() {
 
   // 10g) POST /api/product/qa (Customer Product Q&A strictly from stored product specs)
   app.post('/api/product/qa', async (req: Request, res: Response) => {
-    if (!enforceAiRateLimit(req, res)) return;
+    const optActor = await resolveOptionalAuth(req);
+    if (!enforceAiRateLimit(req, res, optActor?.uid)) return;
     try {
       const result = await answerProductQaWithGemini(req.body);
       return res.json(result);
@@ -1587,10 +2045,11 @@ export async function createAppServer() {
 
   // Legacy /api/ai/suggest compatibility wrapper (returns source: "live" | "fallback")
   app.post('/api/ai/suggest', async (req: Request, res: Response) => {
-    if (!enforceAiRateLimit(req, res)) return;
+    const actor = await requireAuth(req, res);
+    if (!actor) return;
+    if (!enforceAiRateLimit(req, res, actor.uid)) return;
     try {
       const parsed = AiSuggestBodySchema.parse(req.body);
-      const actor = resolveActorFromRequest(req);
       const copilotRes = await runCopilotWithTools(actor, {
         query: parsed.prompt,
         stream: false,
@@ -1629,18 +2088,24 @@ export async function createAppServer() {
     return res.send(glb);
   });
 
-  app.get('/api/products/assets', (_req: Request, res: Response) => {
+  app.get('/api/products/assets', async (req: Request, res: Response) => {
+    const actor = await resolveOptionalAuth(req);
+    const bizId = actor?.bizId || DEFAULT_BIZ_ID;
     return res.json({
       ok: true,
-      assets: listAllSeller3DAssets(),
+      bizId,
+      assets: listAllSeller3DAssets(bizId),
     });
   });
 
-  app.get('/api/products/:sku/asset', (req: Request, res: Response) => {
-    const asset = getSeller3DAsset(req.params.sku);
+  app.get('/api/products/:sku/asset', async (req: Request, res: Response) => {
+    const actor = await resolveOptionalAuth(req);
+    const bizId = actor?.bizId || DEFAULT_BIZ_ID;
+    const asset = getSeller3DAsset(req.params.sku, bizId);
     return res.json({
       ok: true,
       sku: req.params.sku,
+      bizId,
       hasModel: Boolean(asset && asset.status === 'Ready' && asset.modelUrl),
       asset,
     });
@@ -1663,9 +2128,37 @@ export async function createAppServer() {
           `Role '${actor.role}' cannot upload 3D product assets.`
         );
       }
+
+      const rawSku = req.params.sku;
+      const cleanSku = rawSku.replace(/^#/, '');
+      const products = await getProductsForBiz(actor.bizId);
+      const ownedProduct = products.find(
+        (p) =>
+          p.id === rawSku ||
+          p.id === cleanSku ||
+          String(p.sku || '').replace(/^#/, '') === cleanSku
+      );
+      if (!ownedProduct) {
+        return sendTypedError(
+          res,
+          404,
+          'PRODUCT_NOT_FOUND',
+          `SKU '${rawSku}' does not exist in business tenant '${actor.bizId}'.`
+        );
+      }
+      if (actor.role === 'seller' && ownedProduct.sellerId && ownedProduct.sellerId !== actor.uid) {
+        return sendTypedError(
+          res,
+          403,
+          'RBAC_FORBIDDEN',
+          `Product '${rawSku}' belongs to another seller and cannot be mutated by '${actor.uid}'.`
+        );
+      }
+
       const parsed = SellerAssetUploadSchema.parse(req.body);
       const record = registerSeller3DAsset({
-        sku: req.params.sku,
+        sku: rawSku,
+        bizId: actor.bizId,
         fileName: parsed.fileName,
         sizeBytes: parsed.sizeBytes,
         uploadedBy: actor.email,
@@ -1702,30 +2195,35 @@ export async function createAppServer() {
 
   // Multi-turn Gemini Chatbot (gemini-4-argon, gemini-3.8-flash, gemini-3.1-flash-lite)
   app.post('/api/ai/chat', async (req: Request, res: Response) => {
+    const actor = await resolveOptionalAuth(req);
+    const activeActor = actor || (await requireAuth(req, res));
+    if (!activeActor) return;
+    if (!enforceAiRateLimit(req, res, activeActor.uid)) return;
+
     try {
       const {
         messages = [],
         model = 'gemini-3.8-flash',
         portalRole = 'seller',
-        customSystemInstruction,
       } = req.body || {};
 
       const allowedModels = ['gemini-4-argon', 'gemini-3.8-flash', 'gemini-3.1-flash-lite'];
       const selectedModel = allowedModels.includes(model) ? model : 'gemini-3.8-flash';
+      const resolvedPortalRole =
+        activeActor.role === 'customer' ? 'customer' : portalRole === 'customer' ? 'customer' : 'seller';
 
-      const defaultSystemInstruction =
-        portalRole === 'customer'
+      const systemInstruction =
+        resolvedPortalRole === 'customer'
           ? 'You are the AC PayPilot Customer Shopping & Escrow Concierge. Help shoppers compare smart hardware products (AeroBreeze BLDC Ceiling Fan #FAN-BLDC-892, Yonex Astrox 99 Pro #SPO-YNX-99P, AcousticSphere ANC Pods #AUD-ANC-99, ProArt Studio Workstation #AC-WRK-8990), inspect 3D/AR models, optimize SmartCart budgets in INR (₹), and understand 100% PayPal Escrow buyer protection. Keep answers concise, clear, and helpful.'
           : 'You are the AC PayPilot Seller Operations & Autonomous Escrow Strategist. Help merchants analyze order volume trends, audit GST invoices (CGST/SGST vs IGST), optimize product listings, triage escrow risk anomalies, and manage PayPal Sandbox settlements in INR (₹). Provide actionable, data-driven answers.';
-
-      const systemInstruction = customSystemInstruction || defaultSystemInstruction;
 
       const normalizedHistory = Array.isArray(messages)
         ? messages
             .filter((m: any) => m && typeof m.text === 'string' && m.text.trim().length > 0)
+            .slice(-24)
             .map((m: any) => ({
               role: m.role === 'assistant' || m.role === 'model' ? 'model' : 'user',
-              parts: [{ text: String(m.text) }],
+              parts: [{ text: String(m.text).slice(0, 4000) }],
             }))
         : [];
 
@@ -1745,9 +2243,8 @@ export async function createAppServer() {
       return res.json({
         ok: true,
         model: selectedModel,
-        portalRole,
+        portalRole: resolvedPortalRole,
         reply: response.text || 'Processed your request.',
-        systemInstruction,
       });
     } catch (err: any) {
       if (err?.message === 'GEMINI_API_KEY_MISSING') {
@@ -1763,6 +2260,10 @@ export async function createAppServer() {
 
   // Microphone Audio Transcription (gemini-3.5-transcribe)
   app.post('/api/ai/transcribe', async (req: Request, res: Response) => {
+    const actor = await requireAuth(req, res);
+    if (!actor) return;
+    if (!enforceAiRateLimit(req, res, actor.uid)) return;
+
     try {
       const { audioBase64, mimeType = 'audio/webm', prompt } = req.body || {};
       if (!audioBase64 || typeof audioBase64 !== 'string') {
@@ -1807,6 +2308,10 @@ export async function createAppServer() {
 
   // Create & Edit Images (gemini-nano-banana-2.1)
   app.post('/api/ai/image', async (req: Request, res: Response) => {
+    const actor = await requireAuth(req, res);
+    if (!actor) return;
+    if (!enforceAiRateLimit(req, res, actor.uid)) return;
+
     try {
       const {
         prompt,
@@ -1893,6 +2398,10 @@ export async function createAppServer() {
 
   // Animate Uploaded Photo into Video via Interactions API (gemini-omni-1.1-flash)
   app.post('/api/ai/video', async (req: Request, res: Response) => {
+    const actor = await requireAuth(req, res);
+    if (!actor) return;
+    if (!enforceAiRateLimit(req, res, actor.uid)) return;
+
     try {
       const {
         imageBase64,
@@ -1989,7 +2498,11 @@ export async function createAppServer() {
   // ==========================================================================
   // 12. System Health Check Diagnostic Endpoint (GET /api/health/system-check)
   // ==========================================================================
-  app.get('/api/health/system-check', async (_req: Request, res: Response) => {
+  app.get('/api/health/system-check', async (req: Request, res: Response) => {
+    const actor = await requireAuth(req, res);
+    if (!actor) return;
+    if (!enforceAiRateLimit(req, res, actor.uid)) return;
+
     try {
       const diagnostic = await runFullSystemDiagnostic();
       return res.status(diagnostic.ok ? 200 : 503).json(diagnostic);
@@ -2026,13 +2539,8 @@ export async function createAppServer() {
       return false;
     }
 
-    // Verify certUrl is valid HTTPS and strictly hosted on a PayPal domain
-    try {
-      const parsedCert = new URL(certUrl);
-      if (parsedCert.protocol !== 'https:' || !parsedCert.hostname.endsWith('.paypal.com')) {
-        return false;
-      }
-    } catch {
+    // Verify certUrl is valid HTTPS and strictly hosted on an official PayPal API hostname
+    if (!isAllowedPayPalCertUrl(certUrl)) {
       return false;
     }
 
@@ -2062,8 +2570,9 @@ export async function createAppServer() {
     }
 
     try {
+      const paypalApiBase = getPayPalApiBaseUrl();
       const basicAuth = Buffer.from(`${clientId}:${clientSecret}`).toString('base64');
-      const tokenRes = await fetch('https://api-m.sandbox.paypal.com/v1/oauth2/token', {
+      const tokenRes = await fetch(`${paypalApiBase}/v1/oauth2/token`, {
         method: 'POST',
         headers: {
           Authorization: `Basic ${basicAuth}`,
@@ -2077,7 +2586,7 @@ export async function createAppServer() {
       if (!accessToken) return false;
 
       const verifyRes = await fetch(
-        'https://api-m.sandbox.paypal.com/v1/notifications/verify-webhook-signature',
+        `${paypalApiBase}/v1/notifications/verify-webhook-signature`,
         {
           method: 'POST',
           headers: {
@@ -2136,7 +2645,7 @@ export async function createAppServer() {
       const resource = parsed.resource || {};
       const paypalOrderId = (resource.id as string) || (resource.order_id as string) || '';
 
-      // 2. Deduplication check by event ID (durable + memory)
+      // Check existing processed status (durable + memory) before mutating
       if (parsed.id) {
         const isProcessed = await isWebhookEventProcessed(parsed.id);
         if (isProcessed || processedWebhookEventIds.has(parsed.id)) {
@@ -2148,15 +2657,9 @@ export async function createAppServer() {
             message: `Event '${parsed.id}' has already been processed.`,
           });
         }
-        await recordWebhookEvent(parsed.id, {
-          eventType,
-          paypalOrderId,
-          timestamp: new Date().toISOString(),
-        });
-        processedWebhookEventIds.add(parsed.id);
       }
 
-      // Check for supported event types
+      // Check for supported event types BEFORE recording event ID
       const supportedEvents = [
         'PAYMENT.CAPTURE.COMPLETED',
         'PAYMENT.CAPTURE.DENIED',
@@ -2171,10 +2674,12 @@ export async function createAppServer() {
         });
       }
 
-      // 3. Process webhook event and validate referenced order
+      // Validate referenced order, currency & minor-unit amount BEFORE recording webhook deduplication
+      let existingOrder: any = null;
+      let existingLedger: ReturnType<typeof defaultServerLedger.getOrderWithEvents> = null;
       if (paypalOrderId) {
-        const existingOrder = await getOrderByIdForBiz(DEFAULT_BIZ_ID, paypalOrderId);
-        const existingLedger = defaultServerLedger.getOrderWithEvents(paypalOrderId);
+        existingOrder = await getOrderByIdForBiz(DEFAULT_BIZ_ID, paypalOrderId);
+        existingLedger = defaultServerLedger.getOrderWithEvents(paypalOrderId);
         const targetOrder = existingOrder || existingLedger?.order;
 
         if (!targetOrder) {
@@ -2210,7 +2715,30 @@ export async function createAppServer() {
             }
           }
         }
+      }
 
+      // Atomically claim event ID only AFTER validation passes (eliminates TOCTOU duplicate race)
+      if (parsed.id) {
+        const recordResult = await recordWebhookEvent(parsed.id, {
+          eventType,
+          paypalOrderId,
+          timestamp: new Date().toISOString(),
+        });
+        processedWebhookEventIds.add(parsed.id);
+        if (recordResult.alreadyExists) {
+          return res.status(200).json({
+            ok: true,
+            duplicate: true,
+            eventId: parsed.id,
+            status: 'DUPLICATE_IGNORED',
+            message: `Event '${parsed.id}' has already been processed.`,
+          });
+        }
+      }
+
+      // 3. Apply validated escrow transition
+      if (paypalOrderId) {
+        const targetOrder = existingOrder || existingLedger?.order;
         if (existingOrder) {
           let nextState = existingOrder.escrowState;
           if (eventType === 'PAYMENT.CAPTURE.COMPLETED') nextState = 'funded';
@@ -2564,6 +3092,13 @@ export async function createAppServer() {
 
   // Auto-generate storefront brand and products with Gemini (Onboarding finish)
   app.post('/api/ai/generate-storefront', async (req: Request, res: Response) => {
+    const actor = await requireAuth(req, res);
+    if (!actor) return;
+    if (actor.role !== 'seller' && actor.role !== 'business_head') {
+      return sendTypedError(res, 403, 'RBAC_FORBIDDEN', 'Only seller or business head may generate storefront assets.');
+    }
+    if (!enforceAiRateLimit(req, res, actor.uid)) return;
+
     try {
       const { businessName, category, currency } = req.body || {};
       if (!businessName || !category) {
@@ -2583,6 +3118,13 @@ export async function createAppServer() {
 
   // AI Theme Design Assistant ("make it premium and minimal for jewellery")
   app.post('/api/ai/design-assistant', async (req: Request, res: Response) => {
+    const actor = await requireAuth(req, res);
+    if (!actor) return;
+    if (actor.role !== 'seller' && actor.role !== 'business_head') {
+      return sendTypedError(res, 403, 'RBAC_FORBIDDEN', 'Only seller or business head may run the AI design assistant.');
+    }
+    if (!enforceAiRateLimit(req, res, actor.uid)) return;
+
     try {
       const { prompt, currentTheme, currentTemplateId, businessCategory } = req.body || {};
       if (!prompt) {
@@ -2603,6 +3145,13 @@ export async function createAppServer() {
 
   // AI Seller Insights for Dashboard
   app.get('/api/ai/seller-insights', async (req: Request, res: Response) => {
+    const actor = await requireAuth(req, res);
+    if (!actor) return;
+    if (actor.role !== 'seller' && actor.role !== 'business_head' && actor.role !== 'finance') {
+      return sendTypedError(res, 403, 'RBAC_FORBIDDEN', 'Only merchant or finance staff may fetch seller insights.');
+    }
+    if (!enforceAiRateLimit(req, res, actor.uid)) return;
+
     try {
       const bizName = (req.query.businessName as string) || 'AeroCool Dynamics';
       const category = (req.query.category as string) || 'Electronics';
@@ -2767,6 +3316,26 @@ export async function createAppServer() {
 
   // Catch-all for unknown /api/* routes
   // ==========================================================================
+  // Public Sanitized Storefront Projection (SEC-010: never leaks ownerUid/paypalEmail/taxIds)
+  // ==========================================================================
+  app.get('/api/storefront/:slug', async (req: Request, res: Response) => {
+    try {
+      const data = await resolvePublicStorefrontBySlug(req.params.slug);
+      return res.json({
+        ok: true,
+        ...data,
+      });
+    } catch (err: any) {
+      return sendTypedError(
+        res,
+        500,
+        'STOREFRONT_LOAD_ERROR',
+        err?.message || 'Unable to load storefront configuration'
+      );
+    }
+  });
+
+  // ==========================================================================
   // Storefront Order Server Endpoints (Admin SDK persistence; clients cannot write orders directly)
   // ==========================================================================
   const StorefrontOrderItemSchema = z.object({
@@ -2778,7 +3347,8 @@ export async function createAppServer() {
   });
 
   const StorefrontOrderCreateSchema = z.object({
-    bizId: z.string().min(1).default(DEFAULT_BIZ_ID),
+    bizId: z.string().min(1).optional(),
+    storeSlug: z.string().min(1).optional(),
     orderNumber: z.string().optional(),
     customerName: z.string().min(1),
     customerEmail: z.string().email(),
@@ -2796,7 +3366,25 @@ export async function createAppServer() {
   app.post('/api/storefront/orders', persistenceCheckMiddleware, async (req: Request, res: Response) => {
     try {
       const parsed = StorefrontOrderCreateSchema.parse(req.body || {});
-      const bizId = parsed.bizId || DEFAULT_BIZ_ID;
+      const authActor = await resolveOptionalAuth(req);
+
+      let bizId = DEFAULT_BIZ_ID;
+      if (authActor) {
+        bizId = authActor.bizId;
+      } else if (parsed.storeSlug) {
+        const resolved = await resolvePublicStorefrontBySlug(parsed.storeSlug);
+        bizId = resolved.bizId;
+      }
+
+      if (parsed.bizId && parsed.bizId !== bizId) {
+        return sendTypedError(
+          res,
+          403,
+          'TENANT_ACCESS_DENIED',
+          'Caller cannot specify an arbitrary cross-tenant bizId on storefront order creation.'
+        );
+      }
+
       const products = await getProductsForBiz(bizId);
       const bySku = new Map<string, any>();
       for (const product of products) {
@@ -2832,14 +3420,38 @@ export async function createAppServer() {
       const taxable = Math.max(0, subtotal - discount);
       const tax = Math.round(taxable * 0.18);
       const total = taxable + shippingFee + tax;
+      const totalMinor = Math.round(total * 100);
       const escrowFee = Math.round(total * 0.015);
       const now = new Date().toISOString();
+
+      // SEC-004: NEVER mark an order as Escrow Locked without server-verified capture.
+      let verifiedCapture = false;
+      if (parsed.paypalOrderId) {
+        const ledgerOrder = defaultServerLedger.getOrderWithEvents(parsed.paypalOrderId)?.order;
+        const dbOrder = ledgerOrder ? null : await getOrderByIdForBiz(bizId, parsed.paypalOrderId);
+        const matchedPayPalOrder = ledgerOrder || dbOrder;
+        if (
+          !matchedPayPalOrder ||
+          matchedPayPalOrder.paymentStatus !== 'Captured' ||
+          !matchedPayPalOrder.verifiedByServer
+        ) {
+          return sendTypedError(
+            res,
+            400,
+            'PAYMENT_NOT_VERIFIED',
+            `PayPal order '${parsed.paypalOrderId}' has not been captured and verified by the server.`
+          );
+        }
+        verifiedCapture = true;
+      }
+
       const orderId = `ord-store-${Date.now()}-${crypto.randomBytes(4).toString('hex')}`;
       const orderNumber = parsed.orderNumber || `#ORD-${Math.floor(1000 + Math.random() * 9000)}`;
 
       const order = await saveOrderForBiz(bizId, {
         id: orderId,
         bizId,
+        customerId: authActor?.uid || `guest-${crypto.createHash('sha256').update(parsed.customerEmail.toLowerCase()).digest('hex').slice(0, 12)}`,
         orderNumber,
         customerName: parsed.customerName,
         customerEmail: parsed.customerEmail,
@@ -2851,14 +3463,26 @@ export async function createAppServer() {
         shippingFee,
         tax,
         total,
+        totalMinor,
         escrowFee,
-        escrowStatus: 'Escrow Locked',
+        escrowState: verifiedCapture ? 'funded' : 'created',
+        paymentStatus: verifiedCapture ? 'Captured' : 'Created',
+        verifiedByServer: verifiedCapture,
+        escrowStatus: verifiedCapture ? 'Escrow Locked' : 'Pending Payment',
         paymentMethod: parsed.paymentMethod,
-        paypalOrderId: parsed.paypalOrderId,
+        ...(parsed.paypalOrderId ? { paypalOrderId: parsed.paypalOrderId } : {}),
         trackingId: parsed.trackingId || `BLUEDART-${Math.floor(100000000 + Math.random() * 900000000)}`,
         carrier: parsed.carrier || 'BlueDart Air Express',
         timeline: [
-          { step: 'escrow_locked', label: 'Payment Verified & Secured in Escrow', timestamp: now, completed: true, current: true },
+          {
+            step: verifiedCapture ? 'escrow_locked' : 'created',
+            label: verifiedCapture
+              ? 'Payment Verified & Secured in Escrow'
+              : 'Order Created — Awaiting Payment Verification',
+            timestamp: now,
+            completed: verifiedCapture,
+            current: true,
+          },
           { step: 'packed', label: 'Merchant Processing & Packing', timestamp: '', completed: false },
           { step: 'in_transit', label: 'Shipped via BlueDart Express Air', timestamp: '', completed: false },
           { step: 'released', label: 'Delivery Verified & Escrow Released', timestamp: '', completed: false },
@@ -2870,10 +3494,12 @@ export async function createAppServer() {
       const escrowEvent = await recordEscrowEventForBiz(bizId, {
         orderId,
         fromState: null,
-        toState: 'created',
-        actorId: 'storefront-customer',
-        actorRole: 'customer',
-        reason: `Storefront order ${orderNumber} created for ${parsed.customerEmail}`,
+        toState: verifiedCapture ? 'funded' : 'created',
+        actorId: authActor?.uid || 'storefront-customer',
+        actorRole: authActor?.role || 'customer',
+        reason: verifiedCapture
+          ? `Storefront order ${orderNumber} verified & funded in escrow for ${parsed.customerEmail}`
+          : `Storefront order ${orderNumber} created awaiting PayPal capture`,
         timestamp: now,
       });
 
@@ -2910,6 +3536,61 @@ export async function createAppServer() {
         return sendTypedError(res, 403, 'TENANT_ACCESS_DENIED', 'Cannot update an order belonging to another business tenant.');
       }
 
+      const toState: EscrowState =
+        parsed.escrowStatus === 'In Transit'
+          ? 'in_delivery'
+          : parsed.escrowStatus === 'Delivered — Escrow Released'
+            ? 'released'
+            : parsed.escrowStatus === 'Disputed'
+              ? 'disputed'
+              : 'funded';
+
+      if (
+        (toState === 'funded' || toState === 'in_delivery' || toState === 'released') &&
+        order.paymentStatus !== 'Captured' &&
+        order.verifiedByServer !== true
+      ) {
+        return sendTypedError(
+          res,
+          400,
+          'PAYMENT_NOT_VERIFIED',
+          `Cannot advance storefront order '${order.id}' to '${parsed.escrowStatus}' before payment is verified & captured.`
+        );
+      }
+
+      const currentState = (order.escrowState ||
+        (order.escrowStatus === 'In Transit'
+          ? 'in_delivery'
+          : order.escrowStatus === 'Delivered — Escrow Released'
+            ? 'released'
+            : order.escrowStatus === 'Disputed'
+              ? 'disputed'
+              : order.escrowStatus === 'Pending Payment'
+                ? 'created'
+                : 'funded')) as EscrowState;
+
+      const transitionRes = transitionEscrowState({
+        orderId: order.id,
+        currentState,
+        nextState: toState,
+        actorId: actor.uid,
+        actorRole: actor.role as any,
+        reason: parsed.reason || `Storefront order status changed to ${parsed.escrowStatus}`,
+      });
+      if (!transitionRes.ok || !transitionRes.event) {
+        const status =
+          transitionRes.code === 'UNAUTHORIZED_ROLE_FOR_TRANSITION' ||
+          transitionRes.code === 'AI_DIRECT_MUTATION_FORBIDDEN'
+            ? 403
+            : 400;
+        return sendTypedError(
+          res,
+          status,
+          transitionRes.code || 'INVALID_STATE_TRANSITION',
+          transitionRes.error || 'Storefront escrow state transition rejected.'
+        );
+      }
+
       const now = new Date().toISOString();
       const timeline = Array.isArray(order.timeline) ? order.timeline : [];
       const updatedTimeline = timeline.map((item: any) => {
@@ -2925,18 +3606,10 @@ export async function createAppServer() {
         return item;
       });
 
-      const toState =
-        parsed.escrowStatus === 'In Transit'
-          ? 'in_delivery'
-          : parsed.escrowStatus === 'Delivered — Escrow Released'
-            ? 'released'
-            : parsed.escrowStatus === 'Disputed'
-              ? 'disputed'
-              : 'funded';
-
       const updated = await saveOrderForBiz(actor.bizId, {
         ...order,
         bizId: actor.bizId,
+        escrowState: toState,
         escrowStatus: parsed.escrowStatus,
         timeline: updatedTimeline,
         ...(parsed.trackingId ? { trackingId: parsed.trackingId } : {}),
@@ -2947,7 +3620,7 @@ export async function createAppServer() {
       const escrowEvent = await recordEscrowEventForBiz(actor.bizId, {
         orderId: updated.id,
         orderNumber: updated.orderNumber,
-        fromState: order.escrowState || 'funded',
+        fromState: currentState,
         toState,
         actorId: actor.uid,
         actorRole: actor.role,
@@ -3002,8 +3675,22 @@ export async function createAppServer() {
       fs.existsSync(path.join(candidate, 'index.html'))
     );
     if (distPath) {
-      app.use(express.static(distPath));
+      app.use(
+        express.static(distPath, {
+          index: false,
+          setHeaders: (res, filePath) => {
+            if (filePath.includes(`${path.sep}assets${path.sep}`)) {
+              res.setHeader('Cache-Control', 'public, max-age=31536000, immutable');
+            } else if (filePath.endsWith('robots.txt') || filePath.endsWith('sitemap.xml')) {
+              res.setHeader('Cache-Control', 'public, max-age=3600');
+            } else if (filePath.endsWith('index.html')) {
+              res.setHeader('Cache-Control', 'no-cache, must-revalidate');
+            }
+          },
+        })
+      );
       app.get('*', (_req: Request, res: Response) => {
+        res.setHeader('Cache-Control', 'no-cache, must-revalidate');
         res.sendFile(path.join(distPath, 'index.html'));
       });
     }

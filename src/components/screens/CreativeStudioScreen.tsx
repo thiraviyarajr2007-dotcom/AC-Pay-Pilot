@@ -24,7 +24,7 @@ export const CreativeStudioScreen: React.FC<CreativeStudioScreenProps> = ({
   initialTab = 'three-3d',
   showToast,
 }) => {
-  const { role } = useRole();
+  const { role, authFetch } = useRole();
   const resolvedPortal: 'customer' | 'seller' =
     portalMode || (role === 'customer' ? 'customer' : 'seller');
 
@@ -125,9 +125,8 @@ export const CreativeStudioScreen: React.FC<CreativeStudioScreenProps> = ({
     setImageLoading(true);
     setImageError(null);
     try {
-      const res = await fetch('/api/ai/image', {
+      const res = await authFetch('/api/ai/image', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           prompt: imagePrompt.trim(),
           imageBase64: sourceEditImage?.base64,
@@ -136,9 +135,9 @@ export const CreativeStudioScreen: React.FC<CreativeStudioScreenProps> = ({
           imageSize,
         }),
       });
-      const data = await res.json();
+      const data = await res.json().catch(() => ({}));
       if (!res.ok || !data.ok) {
-        setImageError(data.error || 'Image generation failed.');
+        setImageError(data.error || `Image generation failed (HTTP ${res.status}).`);
       } else {
         setGeneratedImageUrl(data.imageUrl);
         setImageCaption(data.caption || '');
@@ -166,9 +165,8 @@ export const CreativeStudioScreen: React.FC<CreativeStudioScreenProps> = ({
     setVideoLoading(true);
     setVideoError(null);
     try {
-      const res = await fetch('/api/ai/video', {
+      const res = await authFetch('/api/ai/video', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           imageBase64: videoSourceImage.base64,
           mimeType: videoSourceImage.mimeType,
@@ -177,9 +175,9 @@ export const CreativeStudioScreen: React.FC<CreativeStudioScreenProps> = ({
           duration: videoDuration,
         }),
       });
-      const data = await res.json();
+      const data = await res.json().catch(() => ({}));
       if (!res.ok || !data.ok) {
-        setVideoError(data.error || 'Video animation failed.');
+        setVideoError(data.error || `Video animation failed (HTTP ${res.status}).`);
       } else {
         setGeneratedVideoUrl(data.videoUrl);
         showToast?.(`Animated ${videoAspectRatio} video with gemini-omni-1.1-flash`);
@@ -210,19 +208,17 @@ export const CreativeStudioScreen: React.FC<CreativeStudioScreenProps> = ({
     setChatError(null);
 
     try {
-      const res = await fetch('/api/ai/chat', {
+      const res = await authFetch('/api/ai/chat', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           messages: nextHistory.map((m) => ({ role: m.role, text: m.text })),
           model: chatModel,
           portalRole: resolvedPortal,
-          customSystemInstruction: systemInstruction,
         }),
       });
-      const data = await res.json();
+      const data = await res.json().catch(() => ({}));
       if (!res.ok || !data.ok) {
-        setChatError(data.error || 'Chat request failed.');
+        setChatError(data.error || `Chat request failed (HTTP ${res.status}).`);
       } else {
         setChatHistory((prev) => [
           ...prev,
@@ -267,18 +263,17 @@ export const CreativeStudioScreen: React.FC<CreativeStudioScreenProps> = ({
           const reader = new FileReader();
           reader.onloadend = async () => {
             const base64Audio = String(reader.result || '');
-            const res = await fetch('/api/ai/transcribe', {
+            const res = await authFetch('/api/ai/transcribe', {
               method: 'POST',
-              headers: { 'Content-Type': 'application/json' },
               body: JSON.stringify({
                 audioBase64: base64Audio,
                 mimeType,
               }),
             });
-            const data = await res.json();
+            const data = await res.json().catch(() => ({}));
             setTranscribing(false);
             if (!res.ok || !data.ok) {
-              setTranscribeError(data.error || 'Audio transcription failed.');
+              setTranscribeError(data.error || `Audio transcription failed (HTTP ${res.status}).`);
             } else {
               const cleanText = data.transcript || '';
               setTranscriptText(cleanText);
@@ -317,17 +312,16 @@ export const CreativeStudioScreen: React.FC<CreativeStudioScreenProps> = ({
     setTranscribeError(null);
     try {
       const { base64, mimeType } = await readFileAsBase64(file);
-      const res = await fetch('/api/ai/transcribe', {
+      const res = await authFetch('/api/ai/transcribe', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           audioBase64: base64,
           mimeType: mimeType || 'audio/mp3',
         }),
       });
-      const data = await res.json();
+      const data = await res.json().catch(() => ({}));
       if (!res.ok || !data.ok) {
-        setTranscribeError(data.error || 'Audio transcription failed.');
+        setTranscribeError(data.error || `Audio transcription failed (HTTP ${res.status}).`);
       } else {
         setTranscriptText(data.transcript || '');
         showToast?.('Audio file transcribed with gemini-3.5-transcribe');

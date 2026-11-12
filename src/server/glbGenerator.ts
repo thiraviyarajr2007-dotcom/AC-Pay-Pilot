@@ -497,13 +497,24 @@ const sellerAssetsBySku = new Map<string, Seller3DAssetRecord>([
   ],
 ]);
 
-export function getSeller3DAsset(rawSku: string): Seller3DAssetRecord | null {
-  const clean = rawSku.replace(/^#/, '').trim().toUpperCase();
-  return sellerAssetsBySku.get(clean) || null;
+function assetMapKey(rawSku: string, bizId = 'biz-aerocool'): string {
+  const cleanSku = rawSku.replace(/^#/, '').trim().toUpperCase();
+  const cleanBiz = (bizId || 'biz-aerocool').trim();
+  return `${cleanBiz}::${cleanSku}`;
 }
 
-export function listAllSeller3DAssets(): Seller3DAssetRecord[] {
-  return Array.from(sellerAssetsBySku.values());
+export function getSeller3DAsset(rawSku: string, bizId = 'biz-aerocool'): Seller3DAssetRecord | null {
+  return sellerAssetsBySku.get(assetMapKey(rawSku, bizId)) || null;
+}
+
+export function listAllSeller3DAssets(bizId?: string): Seller3DAssetRecord[] {
+  if (!bizId) {
+    return Array.from(sellerAssetsBySku.values());
+  }
+  const prefix = `${bizId.trim()}::`;
+  return Array.from(sellerAssetsBySku.entries())
+    .filter(([k]) => k.startsWith(prefix))
+    .map(([, v]) => v);
 }
 
 export function registerSeller3DAsset(params: {
@@ -511,8 +522,10 @@ export function registerSeller3DAsset(params: {
   fileName: string;
   sizeBytes: number;
   uploadedBy: string;
+  bizId?: string;
 }): Seller3DAssetRecord {
   const cleanSku = params.sku.replace(/^#/, '').trim().toUpperCase();
+  const storageKey = assetMapKey(params.sku, params.bizId);
   const extMatch = params.fileName.trim().toLowerCase().match(/\.(glb|gltf|usdz)$/);
   const MAX_BYTES = 25 * 1024 * 1024; // 25 MB
 
@@ -528,7 +541,7 @@ export function registerSeller3DAsset(params: {
       uploadedAt: new Date().toISOString(),
       validationMessage: 'Invalid file format. Only .glb, .gltf, and .usdz 3D assets are accepted.',
     };
-    sellerAssetsBySku.set(cleanSku, failed);
+    sellerAssetsBySku.set(storageKey, failed);
     return failed;
   }
 
@@ -544,7 +557,7 @@ export function registerSeller3DAsset(params: {
       uploadedAt: new Date().toISOString(),
       validationMessage: `File size (${(params.sizeBytes / (1024 * 1024)).toFixed(2)} MB) exceeds the 25 MB limit or is empty.`,
     };
-    sellerAssetsBySku.set(cleanSku, failed);
+    sellerAssetsBySku.set(storageKey, failed);
     return failed;
   }
 
@@ -567,6 +580,6 @@ export function registerSeller3DAsset(params: {
     uploadedAt: new Date().toISOString(),
     validationMessage: `Validated .${format} 3D asset (${(params.sizeBytes / 1024).toFixed(1)} KB) and linked to SKU ${params.sku}.`,
   };
-  sellerAssetsBySku.set(cleanSku, record);
+  sellerAssetsBySku.set(storageKey, record);
   return record;
 }

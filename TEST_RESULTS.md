@@ -1,149 +1,60 @@
-# AC PayPilot — Test Execution Results & Verification Matrix
+# AC PayPilot — Verification & Test Execution Results
 
-**Execution Date:** 2026-10-29  
-**Environment:** Windows 11, Node.js v24.15.0, Vite 8.3.5, TypeScript 5.9.3, Express 4.21.2  
-**Test Framework:** Node.js native test runner (`node:test`) + Browser Subagent Automation + HTTP Integration  
-**Total Automated Regression Tests:** 79  
-**Passing Automated Tests:** 79 (100% Pass)  
-**Failing Automated Tests:** 0  
-**Live Provider API Checks:** 6 Verified Live  
-**Browser End-to-End Journeys:** 8 Verified with Video & Screenshots  
-**Blocked Checks (Physical Hardware Required):** 1 (Physical Mobile Camera AR Pass-Through)  
+**Report Date:** 2026-11-12  
+**Test Methodology:** Direct local command execution (`npm run lint`, `npm run build`, `npm run check:bundle`, `npm run test:coverage`, `npm run test:rules`, `npm audit --omit=dev`), local Chrome E2E/responsive automation against `http://127.0.0.1:3000`, and TestSprite CLI v0.15.0 cloud tunnel execution.  
+**Reproducible Raw Logs:** See `docs/evidence/LINT_EXECUTION_EVIDENCE.txt`, `docs/evidence/BUILD_EXECUTION_EVIDENCE.txt`, and `docs/evidence/TEST_EXECUTION_EVIDENCE.txt`.
 
 ---
 
-## 1. Summary of Execution Layers
+## 1. Core Test & Build Matrix (Post-Final-Edit)
 
-```
-Layer 1: Static Type Check (TypeScript 5.9.3) ──────────────> 100% PASS (0 Errors)
-Layer 2: Financial Math & Fail-Closed Invariants (Unit) ────> 100% PASS (17/17 Tests)
-Layer 3: Security, RBAC, Webhook, Dual-Auth & Persistence ──> 100% PASS (43/43 Tests)
-Layer 4: Financial Integrity, Concurrency & ADC (Integ) ────> 100% PASS (19/19 Tests)
-Layer 5: Real Live External Sandbox APIs (PayPal & Gemini) ──> 100% PASS (6 Live API Probes)
-Layer 6: Production Bundle (Vite Build) ─────────────────────> 100% PASS (dist/ in 6.35s)
-Layer 7: Browser End-to-End User Journeys ───────────────────> 100% PASS (8/8 Workflows)
-Layer 8: Physical Mobile Device Camera Hardware ─────────────> BLOCKED (Desktop Environment)
-```
+| Check | Command | Passed | Failed | Skipped | Notes |
+|---|---|---:|---:|---:|---|
+| TypeScript Type Check | `npm run lint` | Pass | 0 | 0 | `tsc --noEmit` exit code `0` |
+| Production Build | `npm run build` | Pass | 0 | 0 | Vite v8.3.5 (`1040 modules`, `3.12s`) |
+| Bundle Budget Enforcer | `npm run check:bundle` | Pass | 0 | 0 | `index-D62x647T.js`: `133.73 kB` raw (`37.32 kB` gzip); `PublicStorefrontApp-CQ7mIjrT.js`: `47.81 kB` raw |
+| Node Automated Suite + Coverage | `npm run test:coverage` | **103** | **0** | **0** | Duration `89328.78ms`; **74.89%** lines, **57.49%** branches, **66.67%** functions (thresholds: 65 / 50 / 55) |
+| Firestore Rules Emulator Suite | `npm run test:rules` | **5** | **0** | **0** | `firebase emulators:exec --only firestore`, duration `16773.04ms` (`ACP-SEC-003`..`006`, `SEC-009/010/011`) |
+| Production Dependency Audit | `npm audit --omit=dev` | Pass | 0 | 0 | `found 0 vulnerabilities` |
 
----
-
-## 2. Comprehensive Test Cases Matrix
-
-| Test ID | Feature & Scenario | Test Type | Preconditions | Exact Command / Procedure | Expected Result | Actual Result | Status | Evidence / Log Ref |
-| :--- | :--- | :--- | :--- | :--- | :--- | :--- | :--- | :--- |
-| **TC-001** | Full TypeScript compilation | Static Validation | Source code present | `npm run lint` (`tsc --noEmit`) | Exits with code 0 and no type errors | 0 errors found | **PASS** | `stdout: clean` |
-| **TC-002** | Production bundle creation | Build Check | Dependencies installed | `npm run build` (`vite build`) | Builds clean assets into `dist/` | Generated `dist/index.html` + chunks in 9.05s | **PASS** | `vite v8.3.5 built in 9.05s` |
-| **TC-003** | Integer minor units conversion | Unit Test | None | `npm test` (`finance.test.ts`) | ₹8,499 -> 849900 paise; $19.99 -> 1999 cents | Correctly converts and formats | **PASS** | `✔ Integer minor units... (43.3ms)` |
-| **TC-004** | Server invoice separation | Unit Test | None | `npm test` (`finance.test.ts`) | invoiceStatus remains separate from paymentStatus | Strict separation preserved | **PASS** | `✔ Server-grade invoice... (6.6ms)` |
-| **TC-005** | Cart budget headroom detection | Unit Test | None | `npm test` (`finance.test.ts`) | Accurately flags over-budget and headroom | Integer math matches expected | **PASS** | `✔ Cart and budget math... (0.5ms)` |
-| **TC-006** | Authoritative server order pricing | Unit Test | Catalog mock loaded | `npm test` (`finance.test.ts`) | Computes totals from stored catalog, ignores client | Client-tampered totals ignored | **PASS** | `✔ Authoritative server order... (0.9ms)` |
-| **TC-007** | PayPal fee extraction | Unit Test | Provider payload | `npm test` (`finance.test.ts`) | Shows fees only when present in provider payload | Safe fallback when missing | **PASS** | `✔ PayPal fee extraction... (0.7ms)` |
-| **TC-008** | Executive KPI baseline check | Unit Test | Empty baseline range | `npm test` (`finance.test.ts`) | Returns "No baseline" when data missing | Correctly flags missing baseline | **PASS** | `✔ Executive KPI calculation... (0.7ms)` |
-| **TC-009** | Escrow state machine transitions | Unit Test | Valid transition table | `npm test` (`finance.test.ts`) | Only valid transitions permitted; blocks jumps | Strictly enforces state rules | **PASS** | `✔ Escrow state machine... (0.8ms)` |
-| **TC-010** | Payment engine idempotency | Unit Test | Ledger instance | `npm test` (`finance.test.ts`) | Duplicate idempotency key returns cached record | No duplicate charges created | **PASS** | `✔ Server payment engine... (10.0ms)` |
-| **TC-011** | Fail-Closed: Missing Credentials | Unit Test | `NODE_ENV=production` | `npm test` (`finance.test.ts`) | Throws PAYPAL_CONFIG_ERROR in production mode | Explicitly rejects unconfigured provider | **PASS** | `✔ FAIL CLOSED: createPayPal... (2.1ms)` |
-| **TC-012** | Fail-Closed: Invariant Violations | Unit Test | Provider mismatch | `npm test` (`finance.test.ts`) | Currency/amount mismatch throws, fails order, no escrow fund | Order marked Failed, escrow created | **PASS** | `✔ FAIL CLOSED: Capture invariant... (2.3ms)` |
-| **TC-013** | Fail-Closed: Provider Outcomes | Unit Test | Simulation outcomes | `npm test` (`finance.test.ts`) | PENDING/TIMEOUT/CANCELLED never claim verified capture | Honest status mapped, retry controlled | **PASS** | `✔ FAIL CLOSED: Provider outcomes... (2.5ms)` |
-| **TC-014** | Multi-role RBAC enforcement | Unit Test | Multi-role actor tokens | `npm test` (`finance.test.ts`) | Customer blocked from seller/finance actions | 403 Forbidden on violations | **PASS** | `✔ RBAC enforces customer... (1.7ms)` |
-| **TC-015** | Deterministic GSTIN validation | Unit Test | Valid/invalid GSTINs | `npm test` (`finance.test.ts`) | Validates 15-char regex and place of supply | Correctly validates CGST/SGST/IGST | **PASS** | `✔ Deterministic GSTIN check... (1.2ms)` |
-| **TC-016** | Binary glTF 2.0 generator | Unit Test | glbGenerator module | `npm test` (`finance.test.ts`) | Produces magic header `0x46546C67` (glTF) | Valid binary structure | **PASS** | `✔ Binary glTF 2.0 (.glb)... (6.6ms)` |
-| **TC-017** | Copilot tool RBAC & Q&A | Unit Test | Grounded product facts | `npm test` (`finance.test.ts`) | Returns "not provided" for unknown specs | Hallucinations blocked | **PASS** | `✔ Copilot tools enforce... (2.9ms)` |
-| **TC-018** | Legacy finance compatibility | Unit Test | Legacy interfaces | `npm test` (`finance.test.ts`) | Backwards-compatible calculations work | All legacy tests pass | **PASS** | `✔ Legacy calculateInvoice... (0.4ms)` |
-| **TC-019** | SmartCart payload validation | Unit Test | SmartCart payload | `npm test` (`finance.test.ts`) | Resolves catalog prices, validates alternatives | Deterministic minor unit output | **PASS** | `✔ optimizeCartWithGemini... (6.9ms)` |
-| **TC-020** | Spoofed x-actor header rejection | Security Integ | Missing auth header | `npm test` (`security...test.ts`) | Rejects request with HTTP 401 | HTTP 401 returned | **PASS** | `✔ AUTH: /api/products... (946ms)` |
-| **TC-021** | Escrow spoofed header rejection | Security Integ | Missing auth header | `npm test` (`security...test.ts`) | Rejects request with HTTP 401 | HTTP 401 returned | **PASS** | `✔ AUTH: /api/orders... (89ms)` |
-| **TC-022** | Payment spoofed header rejection | Security Integ | Missing auth header | `npm test` (`security...test.ts`) | Rejects request with HTTP 401 | HTTP 401 returned | **PASS** | `✔ AUTH: /api/payments... (12.1ms)` |
-| **TC-023** | Profile spoofed header rejection | Security Integ | Missing auth header | `npm test` (`security...test.ts`) | Rejects request with HTTP 401 | HTTP 401 returned | **PASS** | `✔ AUTH: /api/merchants... (15.1ms)` |
-| **TC-024** | Bearer token verification | Security Integ | Valid signed token | `npm test` (`security...test.ts`) | Derives role and bizId correctly | Identity correctly established | **PASS** | `✔ AUTH: Valid Bearer token... (13.5ms)` |
-| **TC-025** | Non-seller product mutation | Security Integ | Customer token | `npm test` (`security...test.ts`) | Customer attempting product mutation gets 403 | HTTP 403 returned | **PASS** | `✔ AUTH: Role-based authorization... (13.8ms)` |
-| **TC-026** | Create-order UID enforcement | Security Integ | Spoofed customerId in body | `npm test` (`security...test.ts`) | Replaces body customerId with authenticated actor.uid | customerId strictly enforced | **PASS** | `✔ AUTH: /api/paypal/create-order forces... (2286ms)` |
-| **TC-027** | Create-order guest UID generation | Security Integ | Unauthenticated request | `npm test` (`security...test.ts`) | Generates unforgeable guest UID, ignores body override | Guest UID generated | **PASS** | `✔ AUTH: /api/paypal/create-order generates... (1030ms)` |
-| **TC-028** | Fail-Closed: Unsupported Currency | Security Integ | Real PayPal Sandbox | `npm test` (`security...test.ts`) | Real PayPal rejects INR with 400 ORDER_CREATION_FAILED | Fails closed honestly, never fake | **PASS** | `✔ PROVIDER FAIL-CLOSED: /api/paypal... (1847ms)` |
-| **TC-029** | Capture unauthenticated rejection | Security Integ | Missing Authorization | `npm test` (`security...test.ts`) | Rejects unauthenticated capture with HTTP 401 | HTTP 401 returned | **PASS** | `✔ AUTH: /api/paypal/capture-order... (8.9ms)` |
-| **TC-030** | Capture cross-user ownership | Security Integ | Customer A captures B order | `npm test` (`security...test.ts`) | Rejects unauthorized capture with HTTP 403 | HTTP 403 returned | **PASS** | `✔ AUTH: /api/paypal/capture-order... (8.1ms)` |
-| **TC-031** | Refund unauthorized role rejection | Security Integ | Customer role token | `npm test` (`security...test.ts`) | Rejects customer refund attempt with HTTP 403 | HTTP 403 returned | **PASS** | `✔ AUTH: /api/paypal/refund-order... (6.6ms)` |
-| **TC-032** | Seller self-release rejection | Security Integ | Seller role token | `npm test` (`security...test.ts`) | Rejects seller release to released with HTTP 403 | HTTP 403 returned | **PASS** | `✔ AUTH: /api/orders.../escrow-transition... (9.7ms)` |
-| **TC-033** | Product single-source isolation | Security Integ | Multi-tenant bizId | `npm test` (`security...test.ts`) | Products scoped strictly to seller's bizId | Cross-business leakage blocked | **PASS** | `✔ SINGLE SOURCE: Products... (2.4ms)` |
-| **TC-034** | Order single-source isolation | Security Integ | Customer role | `npm test` (`security...test.ts`) | Customer sees only their orders; seller sees bizId | Cross-user leakage blocked | **PASS** | `✔ SINGLE SOURCE: Orders... (1.5ms)` |
-| **TC-035** | Webhook unsigned rejection | Security Integ | Unsigned POST | `npm test` (`security...test.ts`) | Rejects unverified webhook with HTTP 400 | Unsigned webhook rejected | **PASS** | `✔ PAYPAL: Webhook rejects unsigned... (7.2ms)` |
-| **TC-036** | Webhook verified & deduplication | Security Integ | Valid headers + replay | `npm test` (`security...test.ts`) | First event PROCESSED, second DUPLICATE_IGNORED | Deduplication verified | **PASS** | `✔ PAYPAL: Webhook accepts valid... (15.2ms)` |
-| **TC-037** | Webhook unknown order rejection | Security Integ | Non-existent order ID | `npm test` (`security...test.ts`) | Rejects webhook with HTTP 404 ORDER_NOT_FOUND | HTTP 404 returned | **PASS** | `✔ PAYPAL: Webhook rejects unknown... (7.3ms)` |
-| **TC-038** | Webhook currency mismatch | Security Integ | Conflicting currency | `npm test` (`security...test.ts`) | Rejects webhook with HTTP 400 WEBHOOK_CURRENCY_MISMATCH | HTTP 400 returned | **PASS** | `✔ PAYPAL: Webhook rejects currency... (6.6ms)` |
-| **TC-039** | Webhook amount mismatch | Security Integ | Conflicting amount | `npm test` (`security...test.ts`) | Rejects webhook with HTTP 400 WEBHOOK_AMOUNT_MISMATCH | HTTP 400 returned | **PASS** | `✔ PAYPAL: Webhook rejects amount... (9.1ms)` |
-| **TC-040** | Webhook unsupported event handling | Security Integ | Non-payment event | `npm test` (`security...test.ts`) | Safely ignores unsupported type with HTTP 200 | HTTP 200 EVENT_IGNORED | **PASS** | `✔ PAYPAL: Webhook safely ignores... (5.9ms)` |
-| **TC-041** | Webhook forged signature rejection | Security Integ | Invalid signature string | `npm test` (`security...test.ts`) | Rejects forged signature with HTTP 401 | HTTP 401 returned | **PASS** | `✔ PAYPAL: Webhook rejects forged... (8.5ms)` |
-| **TC-042** | Webhook fake cert URL rejection | Security Integ | Non-PayPal domain cert | `npm test` (`security...test.ts`) | Rejects non-PayPal cert URL with HTTP 401 | HTTP 401 returned | **PASS** | `✔ PAYPAL: Webhook rejects non-PayPal... (6.7ms)` |
-| **TC-043** | Domain availability honesty | Integration | Query domain | `npm test` (`security...test.ts`) | Labels result as "estimate", no fake available | Honest estimation returned | **PASS** | `✔ DOMAINS: /api/domains/check... (9.6ms)` |
-| **TC-044** | Real DNS resolution | Integration | Domain host | `npm test` (`security...test.ts`) | Runs real Node DNS lookup, returns records | Real DNS records resolved | **PASS** | `✔ DOMAINS: /api/domains/verify... (114ms)` |
-| **TC-045** | Firestore Health Latency Probe | Integration | Live REST API | `npm test` (`security...test.ts`) | Executes live write+read+delete on _health | Latency measured (~1010ms) | **PASS** | `✔ HEALTH: performFirestoreHealthCheck... (1010ms)` |
-| **TC-046** | Firebase config ID alignment | Integration | Configuration config | `npm test` (`security...test.ts`) | Matches ai-studio-applet-webapp-4bdcd | Canonical IDs match exactly | **PASS** | `✔ HEALTH: Firebase project ID... (943ms)` |
-| **TC-047** | PayPal Sandbox Live OAuth Exchange | Live Provider | Sandbox REST API | Live POST to `oauth2/token` | Returns real PayPal Sandbox Bearer access_token | Live OAuth token retrieved | **PASS** | Verified via live health probe & sandbox adapter |
-| **TC-048** | PayPal Sandbox Live Order Creation | Live Provider | Real Sandbox API | `POST /api/paypal/create-order` (USD) | HTTP 201 with real PayPal order ID (`4WR58417FF312423E`) | Real Sandbox order created | **PASS** | Log: task-902 (`providerMode: 'paypal_sandbox_api'`) |
-| **TC-049** | Live Gemini AI Cart Optimization | Live Provider | `@google/genai` Flash | `POST /api/cart/optimize` | HTTP 200 with `source: 'live'`, `rankedItems` | Real Gemini ranking returned | **PASS** | Live HTTP 200 response |
-| **TC-050** | Live Gemini AI Listing Draft | Live Provider | `@google/genai` Flash | `POST /api/listing/generate` | HTTP 200 3-column draft preserving facts | Real Gemini listing generated | **PASS** | Live HTTP 200 response |
-| **TC-051** | Live Gemini Escrow Release Agent | Live Provider | `@google/genai` Flash | `POST /api/escrow/recommend` | HTTP 200 recommendation struct | Structured AI recommendation returned | **PASS** | Live HTTP 200 response |
-| **TC-052** | Live Gemini Grounded Product Q&A | Live Provider | `@google/genai` Flash | `POST /api/product/qa` | HTTP 200 grounded answer (unknown denied) | Grounded in facts, unknown denied | **PASS** | Live HTTP 200 response |
-| **TC-053** | Browser E2E: Catalog & Navigation | Browser E2E | Running server | Navigate to `/customer/discover` | Renders product cards, search, filters | Clean render, no errors | **PASS** | Screenshot: `customer_discover_catalog` |
-| **TC-054** | Browser E2E: 3D Product Viewer | Browser E2E | Running server | Navigate to `/customer/product/FAN-BLDC-892` | Three.js PBR stage, controls, product specs | Interactive 3D canvas active | **PASS** | Screenshot: `product_detail_fan_bldc_892` |
-| **TC-055** | Browser E2E: SmartCart & Planner | Browser E2E | Running server | Navigate to `/customer/cart` | Ranked Stack + Optional Alternatives box | Accurate rendering, no auto-mutate | **PASS** | Screenshot: `smart_cart_alternatives` |
-| **TC-056** | Browser E2E: PayPal Checkout Modal | Browser E2E | Running server | Click "Proceed to PayPal Checkout" | Modal renders authoritative order totals | Clean modal render & safe close | **PASS** | Screenshot: `paypal_checkout_modal` |
-| **TC-057** | Browser E2E: Persona Role Switch | Browser E2E | Running server | Switch between Customer/Seller/Finance | Route guards adapt, views update cleanly | Smooth transitions across roles | **PASS** | Screenshot: `finance_role_view` |
-| **TC-058** | Browser E2E: Seller Merchant Studio | Browser E2E | Running server | Navigate to `/seller/products` | Listing generator, GLB upload, SKU check | Fully functional seller dashboard | **PASS** | Screenshot: `seller_products_page` |
-| **TC-059** | Browser E2E: Public Storefront | Browser E2E | Running server | Navigate to `/s/aerocool` | Hero banner, products, AI Assistant | Public customer storefront active | **PASS** | Screenshot: `public_storefront_aerocool` |
-| **TC-060** | Browser E2E: System Health Screen | Browser E2E | Running server | Navigate to `/health` | Subsystem diagnostics, webhook simulation | Real-time diagnostic monitor active | **PASS** | Screenshot: `media_1793163588342.png` |
-| **TC-061** | Physical Mobile AR WebXR / QuickLook | Physical E2E | Physical iPhone / Android | Camera pass-through AR viewer | AR camera overlay | **BLOCKED** | Desktop environment lacks phone hardware |
-| **TC-062** | Profile update self-escalation rejection | Security Integ | `role: 'admin'` in body | `npm test` (`security...test.ts`) | Rejects with HTTP 400 `VALIDATION_ERROR` via strict Zod schema | HTTP 400 returned, escalation blocked | **PASS** | `✔ AUTH: /api/users/profile rejects... (12.4ms)` |
-| **TC-063** | Valid user profile update | Security Integ | Valid profile fields | `npm test` (`security...test.ts`) | Accepts and persists `displayName`, `gender`, `phone` | HTTP 200 returned with updated profile | **PASS** | `✔ AUTH: /api/users/profile accepts... (8.9ms)` |
-| **TC-064** | Expired ID token rejection | Security Integ | Expired Bearer token | `npm test` (`security...test.ts`) | Rejects with HTTP 401 `TOKEN_EXPIRED` | HTTP 401 returned | **PASS** | `✔ AUTH: /api/users/profile returns 401 TOKEN_EXPIRED... (6.7ms)` |
-| **TC-065** | Revoked ID token rejection | Security Integ | Revoked Bearer token | `npm test` (`security...test.ts`) | Rejects with HTTP 401 `TOKEN_REVOKED` (`checkRevoked: true`) | HTTP 401 returned | **PASS** | `✔ AUTH: /api/users/profile returns 401 TOKEN_REVOKED... (6.5ms)` |
-| **TC-066** | Client role update function forbidden | Unit/SDK | Client call `updateFirestoreUserRole` | `npm test` (`security...test.ts`) | Throws forbidden error (`ROLE_ESCALATION_FORBIDDEN`) | Error thrown, role mutation denied | **PASS** | `✔ AUTH: updateFirestoreUserRole throws... (2.1ms)` |
-| **TC-067** | Lowest-privilege default user profile creation | Unit/SDK | New user signup | `npm test` (`security...test.ts`) | Creates profile with default role `customer` (never escalated) | Customer role assigned idempotently | **PASS** | `✔ AUTH: ensureFirestoreUserProfile assigns... (1.9ms)` |
-| **TC-068** | authenticatedFetch request execution | Unit/SDK | API client invocation | `npm test` (`security...test.ts`) | Auto-attaches Bearer token, executes clean fetch | HTTP 200 clean execution | **PASS** | `✔ AUTH: authenticatedFetch auto-attaches... (3.8ms)` |
-| **TC-069** | Guest checkout token generation | Security Integ | Unauthenticated create-order | `npm test` (`security...test.ts`) | Generates 32-byte `guestCaptureToken`, stores SHA-256 hash | HTTP 201 with guestCaptureToken | **PASS** | `✔ PAYMENTS: Guest create-order generates... (10.2ms)` |
-| **TC-070** | Guest capture happy path | Security Integ | Valid guestCaptureToken | `npm test` (`security...test.ts`) | Captures order, marks `guestTokenUsed: true` | HTTP 200, paymentStatus: Captured | **PASS** | `✔ PAYMENTS: Guest capture happy path... (12.8ms)` |
-| **TC-071** | Wrong guest capture token rejection | Security Integ | Forged guestCaptureToken | `npm test` (`security...test.ts`) | Constant-time comparison fails with HTTP 403 `INVALID_GUEST_TOKEN` | HTTP 403 returned | **PASS** | `✔ PAYMENTS: Guest capture rejected... (9.4ms)` |
-| **TC-072** | Reused guest capture token rejection | Security Integ | Already captured order | `npm test` (`security...test.ts`) | Rejects reuse with HTTP 403 `GUEST_TOKEN_REUSED` | HTTP 403 returned | **PASS** | `✔ PAYMENTS: Reused guest capture token... (14.1ms)` |
-| **TC-073** | Expired guest capture token rejection | Security Integ | Expired token (>2 hours) | `npm test` (`security...test.ts`) | Rejects with HTTP 403 `GUEST_TOKEN_EXPIRED` | HTTP 403 returned | **PASS** | `✔ PAYMENTS: Expired guest capture token... (8.3ms)` |
-| **TC-074** | Cross-order guest capture token isolation | Security Integ | Order A token on Order B | `npm test` (`security...test.ts`) | Rejects cross-order use with HTTP 403 `INVALID_GUEST_TOKEN` | HTTP 403 returned | **PASS** | `✔ PAYMENTS: Token for Order A cannot capture... (11.5ms)` |
-| **TC-075** | Startup config validator in production | Unit/Config | Missing env vars | `npm test` (`security...test.ts`) | Throws ConfigurationError listing each missing variable by name | ConfigurationError thrown with exact missing keys | **PASS** | `✔ CONFIG: validateStartupConfig in production... (2.4ms)` |
-| **TC-076** | Forbid test webhook bypass outside test | Unit/Config | `ALLOW_TEST_SIGNATURE_BYPASS` | `npm test` (`security...test.ts`) | Throws ConfigurationError on bypass outside `NODE_ENV=test` | Throws security violation error | **PASS** | `✔ CONFIG: validateStartupConfig forbids... (1.8ms)` |
-| **TC-077** | /api/health persistenceMode reporting | Integration | GET `/api/health` | `npm test` (`security...test.ts`) | Returns `persistenceMode: "firestore-admin" | "memory-volatile"` | HTTP 200 with persistenceMode | **PASS** | `✔ HEALTH: /api/health reports persistenceMode... (8.1ms)` |
-| **TC-078** | Single authoritative catalog calculation | Security Integ | Tampered client price | `npm test` (`financial...test.ts`) | Provider, order, and capture match authoritative catalog exactly | Client price ignored, matches catalog | **PASS** | `✔ P0 ORDER CALC: Server uses single... (4.78s)` |
-| **TC-079** | Idempotent create-order retry immutability | Security Integ | Same idempotency key | `npm test` (`financial...test.ts`) | Returns original order, pricing, and guest token without alteration | Idempotent replay preserved | **PASS** | `✔ P0 ORDER CALC: Idempotent create-order... (5.94s)` |
-| **TC-080** | Deliberate Firestore vs static catalog price override | Security Integ | Firestore catalog update | `npm test` (`financial...test.ts`) | Server authoritative calculation uses Firestore catalog over static fallback | Exact Firestore price used | **PASS** | `✔ P0 ORDER CALC: Deliberately different... (2.90s)` |
-| **TC-081** | Strict provider capture validation | Unit/Adapter | Malformed/mismatched captures | `npm test` (`financial...test.ts`) | Rejects missing object, ID, status, amount, currency, malformed value, mismatch | Invariant violations rejected | **PASS** | `✔ P0 STRICT CAPTURE: PayPal adapter rejects... (4.8ms)` |
-| **TC-082** | Production persistence fails closed | Unit/Storage | Simulated write errors | `npm test` (`financial...test.ts`) | Throws PersistenceError on product, order, payment, escrow event failure | Fails closed, no memory fallback | **PASS** | `✔ P0 PERSISTENCE: Production persistence fails... (1.7ms)` |
-| **TC-083** | Provider capture succeeded but DB write failed reconciliation | Security Integ | Capture success, DB failure | `npm test` (`financial...test.ts`) | Returns 502 PAYMENT_CAPTURED_RECONCILIATION_REQUIRED, never fails payment, holds escrow | Recoverable state produced | **PASS** | `✔ P0 RECONCILIATION: Provider capture succeeded... (3.97s)` |
-| **TC-084** | Read-after-write verification on durable Firestore storage | Unit/Storage | Saved product & order | `npm test` (`financial...test.ts`) | Field-by-field verification of saved product and order from database | Exact match read back | **PASS** | `✔ P0 PERSISTENCE: Read-after-write... (2.9ms)` |
-| **TC-085** | Server restart simulation across order lifecycle | Security Integ | Server restart simulation | `npm test` (`financial...test.ts`) | Orders and tokens persist across instances; capture succeeds against durable total | State preserved across restart | **PASS** | `✔ P0 PERSISTENCE: Server restart simulation... (3.61s)` |
-| **TC-086** | Invalid supplied Bearer token rejected with 401 | Security Integ | Invalid Bearer header | `npm test` (`financial...test.ts`) | Rejects with HTTP 401 instead of silent guest checkout fallback | HTTP 401 returned | **PASS** | `✔ P1 AUTH & GUEST: Invalid Bearer token... (11.5ms)` |
-| **TC-087** | Cryptographically secure guest UID entropy | Security Integ | Unauthenticated checkout | `npm test` (`financial...test.ts`) | Generates UID with 16 bytes (32 hex chars) of cryptographic randomness | High entropy UID generated | **PASS** | `✔ P1 GUEST ENTROPY: Guest UID is generated... (2.24s)` |
-| **TC-088** | Simultaneous captures with different idempotency keys | Concurrency | Concurrent capture calls | `npm test` (`financial...test.ts`) | One succeeds (200), conflicting concurrent call rejected with 409 conflict | Race condition blocked | **PASS** | `✔ P1 CONCURRENCY: Simultaneous captures... (2.40s)` |
-| **TC-089** | Ledger in-flight capture lock conflict | Unit/Ledger | In-flight promise overlap | `npm test` (`financial...test.ts`) | Throws CONCURRENT_CAPTURE_CONFLICT on in-flight race condition | Conflict exception thrown | **PASS** | `✔ P1 CONCURRENCY: ServerPaymentLedger throws... (2.53s)` |
-| **TC-090** | Simultaneous create-order calls with different keys | Concurrency | Parallel create calls | `npm test` (`financial...test.ts`) | Produces distinct non-colliding order IDs and tokens | Independent orders created | **PASS** | `✔ P1 CONCURRENCY: Simultaneous create-order... (3.05s)` |
-| **TC-091** | Replay of consumed guest capture token rejected | Security Integ | Reused guest token | `npm test` (`financial...test.ts`) | Rejects replay attempt with HTTP 403 GUEST_TOKEN_REUSED | HTTP 403 returned | **PASS** | `✔ P1 LIFECYCLE: Replay of consumed guest... (2.79s)` |
-| **TC-092** | Expired guest capture token rejected | Security Integ | Expired token (>2 hours) | `npm test` (`financial...test.ts`) | Rejects with HTTP 403 GUEST_TOKEN_EXPIRED | HTTP 403 returned | **PASS** | `✔ P1 LIFECYCLE: Expired guest capture token... (5.2ms)` |
-| **TC-093** | Production starts with 0 fabricated payment records | Unit/Isolation | NODE_ENV=production | `npm test` (`financial...test.ts`) | Ledger seeds 0 orders and 0 payments in production mode | Clean zero baseline in prod | **PASS** | `✔ P1 DEMO ISOLATION: Production starts with 0... (1.1ms)` |
-| **TC-094** | Seeded demo records isolated from production KPIs | Unit/Isolation | NODE_ENV=production | `npm test` (`financial...test.ts`) | Demo records strictly excluded from GMV and order counts in production | Demo data isolated | **PASS** | `✔ P1 DEMO ISOLATION: Seeded demo records do not... (1.5ms)` |
-| **TC-095** | Startup config rejects missing/nonexistent credentials | Unit/Config | Invalid file path | `npm test` (`financial...test.ts`) | Throws ConfigurationError listing GOOGLE_APPLICATION_CREDENTIALS | ConfigurationError thrown | **PASS** | `✔ P1 CONFIG: Production rejects missing or... (1.2ms)` |
-| **TC-096** | Startup config supports Google Cloud ADC | Unit/Config | K_SERVICE present | `npm test` (`financial...test.ts`) | Accepts Google Cloud ADC without requiring local JSON file path | Validated firestore-admin mode | **PASS** | `✔ P1 CONFIG: Production supports Google Cloud... (0.3ms)` |
+### Covered Suites inside `npm run test:coverage`
+- `src/utils/finance.test.ts` — Minor-unit INR/USD math, GSTIN/CGST/SGST/IGST math, PayPal fee omission honesty, escrow state machine invariants, server payment engine concurrency & reconciliation, binary `.glb` validation, RBAC policy.
+- `src/test/securityAndSingleSource.test.ts` — Spoofed `x-actor-*` header rejection (`401`), Bearer token resolution, role enforcement (`403`), atomic idempotent create/capture, guest token reuse/expiration/cross-order forgery (`403`), PayPal webhook signature/currency/amount validation, fail-closed config validation.
+- `src/test/financialIntegrityAndConcurrency.test.ts` — Authoritative server catalog lookup overrides stale static prices, partial capture rejection, capture ID reuse prevention (`409`), in-flight capture race lock (`409`), cross-tenant escrow/refund denial (`403`), `502 PAYMENT_CAPTURED_RECONCILIATION_REQUIRED`.
+- `src/test/productionReadiness.test.ts` — Server port resolution, health probes (`/health/live`, `/health`, `/health/ready` fail-closed `503`), volatile production write lock (`503 PERSISTENCE_UNAVAILABLE`), Vercel adapter parity, bundle split check.
+- `src/test/auditHardening.test.ts` — `SEC-001` SSE tenant/auth isolation, `SEC-012` AI/Q&A guards, `SEC-013` CORS/security headers, `SEC-015` & `FE-007` asset/product checks, `BE-03/04/05`, `FE-005` & `SEC-005` storefront order creation & escrow hardening, `PERF-02/04` & `QA-003` SEO/cache/chunk budgets, `BE-06` & `FE-008` sanitized `storefront.contact` and `GET /api/executive/kpis` RBAC.
 
 ---
 
-## 3. Test Evidence Artifacts
+## 2. Headless Chrome Browser E2E & Viewport Verification (Post-Final-Edit)
 
-1. **CLI Execution Logs (Verified Reproducible Traces)**:
-   - Automated Test Suite Log (60/60 passing): [`docs/evidence/TEST_EXECUTION_EVIDENCE.txt`](file:///c:/Users/thira/OneDrive%20-%20Rathinam%20Group%20Of%20Institutions/Desktop/My%20carrier/projects/PayPilot-AI-%E2%80%94-Autonomous-Commerce-&-Intelligent-Escrow-Platform/docs/evidence/TEST_EXECUTION_EVIDENCE.txt)
-   - TypeScript Typecheck Clean Log: [`docs/evidence/LINT_EXECUTION_EVIDENCE.txt`](file:///c:/Users/thira/OneDrive%20-%20Rathinam%20Group%20Of%20Institutions/Desktop/My%20carrier/projects/PayPilot-AI-%E2%80%94-Autonomous-Commerce-&-Intelligent-Escrow-Platform/docs/evidence/LINT_EXECUTION_EVIDENCE.txt)
-   - Vite Production Build Output: [`docs/evidence/BUILD_EXECUTION_EVIDENCE.txt`](file:///c:/Users/thira/OneDrive%20-%20Rathinam%20Group%20Of%20Institutions/Desktop/My%20carrier/projects/PayPilot-AI-%E2%80%94-Autonomous-Commerce-&-Intelligent-Escrow-Platform/docs/evidence/BUILD_EXECUTION_EVIDENCE.txt)
-2. **Browser Recording**: `file:///C:/Users/thira/.gemini/antigravity-ide/brain/0c367e53-6ea4-4278-84f7-bea6d3f4ed66/paypilot_e2e_audit_1793163387951.webp`
-3. **Key Screenshots Saved in Brain Artifacts**:
-   - `customer_discover_catalog_1793163438510.png` (Product discovery catalog)
-   - `product_detail_fan_bldc_892_1793163474963.png` (Three.js 3D viewer & specs)
-   - `smart_cart_page_1793163490343.png` (Ranked purchase stack)
-   - `smart_cart_alternatives_1793163501864.png` (Suggested lower-cost alternatives)
-   - `paypal_checkout_modal_1793163516618.png` (Authoritative PayPal modal)
-   - `finance_role_view_1793163546221.png` (Finance Desk ledger & GST records)
-   - `seller_products_page_1793163569803.png` (Listing studio & GLB manager)
-   - `public_storefront_aerocool_1793163588545.png` (Live public storefront)
+Executed locally against live server `http://127.0.0.1:3000`:
+- **32-Check Regression & Responsive Suite:** **32/32 PASSED, 0 FAILED**, `consoleErrors=0`, `pageErrors=0`.
+  - Covered: `RoleRouteGuard` on `/seller/dashboard`, `/login` inputs, `/s/aerocool` button `type="button"` attributes (`buttonCount=13, missingType=0`), absence of fabricated pre-checkout badges, accessible checkout modal + inline validation alert, `/customer/discover` -> `/customer/cart` (`Proceed to PayPal Checkout (₹51,986)`) -> `PayPalCheckoutModal`, `/customer/orders` -> `INV-2026-089` & `INV-1001` invoices, and **24 responsive layout checks** across `320x568`, `375x667`, `768x1024`, and `1280x800` on 6 core routes (`overflow=false`).
+- **18-Scenario Multi-Persona Chrome E2E:** **18/18 PASSED (100%)**, `Console Errors: 0`.
+  - Covered: Personas A/B/C/D/E including Seller Dashboard KPIs, Storefront Builder, Listing Generator, Orders & Escrow, InvoiceIQ, Transactions, Fee Audit Modal, Customer Discover, 3D/AR Spatial View, SmartCart, PayPal Checkout Modal, `TC-SEC-001` unauthenticated route guard, `/checkout/cancel`, `/health`, 404 fallback, tablet (`768px`) & mobile (`375px`) overflow checks.
 
+---
+
+## 3. TestSprite CLI v0.15.0 Results (Cloud Tunnel to `127.0.0.1:3000`)
+
+TestSprite CLI (`@testsprite/testsprite-cli v0.15.0`) artifacts are stored strictly outside this repository. All core suites below (except legacy `5aa13959`) executed after the final source edit:
+
+| Test ID | Test Name | Status | Run ID | Details |
+|---|---|---|---|---|
+| `de8b142f-1b3b-453a-af49-3e5307e69454` | Public Storefront Cart, Accessible Checkout & Validation | **PASS (8/8)** | `745a2463-b3d1-4000-aedd-8f9dc71dea5c` | Storefront load, add-to-cart, cart drawer checkout modal, inline validation error alert |
+| `0550ec49-7d32-44b8-b8d4-4250e545e0a3` | Customer Discover, SmartCart & Login / Guard Flows | **PASS (5/5)** | `fd829c90-e3d2-44e5-80cb-00027121f542` | `/login` inputs, `/customer/cart` itemized totals + non-zero PayPal button, `/seller/dashboard` guard |
+| `75fb4a14-fd05-4772-b653-dcc207035de2` | 3D Spatial Twin & Model Inspection | **PASS (4/4)** | `a539664c-b615-4dc0-871d-972964efa2d5` | `/api/models/fan-bldc-892` glTF stream (`6380` bytes), 3D/WebXR stage, headless WebGL fallback & responsive controls |
+| `efe5b15a-dd0c-4601-af5f-61cd0fa9f059` | PayPal Sandbox Checkout Flow | **BLOCKED (8/9)** | `5f64c5e8-97ab-4a6d-bcbd-58a7df964f44` | SmartCart loaded (`₹43,487`), but Firebase Auth Email/Password sign-in returned `auth/operation-not-allowed`, blocking live authenticated PayPal interaction |
+| `5aa13959-2f03-4284-8148-8b7f219ef417` | AC PayPilot Storefront & Role Route Guard (Oct 30 Plan) | **FAIL** | `22f6d09d-243e-445b-b431-071be1917635` | Local `.env` sets `VITE_DEMO_MODE=true`, so visiting `/` starts in demo-switcher customer mode and shows `"Access restricted"` + `"Switch Demo Role"` on `/seller/dashboard` rather than `"Sign In to Continue"` (enforced when `VITE_DEMO_MODE` is unset/production); Oct 30 plan also expected home navbar after navigation |
+
+### Synthetic High-Rate Stress Script Observation
+A legacy 1,000-test rapid HTTP stress script executed against `http://127.0.0.1:3000` from a single IP completed **339/1000** checks cleanly and rejected **661/1000** burst requests with **`HTTP 429 RATE_LIMIT_EXCEEDED`** (`apiLimiter` operating as intended).
+
+---
+
+## 4. Blocked / Unverified Scenarios
+
+- **Physical Mobile Camera AR & WebXR Headset Sessions:** Blocked without physical camera/WebXR hardware; desktop/fallback flows verified via automated tests, Chrome inspections, and TestSprite `75fb4a14`.
+- **Authenticated Firebase Email/Password & Live PayPal Sandbox Account Capture:** Server PayPal adapters and webhooks are covered by deterministic unit/integration tests; interactive TestSprite browser checkout (`efe5b15a`) was blocked by Firebase project `auth/operation-not-allowed`.
+- **Remote Production Origin (`ac-pay-pilot.vercel.app`):** Not re-deployed during this local remediation pass; remote parity requires pushing changes and verifying deployed health endpoints.

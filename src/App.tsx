@@ -1,4 +1,4 @@
-import React, { useState, useCallback } from 'react';
+import React, { useState, useCallback, useEffect } from 'react';
 import {
   Routes,
   Route,
@@ -14,6 +14,9 @@ import { RoleRouteGuard } from './components/RoleRouteGuard';
 import { ScreenDataSourceBanner } from './components/ScreenDataSourceBanner';
 import { useRole } from './context/RoleContext';
 import type { OrderRecord } from './components/screens/OrdersScreen';
+import type { SmartCartItem } from './components/screens/SmartCartScreen';
+import { loadInitialSmartCart, persistSmartCart } from './data/cartDefaults';
+import type { CheckoutIntent } from './components/modals/PayPalCheckoutModal';
 
 const DashboardScreen = React.lazy(() =>
   import('./components/screens/DashboardScreen').then((m) => ({ default: m.DashboardScreen }))
@@ -409,11 +412,13 @@ const ProductRouteWrapper: React.FC<{
     customCatalog[cleanSku] ||
     customCatalog[`#${cleanSku}`] ||
     CATALOG_BY_SKU[cleanSku] ||
-    CATALOG_BY_SKU['FAN-BLDC-892'];
+    CATALOG_BY_SKU[`#${cleanSku}`] ||
+    null;
 
   return (
     <ProductDetailARScreen
       selectedProduct={product}
+      notFoundSku={!product ? cleanSku : undefined}
       onAddToCart={onAddToCart}
       onBuyNow={onBuyNow}
       onOpenQRModal={onOpenQRModal}
@@ -425,12 +430,14 @@ const ProductRouteWrapper: React.FC<{
 
 const InvoiceRouteWrapper: React.FC<{
   basePath?: string;
+  pathSuffix?: string;
   onOpenCopilot: (q?: string) => void;
   onOpenFeeAudit: () => void;
   showToast: (msg: string) => void;
   globalSearchQuery: string;
 }> = ({
   basePath = '/seller/invoices',
+  pathSuffix = '',
   onOpenCopilot,
   onOpenFeeAudit,
   showToast,
@@ -442,7 +449,7 @@ const InvoiceRouteWrapper: React.FC<{
   return (
     <InvoiceIQScreen
       selectedInvoiceId={id}
-      onSelectInvoiceId={(nextId) => navigate(`${basePath}/${nextId}`)}
+      onSelectInvoiceId={(nextId) => navigate(`${basePath}/${nextId}${pathSuffix}`)}
       onOpenCopilot={onOpenCopilot}
       onOpenFeeAudit={onOpenFeeAudit}
       showToast={showToast}
@@ -456,11 +463,75 @@ const RoleHomeRedirect: React.FC = () => {
   return <Navigate to={profile.homeRoute} replace />;
 };
 
+const ROUTE_META: Array<{ match: (path: string) => boolean; title: string; description: string }> = [
+  {
+    match: (p) => p === '/login' || p === '/auth',
+    title: 'Sign In — AC PayPilot',
+    description: 'Sign in or explore Demo Mode for AC PayPilot Autonomous Commerce & Intelligent Escrow.',
+  },
+  {
+    match: (p) => p.startsWith('/executive'),
+    title: 'Executive Insights — AC PayPilot',
+    description: 'Multi-store GMV telemetry, escrow hold health, and executive synthesis across PayPilot workspaces.',
+  },
+  {
+    match: (p) => p.startsWith('/seller/command-center'),
+    title: 'Seller Command Center — AC PayPilot',
+    description: 'Interactive enterprise analytics, escrow pipeline controls, and settlement telemetry.',
+  },
+  {
+    match: (p) => p.startsWith('/seller/products'),
+    title: 'Listing Generator & 3D Studio — AC PayPilot',
+    description: 'Create GST-compliant SKUs, upload .glb 3D assets, and generate truthful AI product listings.',
+  },
+  {
+    match: (p) => p.startsWith('/seller/invoices') || p.startsWith('/finance/invoices') || p.includes('/invoice'),
+    title: 'InvoiceIQ & GST Compliance — AC PayPilot',
+    description: 'Automated GST invoice verification, HSN checks, and PayPal fee audit trails.',
+  },
+  {
+    match: (p) => p.startsWith('/seller/dashboard'),
+    title: 'Seller Dashboard — AC PayPilot',
+    description: 'Live storefront GMV, escrow lifecycle monitoring, and order dispatch workspace.',
+  },
+  {
+    match: (p) => p.startsWith('/finance'),
+    title: 'Finance & Reconciliation — AC PayPilot',
+    description: 'PayPal Sandbox settlement reconciliation, fee audits, and GST ledger controls.',
+  },
+  {
+    match: (p) => p.startsWith('/customer/discover'),
+    title: 'Discover 3D & Smart Hardware — AC PayPilot',
+    description: 'Search energy-efficient hardware, filter by budget, and inspect products in 3D & AR.',
+  },
+  {
+    match: (p) => p.startsWith('/customer/cart'),
+    title: 'SmartCart & Budget Optimizer — AC PayPilot',
+    description: 'Rank B2B cart priorities against your target budget and check out with PayPal Escrow.',
+  },
+  {
+    match: (p) => p.startsWith('/customer/product/'),
+    title: '3D & AR Product Inspector — AC PayPilot',
+    description: 'Interactive glTF/WebXR product inspection, spec Q&A, and escrow-protected PayPal checkout.',
+  },
+  {
+    match: (p) => p.startsWith('/customer/orders') || p.startsWith('/seller/orders'),
+    title: 'Escrow Orders & Delivery — AC PayPilot',
+    description: 'Track shipment milestones, inspect buyer delivery proofs, and manage escrow releases.',
+  },
+  {
+    match: (p) => p.startsWith('/assistant'),
+    title: 'Autonomous Copilot — AC PayPilot',
+    description: 'Role-scoped conversational commerce assistant with verifiable store record citations.',
+  },
+];
+
 export default function App() {
   const location = useLocation();
   const navigate = useNavigate();
   const [searchParams, setSearchParams] = useSearchParams();
   const {
+    role,
     setRole,
     dataSource,
     activeBizId,
@@ -472,11 +543,32 @@ export default function App() {
 
   const [searchQuery, setSearchQuery] = useState('');
   const [customCatalog, setCustomCatalog] = useState<Record<string, any>>(CATALOG_BY_SKU);
+  const [cartItems, setCartItems] = useState<SmartCartItem[]>(() =>
+    loadInitialSmartCart(dataSource === 'live')
+  );
+  const [checkoutIntent, setCheckoutIntent] = useState<CheckoutIntent | null>(null);
   const [orders, setOrders] = useState<OrderRecord[]>(INITIAL_ORDER_RECORDS);
   const [liveStoreOrders, setLiveStoreOrders] = useState<StorefrontOrder[]>([]);
   const [copilotInitialQuery, setCopilotInitialQuery] = useState<string>('');
   const [toastMessage, setToastMessage] = useState<string | null>(null);
   const [isOnboardingOpen, setIsOnboardingOpen] = useState(false);
+
+  useEffect(() => {
+    persistSmartCart(cartItems);
+  }, [cartItems]);
+
+  useEffect(() => {
+    const matched = ROUTE_META.find((r) => r.match(location.pathname));
+    const title = matched?.title || 'AC PayPilot — Autonomous Commerce & Intelligent Escrow';
+    const description =
+      matched?.description ||
+      'AI-native B2B commerce, 3D/AR spatial catalog, and PayPal escrow settlement workspace.';
+    document.title = title;
+    const metaDesc = document.querySelector('meta[name="description"]');
+    if (metaDesc) {
+      metaDesc.setAttribute('content', description);
+    }
+  }, [location.pathname]);
 
   React.useEffect(() => {
     ensureDefaultStoreExists();
@@ -609,9 +701,36 @@ export default function App() {
 
   const handleAddToCart = useCallback(
     (product: any) => {
+      const sku = product?.sku || '#FAN-BLDC-892';
       if (product?.sku) {
         setCustomCatalog((prev) => ({ ...prev, [product.sku]: product }));
       }
+      setCartItems((prev) => {
+        const cleanSku = String(sku).replace(/^#/, '');
+        const existing = prev.find(
+          (i) => i.sku === sku || i.sku.replace(/^#/, '') === cleanSku
+        );
+        if (existing) {
+          return prev.map((i) =>
+            i.sku === existing.sku ? { ...i, qty: i.qty + 1, selected: true } : i
+          );
+        }
+        return [
+          ...prev,
+          {
+            sku,
+            name: product?.name || sku,
+            category: product?.category || 'Hardware',
+            hsCode: product?.hsCode || '8414.51.10',
+            unitPrice: Number(product?.price) || 8499,
+            qty: 1,
+            selected: true,
+            img:
+              product?.img ||
+              'https://images.unsplash.com/photo-1591799264318-7e6ef8ddb7ea?w=400&auto=format&fit=crop&q=80',
+          },
+        ];
+      });
       showToast(`Added ${product?.name || 'item'} to SmartCart`);
       navigate('/customer/cart');
     },
@@ -631,6 +750,20 @@ export default function App() {
     (product?: any) => {
       if (product?.sku) {
         setCustomCatalog((prev) => ({ ...prev, [product.sku]: product }));
+        setCheckoutIntent({
+          items: [
+            {
+              sku: product.sku,
+              name: product.name,
+              quantity: 1,
+              unitPrice: Number(product.price) || undefined,
+            },
+          ],
+          currency: 'USD',
+          mode: 'buy_now',
+        });
+      } else {
+        setCheckoutIntent(null);
       }
       openModalParam('checkout');
     },
@@ -640,20 +773,25 @@ export default function App() {
   const handleCheckoutSuccess = useCallback(() => {
     const newOrderId = `#PP-${Math.floor(9822 + orders.length)}`;
     const newInvoiceId = `INV-2026-0${90 + orders.length}`;
+    const firstIntentItem = checkoutIntent?.items?.[0];
     const newOrder: OrderRecord = {
       id: newOrderId,
       invoiceId: newInvoiceId,
-      buyerName: 'Priya Patel (Apex Cloud Labs)',
+      buyerName: 'Verified Customer',
       buyerGstin: '27AABCU9603R1ZM',
-      productSku: 'AC-WRK-8990',
-      productName: 'ProArt Studio Workstation X1 + Display Bundle',
-      qty: 1,
-      amount: 421500,
-      paymentState: 'Authorized',
+      productSku: firstIntentItem?.sku || 'FAN-BLDC-892',
+      productName: firstIntentItem?.name || 'Smart Hardware Bundle',
+      qty: firstIntentItem?.quantity || 1,
+      amount: (firstIntentItem?.unitPrice || 8499) * (firstIntentItem?.quantity || 1),
+      paymentState: 'Captured',
       date: 'Just now',
       trackingId: 'ESCROW-LOCKED-NEW',
     };
     setOrders((prev) => [newOrder, ...prev]);
+    if (checkoutIntent?.mode === 'cart') {
+      setCartItems((prev) => prev.filter((item) => !item.selected));
+    }
+    setCheckoutIntent(null);
     emitOrderPlacedNotification({
       id: newOrderId,
       bizId: DEFAULT_BIZ_ID,
@@ -671,7 +809,7 @@ export default function App() {
       search: `?${next.toString()}`,
     });
     showToast(`PayPal Escrow Authorized (${newOrderId}) — Redirected to Orders`);
-  }, [navigate, orders.length, showToast]);
+  }, [checkoutIntent, navigate, orders.length, showToast]);
 
   const handleUpdateOrderState = useCallback(
     (orderId: string, nextState: CanonicalPaymentState) => {
@@ -694,6 +832,7 @@ export default function App() {
         invoices={mockInvoices}
         transactions={mockTransactions}
         orders={mockOrders}
+        activeCartCount={cartItems.reduce((sum, item) => sum + (item.selected ? item.qty : 0), 0)}
       />
 
       <div className="flex flex-1 min-h-0 items-start">
@@ -956,7 +1095,22 @@ export default function App() {
               element={
                 <RoleRouteGuard allowedRoles={['customer', 'business_head']}>
                   <SmartCartScreen
+                    items={cartItems}
+                    onUpdateItems={setCartItems}
                     onOpenCheckout={() => openModalParam('checkout')}
+                    onStartCheckout={(active) => {
+                      setCheckoutIntent({
+                        items: active.map((i) => ({
+                          sku: i.sku,
+                          name: i.name,
+                          quantity: i.qty,
+                          unitPrice: i.unitPrice,
+                        })),
+                        currency: 'USD',
+                        mode: 'cart',
+                      });
+                      openModalParam('checkout');
+                    }}
                     onOpenCopilot={(query) => {
                       if (query) {
                         setCopilotInitialQuery(query);
@@ -1004,9 +1158,25 @@ export default function App() {
                     orders={effectiveOrders}
                     highlightedOrderId={highlightedOrderId}
                     onUpdateOrderState={handleUpdateOrderState}
-                    onOpenInvoice={(invId) => navigate(`/seller/invoices/${invId}`)}
+                    onOpenInvoice={(invId) => navigate(`/customer/orders/${invId}/invoice`)}
                     onOpenProduct={(sku) => navigate(`/customer/product/${sku}`)}
                     onOpenCheckout={() => openModalParam('checkout')}
+                    showToast={showToast}
+                    globalSearchQuery={searchQuery}
+                  />
+                </RoleRouteGuard>
+              }
+            />
+
+            <Route
+              path="/customer/orders/:id/invoice"
+              element={
+                <RoleRouteGuard allowedRoles={['customer', 'business_head']}>
+                  <InvoiceRouteWrapper
+                    basePath="/customer/orders"
+                    pathSuffix="/invoice"
+                    onOpenCopilot={(q) => openModalParam('copilot', q)}
+                    onOpenFeeAudit={() => openModalParam('fee-audit')}
                     showToast={showToast}
                     globalSearchQuery={searchQuery}
                   />
@@ -1024,7 +1194,13 @@ export default function App() {
                     onConsumeInitialQuery={() => setCopilotInitialQuery('')}
                     onNavigateProduct={(sku) => navigate(`/customer/product/${sku}`)}
                     onNavigateCart={() => navigate('/customer/cart')}
-                    onNavigateInvoice={(invId) => navigate(`/seller/invoices/${invId}`)}
+                    onNavigateInvoice={(invId) =>
+                      navigate(
+                        role === 'customer'
+                          ? `/customer/orders/${invId}/invoice`
+                          : `/seller/invoices/${invId}`
+                      )
+                    }
                     onOpenCheckout={() => openModalParam('checkout')}
                     showToast={showToast}
                   />
@@ -1089,8 +1265,12 @@ export default function App() {
 
       <PayPalCheckoutModal
         isOpen={activeModal === 'checkout'}
-        onClose={closeModalParam}
+        onClose={() => {
+          setCheckoutIntent(null);
+          closeModalParam();
+        }}
         onSuccess={handleCheckoutSuccess}
+        checkoutIntent={checkoutIntent}
         onSimulateRedirectReturn={() =>
           navigate('/checkout/success?token=PP-TX-94821-SB&orderId=%23PP-9822')
         }

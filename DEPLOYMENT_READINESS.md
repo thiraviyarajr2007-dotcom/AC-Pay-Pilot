@@ -1,252 +1,61 @@
-# AC PayPilot — Production Deployment & Environment Readiness Guide
+# AC PayPilot — Production Deployment Readiness Assessment
 
-**Date:** 2026-11-11  
-**Project:** AC PayPilot (`PayPilot-AI-—-Autonomous-Commerce-&-Intelligent-Escrow-Platform`)  
-**Deployment Target:** Unified Node.js / Express Container / Cloud Run / Vercel (Node 24.x + Static `dist/`)  
-**Current Status:** **Production Build Verified, Local Runtime Verified, Firestore Emulator Rules Verified, 0 Audit Vulnerabilities (Remote Vercel Redeploy Pending Push)**  
-
----
-
-## 1. System Build & Runtime Status
-
-| Subsystem | Requirement | Verified Status | Evidence |
-| :--- | :--- | :--- | :--- |
-| **Node.js Runtime** | Node `>=24.12.0 <25.0.0` (`.nvmrc`: `24.12.0`, tested `v24.15.0`) | **READY** | Pinned in `package.json` `engines`, `.nvmrc`, and `.github/workflows/webpack.yml` |
-| **Dependency Security** | Clean production dependency graph | **PASS (0 vulns)** | `npm audit` and `npm audit --omit=dev` report `found 0 vulnerabilities` |
-| **TypeScript Typecheck** | Zero compiler errors | **PASS** | `npm run lint` (`tsc --noEmit`) exited code 0 |
-| **Vite Production Bundle** | Route-split client bundle in `dist/` | **PASS** | `npm run build` in ~5.18s; main entry `index-*.js` is `383.84 kB` (`116.85 kB` gzip) |
-| **Express Backend** | Configurable `PORT` (default `3000`, verified `4173`) | **PASS** | Clean startup via `resolveServerPort()` + `node node_modules/tsx/dist/cli.mjs server.ts` |
-| **Liveness & Readiness** | `/health/live` (200) & `/health/ready` (503 in volatile prod) | **PASS** | Verified fail-closed readiness & durable mutation blocking across all mutating endpoints |
-| **Unit & Integration Suite** | Node native test runner (`node:test`) | **PASS** | 95/95 tests passing (`npm test`) |
-| **Firestore Security Rules** | Firebase Emulator Rules verification (`@firebase/rules-unit-testing`) | **PASS** | 4/4 rules suites passing (`npm run test:rules`) against `firestore.rules` |
+**Assessment Date:** 2026-11-12  
+**Workspace Status:** Remediated & Verified Locally (Remote Vercel Redeploy Pending Git Push & Env Confirmation)  
+**Target Runtime:** Node.js `>=24.12.0 <25.0.0`, Vercel (`vercel.json` + `api/index.ts`), Firebase Firestore Enterprise Edition, PayPal REST APIs, Google Gemini API.
 
 ---
 
-## 2. Environment Variables & Secret Configuration
+## 1. Local & Emulator Verification Verdict (Post-Final-Edit)
 
-> [!IMPORTANT]
-> Never commit actual secret values to source control or report artifacts. All values below should be supplied through secure environment variable injection (e.g., Cloud Secret Manager, Docker Compose, or `.env`).
+All local build, security rules, static analysis, bundle budget, Chrome E2E, and automated test gates passed on the latest codebase:
 
-### Public Client Configuration (Vite-Exposed)
-These variables are bundled into the client bundle at build time:
-- `VITE_FIREBASE_API_KEY`: Firebase web client API key.
-- `VITE_FIREBASE_AUTH_DOMAIN`: Firebase authentication domain (`ai-studio-applet-webapp-4bdcd.firebaseapp.com`).
-- `VITE_FIREBASE_PROJECT_ID`: Canonical project identifier (`ai-studio-applet-webapp-4bdcd`).
-- `VITE_FIREBASE_DATABASE_ID`: Custom database identifier (`ai-studio-paypilotaiautono-5cf5c897-94de-4d92-83f5-3c2d5e3761dd`).
-- `VITE_FIREBASE_STORAGE_BUCKET`: Firebase storage bucket URI (`ai-studio-applet-webapp-4bdcd.firebasestorage.app`).
-- `VITE_FIREBASE_MESSAGING_SENDER_ID`: Cloud Messaging sender ID (`920798490531`).
-- `VITE_FIREBASE_APP_ID`: Firebase web app client ID (`1:920798490531:web:0308268700ebe8a272f416`).
-- `VITE_PAYPAL_CLIENT_ID`: PayPal Sandbox client identifier for rendering standard buttons.
-
-### Server-Only Secrets (Protected Backend)
-These variables are strictly consumed by `server.ts` and must **never** be exposed in client code:
-- `PORT`: HTTP port to bind (defaults to `3000`).
-- `NODE_ENV`: Runtime mode (`development`, `test`, or `production`).
-- `GEMINI_API_KEY`: Google Gemini AI API key (for `gemini-3.8-flash` operations).
-- `PAYPAL_CLIENT_ID`: PayPal Sandbox REST API client ID.
-- `PAYPAL_CLIENT_SECRET`: PayPal Sandbox REST API client secret.
-- `PAYPAL_WEBHOOK_ID`: Optional PayPal webhook ID for event signature validation.
-- `GOOGLE_APPLICATION_CREDENTIALS`: Path to GCP service account JSON key file for Firebase Admin SDK.
-- `FIRESTORE_EMULATOR_HOST`: Optional host:port if running local Firebase emulator (e.g. `127.0.0.1:8080`).
+| Gate | Status | Verified Result |
+|---|---|---|
+| TypeScript (`npm run lint`) | **PASS** | 0 errors |
+| Vite Build (`npm run build`) | **PASS** | 1040 modules built cleanly (`3.12s`) |
+| Bundle Budgets (`npm run check:bundle`) | **PASS** | Entry chunk `133.73 kB` raw / `37.32 kB` gzip (`All bundle size and entry preload budgets passed`) |
+| Automated Tests + Coverage (`npm run test:coverage`) | **PASS** | **103/103** tests passed (`0` failed, `0` skipped); `74.89%` lines / `57.49%` branches / `66.67%` functions |
+| Firestore Rules Emulator (`npm run test:rules`) | **PASS** | **5/5** tests passed (`ACP-SEC-003`..`006`, `SEC-009/010/011`) |
+| Dependency Security (`npm audit --omit=dev`) | **PASS** | `0` known production vulnerabilities |
+| Local Chrome Verification Suites | **PASS** | **32/32** regression/viewport checks + **18/18** multi-persona E2E checks (`0` console errors) |
+| TestSprite CLI v0.15.0 (Tunnel) | **3 PASS / 1 BLOCKED / 1 FAIL** | Storefront checkout (`de8b142f` 8/8), Customer Cart/Guard (`0550ec49` 5/5), and 3D Spatial Twin (`75fb4a14` 4/4) **PASSED** post-edit; `efe5b15a` blocked by external Firebase `auth/operation-not-allowed`; legacy Oct 30 plan (`5aa13959`) failed against local `.env` `VITE_DEMO_MODE=true` demo banner |
 
 ---
 
-## 3. External Provider & Subsystem Readiness
+## 2. Production Configuration & Fail-Closed Guarantees
 
-### A. PayPal Sandbox v2
-- **OAuth2 Token Exchange:** **VERIFIED LIVE** (`https://api-m.sandbox.paypal.com/v1/oauth2/token`).
-- **Live Order Creation:** **VERIFIED LIVE** with real PayPal Sandbox API (`POST /v2/checkout/orders` returning HTTP 201 with real order IDs e.g. `4WR58417FF312423E` using supported currency `USD`).
-- **Fail-Closed Currency Invariant:** Verified that unsupported currencies (such as `INR` on PayPal Orders v2 API) correctly fail closed with HTTP 400 `ORDER_CREATION_FAILED` (422 `CURRENCY_NOT_SUPPORTED`), never manufacturing fake successes.
-- **Fail-Closed Capture & Invariants:** Captures verify status `COMPLETED`, currency match, and minor unit amount match. Mismatches or bank declines reject capture and prevent escrow funding.
-- **Webhook Signature Checking:** Verifies headers `PAYPAL-AUTH-ALGO`, `PAYPAL-CERT-URL`, `PAYPAL-TRANSMISSION-ID`, `PAYPAL-TRANSMISSION-SIG`, and `PAYPAL-TRANSMISSION-TIME`. Rejects unsigned or forged requests, enforces PayPal cert domain validation, validates order identity, and dedupes repeat event IDs.
-
-### B. Google Gemini AI Engine
-- **Model Selected:** `gemini-3.8-flash`.
-- **System Check Response:** **VERIFIED LIVE** (Received `PONG` response from live API).
-- **Structured Schema Enforced:**
-  - `POST /api/invoice/analyze`: Structured GST analysis and line items.
-  - `POST /api/listing/generate`: 3-column listing draft preserving seller-supplied facts.
-  - `POST /api/cart/optimize`: Priority ranking with budget ceiling checks and separate suggested alternatives.
-  - `POST /api/escrow/recommend`: Advisory recommendation (`release`, `hold`, `dispute`) grounded in tracking records.
-  - `POST /api/product/qa`: Grounded Q&A returning `not_provided` when specs are unknown.
-
-### C. Cloud Firestore Database
-- **Configuration:** Project `ai-studio-applet-webapp-4bdcd`, custom database `ai-studio-paypilotaiautono-5cf5c897-94de-4d92-83f5-3c2d5e3761dd`.
-- **Health Verification:** True live Cloud Firestore write + read + delete REST operations verified on `_health` collection with latency measurement (~1000ms).
-- **Durable Server Persistence Status:** Privileged Admin SDK gRPC writes require `GOOGLE_APPLICATION_CREDENTIALS` (Service Account JSON). In local development and test environments without service account credentials, `firebaseAdmin.ts` uses partitioned in-memory storage fallback. **Production readiness claim for durable cloud persistence requires provisioning `GOOGLE_APPLICATION_CREDENTIALS`.** Data stored in local memory maps will not survive process restarts.
-
-### D. Three.js & Binary glTF 2.0 Spatial Engine
-- **MIME Type:** `model/gltf-binary`.
-- **Header Check:** 12-byte header with magic `0x46546C67` (ASCII `glTF`), version `2`, and valid total byte length.
-- **Upload Validation:** Enforces 25 MB max limit and valid file extensions (`.glb`, `.gltf`, `.usdz`).
+1. **Startup Fail-Closed Validation (`src/server/configValidator.ts`):**
+   - Production refuses to start with volatile in-memory storage fallback (`persistenceCheckMiddleware` returns `503 PERSISTENCE_UNAVAILABLE` if Firestore persistence is unavailable).
+   - `ENABLE_TEST_WEBHOOK_BYPASS` is strictly forbidden outside `NODE_ENV=test`.
+   - Spoofed `x-actor-*` headers without verified Firebase ID tokens are rejected (`401`).
+2. **Health Probes (`src/server/healthService.ts` & `server.ts`):**
+   - `GET /health/live`: `200` liveness response without mutating Firestore.
+   - `GET /health` / `GET /api/health` / `GET /health/ready`: Honestly reports `degraded` or `503` when persistence/integrations are unhealthy instead of masking fallbacks as `healthy`.
+   - `POST /api/health/system-check`: Protected by Firebase Auth (`401`/`403` when unauthorized).
+3. **API Rate Limiting, Security Headers & Storefront Privacy:**
+   - Global security headers (`X-Content-Type-Options`, `X-Frame-Options`, `Referrer-Policy`, `Strict-Transport-Security`, CSP/CORS allowlist) and `apiLimiter` (`429 RATE_LIMIT_EXCEEDED`) enforced in `server.ts`.
+   - `/s/:slug` uses `sanitizePublicBusinessProfile()` (`contact` sanitized for display; `ownerUid`, `paypalEmail`, `taxGstNumber`, `roleMembers` redacted).
+   - `GET /api/executive/kpis` & `POST /api/executive/kpis` enforce `business_head` | `finance` RBAC (`403` otherwise).
 
 ---
 
-## 4. Hosting & Deployment Compatibility
+## 3. Mandatory Pre-Go-Live Production Checklist (Remote Vercel)
 
-The project is structured as a unified Express + Vite application:
-- In **development**, `server.ts` attaches Vite middleware in `middlewareMode: true` for Hot Module Replacement (HMR).
-- In **production**, `server.ts` serves static assets from `dist/` with SPA fallback (`dist/index.html`) for all non-API GET requests.
+Before promoting the remote deployment to live traffic:
 
-### Supported Deployment Targets
-1. **Docker / Container / Google Cloud Run**:
-   - Containerize Node.js 20 or 24.
-   - Run `npm run build` during Docker build stage.
-   - Start with `NODE_ENV=production npm start`.
-2. **Firebase App Hosting**:
-   - Uses `apphosting.yaml` with server entry point.
-3. **VM / Cloud Engine (Linux/Ubuntu)**:
-   - Run behind Nginx reverse proxy with SSL termination.
-
----
-
-## 5. Security & Risk Checklist Before Production Go-Live
-
-- [x] **RBAC Enforcement**: Server verifies Bearer tokens and rejects spoofed `x-actor` headers with HTTP 401.
-- [x] **Dual-Auth Guest Checkout**: Unauthenticated guest checkouts receive single-use cryptographic capture token (`guestCaptureToken`) with SHA-256 hash validation and constant-time verification. Replay, reuse, and cross-order capture attempts rejected with 403.
-- [x] **Startup Configuration Validator**: Server startup fails fast in production if required variables (`PAYPAL_WEBHOOK_ID`, `PAYPAL_CLIENT_ID`, `PAYPAL_CLIENT_SECRET`, `GOOGLE_APPLICATION_CREDENTIALS`) are missing, and strictly forbids test signature bypass.
-- [x] **Fail-Closed USD Payment Standard**: INR catalog items dynamically converted to USD using server exchange rate; direct unsupported currency requests fail closed with 400.
-- [x] **Single-Source Auth & Role Immutability**: All client API requests attach fresh Bearer tokens via `authenticatedFetch`. Client role escalation is blocked at root cause (`ROLE_ESCALATION_FORBIDDEN` and Zod `.strict()` schema).
-- [x] **Authoritative Financial Calculations**: All price calculations, tax rates (18% GST), and PayPal fees are computed on the server from authoritative catalog items.
-- [x] **Idempotency**: Payment creation and order capture use idempotency keys to prevent duplicate transactions.
-- [x] **AI Grounding**: Gemini is forbidden from inventing unprovided product specs or hallucinating certifications.
-- [x] **CSV Injection Protection**: Financial exports sanitize formulas starting with `=`, `+`, `-`, or `@`.
-- [x] **Zero UI Churn**: Original page layout, Tailwind color palette, and component hierarchy strictly preserved.
-- [ ] **Pending Production Action**: Set `GOOGLE_APPLICATION_CREDENTIALS` in production environment to connect Firebase Admin SDK directly to Cloud Firestore.
-
----
-
-## 6. Step-by-Step Deployment Procedure
-
-### Step 1: Install Dependencies
-```bash
-npm install
-```
-
-### Step 2: Validate TypeScript Types
-```bash
-npm run lint
-```
-*Expected output: Process exits with code 0 (no type errors).*
-
-### Step 3: Run Full Test Suite
-```bash
-npm test
-```
-*Expected output: 79/79 tests pass.*
-
-### Step 4: Build Client Bundle
-```bash
-npm run build
-```
-*Expected output: Production assets generated in `dist/`.*
-
-### Step 5: Configure Production Environment Variables
-Create `.env.production` or inject via cloud environment settings:
-```bash
-PORT=3000
-NODE_ENV=production
-GEMINI_API_KEY="your-gemini-key"
-PAYPAL_CLIENT_ID="your-paypal-sandbox-client-id"
-PAYPAL_CLIENT_SECRET="your-paypal-sandbox-client-secret"
-PAYPAL_WEBHOOK_ID="your-paypal-webhook-id"
-GOOGLE_APPLICATION_CREDENTIALS="/etc/secrets/service-account.json"
-```
-
-### Step 6: Start Production Server
-```bash
-npm start
-```
-
-### Step 7: Verify Live Production Health
-```bash
-curl -f http://localhost:3000/health
-curl -f http://localhost:3000/api/health/system-check
-```
-*Both probes should return HTTP 200.*
-
----
-
-## 7. Separate Readiness Verdicts & Environment Profiles
-
-### A. Readiness Verdicts
-
-1. **Local Demo Mode: READY (100% OPERATIONAL)**
-   - **Verdict:** Fully operational and safe for interactive evaluation, developer preview, and stakeholder demos.
-   - **Capabilities:** High-fidelity UI, Three.js 3D/AR canvas, SmartCart planning, synthetic deterministic PayPal Sandbox flows, demo ledger records, and role switcher.
-   - **Persistence:** In-memory volatile store with safe state resetting on restart.
-
-2. **PayPal Sandbox Mode: READY (100% OPERATIONAL)**
-   - **Verdict:** Live verified against official PayPal Sandbox REST APIs.
-   - **Capabilities:** Real OAuth2 token exchange (`https://api-m.sandbox.paypal.com/v1/oauth2/token`), real USD order creation (`POST /v2/checkout/orders` returning real PayPal order IDs), strict capture invariant validation with zero fallbacks, and HMAC-SHA256 webhook signature verification.
-   - **Currency Requirement:** USD checkout strictly enforced (direct INR checkout fails closed with HTTP 400).
-
-3. **Durable Production Persistence: READY (FAIL-CLOSED)**
-   - **Verdict:** Production-hardened with strict fail-closed database guarantees.
-   - **Capabilities:**
-     - Zero silent memory fallbacks for financial mutations.
-     - Product, order, payment, escrow event, user profile, and webhook write failures immediately throw `PersistenceError`.
-     - Automated 502 reconciliation state (`PAYMENT_CAPTURED_RECONCILIATION_REQUIRED`) on provider-captured payments when durable persistence fails, preventing fund loss and holding escrow locked.
-     - Dual-mode credential support: Application Default Credentials (ADC) for Google Cloud Run (`K_SERVICE`) / App Engine (`GAE_SERVICE`) or verified service account key file (`GOOGLE_APPLICATION_CREDENTIALS`).
-   - **Prerequisite for Production Go-Live:** Supply valid GCP credentials (via Service Account JSON or Cloud Run Workload Identity).
-
----
-
-### B. Exact Required Configuration by Mode
-
-#### Profile 1: Local Development
-```ini
-NODE_ENV=development
-PORT=3000
-GEMINI_API_KEY=<optional_gemini_api_key>
-INR_TO_USD_EXCHANGE_RATE=0.012
-# Uses memory-volatile storage and deterministic sandbox simulator
-```
-
-#### Profile 2: Explicit Demo Mode
-```ini
-NODE_ENV=development
-DEMO_MODE=true
-PORT=3000
-GEMINI_API_KEY=<optional_gemini_api_key>
-INR_TO_USD_EXCHANGE_RATE=0.012
-# Seeds 3 demo orders, enables persona switching, preserves dashboard KPIs
-```
-
-#### Profile 3: PayPal Sandbox (Live Integration)
-```ini
-NODE_ENV=development
-PORT=3000
-PAYPAL_CLIENT_ID=<your_paypal_sandbox_client_id>
-PAYPAL_CLIENT_SECRET=<your_paypal_sandbox_client_secret>
-PAYPAL_WEBHOOK_ID=<your_paypal_webhook_id>
-GEMINI_API_KEY=<your_gemini_api_key>
-INR_TO_USD_EXCHANGE_RATE=0.012
-# Communicates directly with https://api-m.sandbox.paypal.com
-```
-
-#### Profile 4: Production (Google Cloud Run / ADC)
-```ini
-NODE_ENV=production
-PORT=8080
-K_SERVICE=paypilot-cloud-run-production
-PAYPAL_CLIENT_ID=<production_or_sandbox_client_id>
-PAYPAL_CLIENT_SECRET=<production_or_sandbox_client_secret>
-PAYPAL_WEBHOOK_ID=<production_or_sandbox_webhook_id>
-GEMINI_API_KEY=<production_gemini_api_key>
-INR_TO_USD_EXCHANGE_RATE=0.012
-# Automatically uses Google Cloud ADC; fail-closed persistence active
-```
-
-#### Profile 5: Production (Self-Hosted / Container with Service Account)
-```ini
-NODE_ENV=production
-PORT=3000
-GOOGLE_APPLICATION_CREDENTIALS=/secrets/firebase/service-account.json
-PAYPAL_CLIENT_ID=<production_or_sandbox_client_id>
-PAYPAL_CLIENT_SECRET=<production_or_sandbox_client_secret>
-PAYPAL_WEBHOOK_ID=<production_or_sandbox_webhook_id>
-GEMINI_API_KEY=<production_gemini_api_key>
-INR_TO_USD_EXCHANGE_RATE=0.012
-# Validates existence of service-account.json at startup; fails closed if absent
-```
+- [ ] **Push & Trigger Remote Vercel Deployment:** Push the latest local commits so Vercel builds `api/index.ts` and `dist/`.
+- [ ] **Confirm Production Environment Variables in Vercel:**
+  - Ensure `NODE_ENV=production` and `VITE_DEMO_MODE` is **unset/false** (so unauthenticated users see `"Not Signed In"` header & `"Sign In to Continue"` on guarded routes rather than Demo Sandbox).
+  - Verify Email/Password sign-in (and OAuth providers) are enabled in the target Firebase Auth Console.
+  - Verify `FIREBASE_SERVICE_ACCOUNT_JSON` (or valid ADC), `PAYPAL_CLIENT_ID`, `PAYPAL_CLIENT_SECRET`, `PAYPAL_ENV=sandbox|live`, `PAYPAL_WEBHOOK_ID`, and `GEMINI_API_KEY`.
+  - Verify `ALLOWED_ORIGINS` matches your canonical production domain(s).
+- [ ] **Deploy Updated Firestore Rules & Indexes:**
+  - Run `firebase deploy --only firestore:rules,firestore:indexes` against the target Firebase project (`project_id` verified).
+- [ ] **Verify Live Deployment Post-Deploy:**
+  - Check `GET https://<deployed-host>/health/live` -> `200`
+  - Check `GET https://<deployed-host>/health/ready` -> `200`
+  - Check `GET https://<deployed-host>/robots.txt` & `/sitemap.xml` -> served directly (not caught by SPA rewrite)
+  - Check `GET https://<deployed-host>/s/aerocool` -> `200` with sanitized merchant contact info
+  - Check `POST https://<deployed-host>/api/orders/create` (tampered total rejected; verified minor-unit total & idempotency enforced)
+- [ ] **Physical Device Validation (Out-of-Scope Locally):** Confirm mobile WebXR / ARCore / ARKit camera preview and end-to-end live PayPal checkout login on a real device.

@@ -74,7 +74,7 @@ export const OrdersScreen: React.FC<OrdersScreenProps> = ({
     setServerConfirmed,
     feesVerified,
     setFeesVerified,
-    getActorHeaders,
+    authFetch,
   } = useRole();
 
   const [statusFilter, setStatusFilter] = useState<'ALL' | CanonicalPaymentState>('ALL');
@@ -150,9 +150,8 @@ export const OrdersScreen: React.FC<OrdersScreenProps> = ({
   const fetchEscrowRecommendation = async (order: OrderRecord, escState: EscrowState) => {
     setAiRecLoading(true);
     try {
-      const res = await fetch('/api/escrow/recommend', {
+      const res = await authFetch('/api/escrow/recommend', {
         method: 'POST',
-        headers: getActorHeaders(),
         body: JSON.stringify({
           orderId: order.id,
           trackingId: order.trackingId,
@@ -161,22 +160,28 @@ export const OrdersScreen: React.FC<OrdersScreenProps> = ({
           damageReported: false,
         }),
       });
-      const data = await res.json();
-      if (data.ok && data.recommendation) {
+      const data = await res.json().catch(() => null);
+      if (res.ok && data?.ok && data.recommendation) {
         setAiEscrowRec(data);
+      } else {
+        setAiEscrowRec(null);
       }
     } catch {
-      // ignore
+      setAiEscrowRec(null);
     } finally {
       setAiRecLoading(false);
     }
   };
 
+  const canQueryAiReleaseAgent = mode !== 'customer' && role !== 'customer';
+
   useEffect(() => {
-    if (activeMoneyOrder) {
+    if (canQueryAiReleaseAgent && activeMoneyOrder) {
       void fetchEscrowRecommendation(activeMoneyOrder, activeEscrowState);
+    } else {
+      setAiEscrowRec(null);
     }
-  }, [activeMoneyOrder?.id, activeEscrowState]);
+  }, [canQueryAiReleaseAgent, activeMoneyOrder?.id, activeEscrowState, authFetch]);
 
   const [auditModal, setAuditModal] = useState<{
     order: OrderRecord;
@@ -234,18 +239,23 @@ export const OrdersScreen: React.FC<OrdersScreenProps> = ({
 
     // 1. Post to server ledger API
     try {
-      await fetch(`/api/orders/${encodeURIComponent(order.id)}/escrow-transition`, {
+      const res = await authFetch(`/api/orders/${encodeURIComponent(order.id)}/escrow-transition`, {
         method: 'POST',
-        headers: getActorHeaders(),
         body: JSON.stringify({
           nextState: targetState,
           reason: actualReason,
-          actorId: profile.userEmail,
-          actorRole: role,
         }),
       });
+      if (!res.ok) {
+        const errData = await res.json().catch(() => null);
+        showToast(errData?.error || `Escrow transition denied (HTTP ${res.status})`);
+        setTransitioning(false);
+        return;
+      }
     } catch {
-      // server state handled
+      showToast('Failed to reach escrow transition server.');
+      setTransitioning(false);
+      return;
     }
 
     // 2. Persist to Firestore escrowEvents collection
@@ -406,7 +416,7 @@ export const OrdersScreen: React.FC<OrdersScreenProps> = ({
       </div>
 
       {/* POST /api/escrow/recommend: AI Release Agent Card (Reads order evidence, human confirms with 1 click) */}
-      {activeMoneyOrder && (
+      {canQueryAiReleaseAgent && activeMoneyOrder && (
         <div
           data-testid="ai-escrow-release-agent-card"
           className="bg-white rounded-xl border border-blue-200 p-5 shadow-xs space-y-3"

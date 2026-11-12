@@ -8,7 +8,7 @@ import {
 const GSTIN_REGEX = /^[0-9]{2}[A-Z]{5}[0-9]{4}[A-Z]{1}[1-9A-Z]{1}Z[0-9A-Z]{1}$/;
 
 export const SettingsScreen: React.FC = () => {
-  const { role, firebaseUser, getActorHeaders } = useRole();
+  const { role, firebaseUser, authFetch } = useRole();
 
   const [merchantName, setMerchantName] = useState('TechPilot Solutions Store (IN)');
   const [merchantGstin, setMerchantGstin] = useState('29AABCC1234D1Z9');
@@ -107,9 +107,8 @@ export const SettingsScreen: React.FC = () => {
 
     try {
       // 1. Save to server REST API
-      const serverRes = await fetch('/api/merchants/profile', {
+      const serverRes = await authFetch('/api/merchants/profile', {
         method: 'POST',
-        headers: getActorHeaders(),
         body: JSON.stringify({
           uid,
           storeName: merchantName.trim(),
@@ -120,7 +119,7 @@ export const SettingsScreen: React.FC = () => {
       });
 
       if (!serverRes.ok) {
-        const errJson = await serverRes.json();
+        const errJson = await serverRes.json().catch(() => ({}));
         throw new Error(errJson.error || 'Server rejected merchant profile update');
       }
 
@@ -155,15 +154,13 @@ export const SettingsScreen: React.FC = () => {
     setTestingPing(true);
     const start = performance.now();
     try {
-      const res = await fetch('/api/health/system-check', {
-        headers: getActorHeaders(),
-      });
-      const data = await res.json();
+      const res = await authFetch('/api/health/system-check');
+      const data = await res.json().catch(() => ({}));
       const latency = Math.round(performance.now() - start);
       if (res.ok) {
         setPingResult(`${latency}ms • Node runtime healthy (${data.checks?.length || 4} subsystems operational)`);
       } else {
-        setPingResult(`${latency}ms • Diagnostic check reported issue: ${data.status || 'unknown'}`);
+        setPingResult(`${latency}ms • Diagnostic check reported issue (HTTP ${res.status}): ${data.status || data.error || 'unknown'}`);
       }
     } catch {
       const latency = Math.round(performance.now() - start);

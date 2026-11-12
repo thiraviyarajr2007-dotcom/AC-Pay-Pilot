@@ -51,10 +51,11 @@ const PROMPT_SUGGESTIONS = [
 export const AssistantScreen: React.FC<AssistantScreenProps> = ({
   initialQuery,
   onConsumeInitialQuery,
+  onNavigateInvoice,
   showToast,
 }) => {
   const navigate = useNavigate();
-  const { role, profile, getActorHeaders } = useRole();
+  const { role, profile, authFetch } = useRole();
 
   const [messages, setMessages] = useState<ChatMessage[]>([
     {
@@ -118,20 +119,19 @@ export const AssistantScreen: React.FC<AssistantScreenProps> = ({
         const reader = new FileReader();
         reader.onloadend = async () => {
           try {
-            const res = await fetch('/api/ai/transcribe', {
+            const res = await authFetch('/api/ai/transcribe', {
               method: 'POST',
-              headers: { 'Content-Type': 'application/json' },
               body: JSON.stringify({
                 audioBase64: String(reader.result || ''),
                 mimeType,
               }),
             });
-            const data = await res.json();
-            if (res.ok && data.ok && data.transcript) {
+            const data = await res.json().catch(() => null);
+            if (res.ok && data?.ok && data.transcript) {
               setInput((prev) => (prev ? `${prev} ${data.transcript}` : data.transcript));
               showToast('Voice transcribed with gemini-3.5-transcribe');
             } else {
-              showToast(data.error || 'Voice transcription failed');
+              showToast(data?.error || `Voice transcription failed (HTTP ${res.status})`);
             }
           } catch {
             showToast('Unable to transcribe audio');
@@ -175,10 +175,9 @@ export const AssistantScreen: React.FC<AssistantScreenProps> = ({
     setStreaming(true);
 
     try {
-      const res = await fetch('/api/copilot', {
+      const res = await authFetch('/api/copilot', {
         method: 'POST',
         headers: {
-          ...getActorHeaders(),
           Accept: 'text/event-stream',
         },
         body: JSON.stringify({
@@ -186,6 +185,25 @@ export const AssistantScreen: React.FC<AssistantScreenProps> = ({
           stream: true,
         }),
       });
+
+      if (!res.ok) {
+        const errData = await res.json().catch(() => null);
+        setMessages((prev) =>
+          prev.map((m) =>
+            m.id === aiMsgId
+              ? {
+                  ...m,
+                  source: 'fallback',
+                  text:
+                    errData?.error ||
+                    `Copilot request failed (HTTP ${res.status}). Sign in or check your permissions.`,
+                  timestamp: 'Just now',
+                }
+              : m
+          )
+        );
+        return;
+      }
 
       const contentType = res.headers.get('content-type') || '';
       if (contentType.includes('text/event-stream') && res.body) {
@@ -209,7 +227,12 @@ export const AssistantScreen: React.FC<AssistantScreenProps> = ({
             if (!eventLine || !dataLine) continue;
 
             const evtType = eventLine.replace('event:', '').trim();
-            const payload = JSON.parse(dataLine.replace('data:', '').trim());
+            let payload: any;
+            try {
+              payload = JSON.parse(dataLine.replace('data:', '').trim());
+            } catch {
+              continue;
+            }
 
             if (evtType === 'tool_calls') {
               setMessages((prev) =>
@@ -257,12 +280,12 @@ export const AssistantScreen: React.FC<AssistantScreenProps> = ({
           }
         }
       } else {
-        const data = await res.json();
+        const data = await res.json().catch(() => ({}));
         setMessages((prev) =>
           prev.map((m) =>
             m.id === aiMsgId
               ? {
-                   ...m,
+                  ...m,
                   source: data.source || 'fallback',
                   text: data.answer || data.error || 'Completed response.',
                   whyThis: data.whyThis,
@@ -481,7 +504,19 @@ export const AssistantScreen: React.FC<AssistantScreenProps> = ({
                         <button
                           type="button"
                           disabled={!msg.approved}
-                          onClick={() => navigate(msg.proposal!.targetRoute)}
+                          onClick={() => {
+                            const target = msg.proposal!.targetRoute;
+                            if (target.startsWith('/seller/invoices/') || target.startsWith('/finance/invoices/')) {
+                              const invId = target.split('/').pop() || '';
+                              if (role === 'customer') {
+                                navigate(`/customer/orders/${encodeURIComponent(invId)}/invoice`);
+                              } else {
+                                onNavigateInvoice(invId);
+                              }
+                            } else {
+                              navigate(target);
+                            }
+                          }}
                           className="px-3 py-1 rounded-lg bg-inverse-surface text-inverse-on-surface disabled:opacity-40 text-[11px] font-semibold transition-opacity cursor-pointer disabled:cursor-not-allowed"
                         >
                           {msg.proposal.title} →

@@ -1,6 +1,18 @@
-import React, { useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import { ARPanelState } from './ProductDetailARScreen';
 import { WebXRStudioViewer } from '../three/WebXRStudioViewer';
+
+function checkWebGLAvailable(): boolean {
+  try {
+    const canvas = document.createElement('canvas');
+    const gl = canvas.getContext('webgl2') || canvas.getContext('webgl');
+    if (!gl) return false;
+    (gl as WebGLRenderingContext).getExtension?.('WEBGL_lose_context')?.loseContext();
+    return true;
+  } catch {
+    return false;
+  }
+}
 
 interface GalleryAngle {
   id: string;
@@ -53,6 +65,54 @@ export const ProductARViewerSection: React.FC<ProductARViewerSectionProps> = ({
   onOpenARModal,
 }) => {
   const [engineMode, setEngineMode] = useState<'three_webxr' | 'model_viewer'>('three_webxr');
+  const [modelViewerFailed, setModelViewerFailed] = useState<boolean>(false);
+  const webglAvailable = useMemo(() => checkWebGLAvailable(), []);
+
+  useEffect(() => {
+    if (engineMode !== 'model_viewer' || !webglAvailable) return;
+    setModelViewerFailed(false);
+    const el = modelViewerRef.current;
+    if (!el) {
+      const timer = window.setTimeout(() => {
+        if (!customElements.get('model-viewer')) {
+          setModelViewerFailed(true);
+        }
+      }, 3000);
+      return () => window.clearTimeout(timer);
+    }
+
+    let settled = false;
+    const onLoad = () => {
+      settled = true;
+      setModelViewerFailed(false);
+    };
+    const onError = () => {
+      settled = true;
+      setModelViewerFailed(true);
+    };
+    el.addEventListener?.('load', onLoad);
+    el.addEventListener?.('error', onError);
+
+    const timeoutId = window.setTimeout(() => {
+      if (!settled && !el.modelIsVisible) {
+        setModelViewerFailed(true);
+      }
+    }, 4500);
+
+    return () => {
+      window.clearTimeout(timeoutId);
+      el.removeEventListener?.('load', onLoad);
+      el.removeEventListener?.('error', onError);
+    };
+  }, [engineMode, resolvedModelUrl, webglAvailable, modelViewerRef]);
+
+  const parsedOrbit = useMemo(() => {
+    const match = /(-?\d+(?:\.\d+)?)deg\s+(-?\d+(?:\.\d+)?)deg/.exec(cameraOrbit);
+    const yaw = match ? Number(match[1]) : 0;
+    const pitch = match ? 75 - Number(match[2]) : 0;
+    const zoomScale = Math.max(0.7, Math.min(1.45, Number((30 / Math.max(15, fieldOfView)).toFixed(2))));
+    return { yaw, pitch, zoomScale };
+  }, [cameraOrbit, fieldOfView]);
 
   return (
     <div className="space-y-6">
@@ -104,7 +164,6 @@ export const ProductARViewerSection: React.FC<ProductARViewerSectionProps> = ({
               {(
                 [
                   { id: 'ready', label: '3D View' },
-                  { id: 'loading', label: 'Loading' },
                   { id: 'model_unavailable', label: 'Photos' },
                   { id: 'ar_unsupported', label: 'Phone QR' },
                   { id: 'camera_denied', label: 'Camera Off' },
@@ -320,6 +379,29 @@ export const ProductARViewerSection: React.FC<ProductARViewerSectionProps> = ({
                   productName={product.name}
                   price={product.price}
                 />
+              </div>
+            ) : !webglAvailable || modelViewerFailed ? (
+              <div
+                data-testid="google-model-viewer-fallback"
+                className="relative w-full h-[340px] sm:h-[380px] rounded-xl bg-gradient-to-br from-slate-950 via-slate-900 to-slate-950 flex flex-col items-center justify-center p-6 text-center select-none overflow-hidden"
+              >
+                <div
+                  className="w-44 h-44 rounded-3xl border border-sky-400/40 bg-gradient-to-tr from-sky-500/20 via-indigo-500/20 to-emerald-400/20 shadow-2xl flex flex-col items-center justify-center p-3 transition-transform duration-300"
+                  style={{
+                    transform: `perspective(900px) rotateX(${parsedOrbit.pitch}deg) rotateY(${parsedOrbit.yaw}deg) scale(${parsedOrbit.zoomScale})`,
+                  }}
+                >
+                  <span className="material-symbols-outlined text-[44px] text-sky-300">deployed_code</span>
+                  <span className="mt-2 text-[11px] font-mono text-sky-300 truncate max-w-full">
+                    {resolvedModelUrl}
+                  </span>
+                  <span className="mt-1 text-xs font-bold text-white truncate max-w-full">
+                    {product.name}
+                  </span>
+                </div>
+                <p className="mt-4 text-xs text-slate-300 max-w-md">
+                  Binary glTF 2.0 stream active (interactive spatial fallback rendered without hardware WebGL; orbit {Math.round(parsedOrbit.yaw)}°).
+                </p>
               </div>
             ) : (
               <div className="relative w-full h-[340px] sm:h-[380px] flex items-center justify-center">

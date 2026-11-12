@@ -209,6 +209,8 @@ export interface StorefrontOrder {
     | 'Disputed';
   paymentMethod: 'paypal' | 'escrow';
   paypalOrderId?: string;
+  storeSlug?: string;
+  verifiedByServer?: boolean;
   trackingId: string;
   carrier: string;
   timeline: StorefrontOrderTimeline[];

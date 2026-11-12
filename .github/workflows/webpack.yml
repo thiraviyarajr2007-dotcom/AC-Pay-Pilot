@@ -29,8 +29,34 @@ jobs:
     - name: Typecheck / Lint
       run: npm run lint
 
-    - name: Automated Tests
-      run: npm test
-
     - name: Production Vite Build
       run: npm run build
+
+    - name: Bundle Size & Preload Budget Gate
+      run: npm run check:bundle
+
+    - name: Automated Regression Suite with Coverage
+      run: npm run test:coverage
+
+    - name: Firestore Security Rules Verification (Emulator)
+      run: |
+        if ! command -v firebase >/dev/null 2>&1; then
+          npm install -g firebase-tools
+        fi
+        npm run test:rules
+
+    - name: Built Server Live & SEO Smoke Check
+      run: |
+        node node_modules/tsx/dist/cli.mjs server.ts &
+        SERVER_PID=$!
+        trap "kill $SERVER_PID 2>/dev/null || true" EXIT
+        for i in $(seq 1 30); do
+          if curl -fsS http://127.0.0.1:3000/health/live >/dev/null; then
+            break
+          fi
+          sleep 1
+        done
+        curl -fsS http://127.0.0.1:3000/health/live
+        curl -fsS http://127.0.0.1:3000/robots.txt | grep -q "User-agent"
+        curl -fsS http://127.0.0.1:3000/sitemap.xml | grep -q "<urlset"
+        curl -fsS http://127.0.0.1:3000/customer/discover | grep -q "<!doctype html"

@@ -6,6 +6,7 @@ import {
 } from '../../services/storefrontService';
 import { getDefaultStorefrontConfig } from '../../data/templateDefaults';
 import { BusinessProfile } from '../../types/storefront';
+import { useRole } from '../../context/RoleContext';
 
 interface OnboardingWizardProps {
   isOpen: boolean;
@@ -32,6 +33,7 @@ export function OnboardingWizard({
   onComplete,
   initialData,
 }: OnboardingWizardProps) {
+  const { authFetch } = useRole();
   const [step, setStep] = useState<number>(1);
   const [isAiGenerating, setIsAiGenerating] = useState<boolean>(false);
   const [aiGenStatus, setAiGenStatus] = useState<string>('');
@@ -189,9 +191,8 @@ export function OnboardingWizard({
 
     try {
       setAiGenStatus('Contacting Gemini 2.5 Flash to craft brand narrative & starter catalog...');
-      const response = await fetch('/api/ai/generate-storefront', {
+      const response = await authFetch('/api/ai/generate-storefront', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           businessName,
           category,

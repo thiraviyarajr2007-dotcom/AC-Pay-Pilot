@@ -22,6 +22,7 @@ import {
   getDefaultStorefrontConfig,
 } from '../../data/templateDefaults';
 import { hostingerProvider } from '../../services/domainProvider';
+import { useRole } from '../../context/RoleContext';
 
 const PublicStorefrontApp = React.lazy(() =>
   import('../storefront/PublicStorefrontApp').then((m) => ({ default: m.PublicStorefrontApp }))
@@ -39,6 +40,7 @@ export function StorefrontBuilderScreen({
   bizId = DEFAULT_BIZ_ID,
   showToast = console.log,
 }: StorefrontBuilderScreenProps) {
+  const { authFetch } = useRole();
   // Current live business and config from Firestore
   const [business, setBusiness] = useState<BusinessProfile | null>(null);
   const [publishedConfig, setPublishedConfig] = useState<StorefrontConfig | null>(null);
@@ -152,9 +154,8 @@ export function StorefrontBuilderScreen({
 
     setIsAiDesigning(true);
     try {
-      const res = await fetch('/api/ai/design-assistant', {
+      const res = await authFetch('/api/ai/design-assistant', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           prompt: aiPrompt,
           currentTheme: draftConfig.theme,
@@ -172,7 +173,8 @@ export function StorefrontBuilderScreen({
           rationale: data.rationale,
         });
       } else {
-        showToast('AI Design Assistant failed to generate theme.');
+        const errData = await res.json().catch(() => null);
+        showToast(errData?.error || `AI Design Assistant failed (HTTP ${res.status}).`);
       }
     } catch (err) {
       console.error(err);

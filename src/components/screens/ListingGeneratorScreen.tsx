@@ -57,7 +57,7 @@ export const ListingGeneratorScreen: React.FC<ListingGeneratorScreenProps> = ({
   onPreviewCustomer,
   showToast,
 }) => {
-  const { feesVerified, setFeesVerified, getActorHeaders } = useRole();
+  const { feesVerified, setFeesVerified, authFetch } = useRole();
 
   // Seller input form (Defaults to Demo Ceiling Fan #FAN-BLDC-892 for the 3-minute guided demo)
   const [sku, setSku] = useState('#FAN-BLDC-892');
@@ -213,15 +213,24 @@ export const ListingGeneratorScreen: React.FC<ListingGeneratorScreenProps> = ({
     });
 
     try {
-      const res = await fetch(`/api/products/${encodeURIComponent(sku)}/asset`, {
+      const res = await authFetch(`/api/products/${encodeURIComponent(sku)}/asset`, {
         method: 'POST',
-        headers: getActorHeaders(),
         body: JSON.stringify({ fileName, sizeBytes }),
       });
-      const data = await res.json();
-      if (data.asset) {
+      const data = await res.json().catch(() => null);
+      if (res.ok && data?.asset) {
         setAssetStatus(data.asset);
         showToast?.(`3D Asset ${data.asset.status}: ${data.asset.validationMessage}`);
+      } else {
+        setAssetStatus({
+          sku,
+          fileName,
+          format: 'glb',
+          sizeBytes,
+          status: 'Failed',
+          modelUrl: null,
+          validationMessage: data?.error || `Asset validation failed (HTTP ${res.status}).`,
+        });
       }
     } catch {
       setAssetStatus({
@@ -260,9 +269,8 @@ export const ListingGeneratorScreen: React.FC<ListingGeneratorScreenProps> = ({
     if (specCertifications.trim()) providedSpecs.certifications = specCertifications.trim();
 
     try {
-      const res = await fetch('/api/listing/generate', {
+      const res = await authFetch('/api/listing/generate', {
         method: 'POST',
-        headers: getActorHeaders(),
         body: JSON.stringify({
           sku,
           productName,
@@ -272,8 +280,8 @@ export const ListingGeneratorScreen: React.FC<ListingGeneratorScreenProps> = ({
           providedSpecs,
         }),
       });
-      const data = await res.json();
-      if (data.ok) {
+      const data = await res.json().catch(() => null);
+      if (res.ok && data?.ok) {
         setAiResult(data);
         setDraftTitle(data.generated.title);
         setDraftHsn(data.generated.hsnCode);
@@ -283,7 +291,7 @@ export const ListingGeneratorScreen: React.FC<ListingGeneratorScreenProps> = ({
           `AI Listing Draft ready (Source: ${data.source}). Review the 3 columns and approve before publishing.`
         );
       } else {
-        showToast?.(`Draft generation failed: ${data.error || 'Unknown error'}`);
+        showToast?.(`Draft generation failed: ${data?.error || `HTTP ${res.status}`}`);
       }
     } catch {
       showToast?.('Failed to generate AI listing draft.');
@@ -313,15 +321,14 @@ export const ListingGeneratorScreen: React.FC<ListingGeneratorScreenProps> = ({
     };
 
     try {
-      // 1. Post to Server API
-      await fetch('/api/products', {
+      // 1. Post to Server API (schema requires positive numeric `price`)
+      const res = await authFetch('/api/products', {
         method: 'POST',
-        headers: getActorHeaders(),
         body: JSON.stringify({
           sku: cleanSku,
           name: draftTitle,
           category,
-          priceMinor: grossPrice * 100,
+          price: grossPrice,
           currency: 'INR',
           hsnCode: draftHsn,
           modelUrl: assetStatus.status === 'Ready' ? assetStatus.modelUrl : null,
@@ -329,6 +336,10 @@ export const ListingGeneratorScreen: React.FC<ListingGeneratorScreenProps> = ({
           stock: 120,
         }),
       });
+      const data = await res.json().catch(() => null);
+      if (!res.ok || !data?.ok) {
+        throw new Error(data?.error || `Server rejected product publish (HTTP ${res.status}).`);
+      }
 
       // 2. Persist to Firestore
       await saveProductToFirestore({
@@ -357,8 +368,9 @@ export const ListingGeneratorScreen: React.FC<ListingGeneratorScreenProps> = ({
 
       setSellerApproved(true);
       showToast?.(`Seller approved & published SKU ${cleanSku} to live catalog & Firestore.`);
-    } catch {
-      showToast?.('Error syncing product to database.');
+    } catch (err) {
+      setSellerApproved(false);
+      showToast?.(err instanceof Error ? err.message : 'Error syncing product to database.');
     } finally {
       setIsPublishing(false);
     }
@@ -384,15 +396,18 @@ export const ListingGeneratorScreen: React.FC<ListingGeneratorScreenProps> = ({
     }
     setDeletingSku(targetSku);
     try {
-      await fetch(`/api/products/${encodeURIComponent(targetSku)}`, {
+      const res = await authFetch(`/api/products/${encodeURIComponent(targetSku)}`, {
         method: 'DELETE',
-        headers: getActorHeaders(),
       });
+      const data = await res.json().catch(() => null);
+      if (!res.ok || !data?.ok) {
+        throw new Error(data?.error || `Delete rejected (HTTP ${res.status}).`);
+      }
       await deleteProductFromFirestore(targetSku.replace(/^#/, ''));
       setPublishedListings((prev) => prev.filter((p) => p.sku !== targetSku));
       showToast?.(`Deleted SKU ${targetSku} from catalog.`);
-    } catch {
-      showToast?.(`Failed to delete SKU ${targetSku}.`);
+    } catch (err) {
+      showToast?.(err instanceof Error ? err.message : `Failed to delete SKU ${targetSku}.`);
     } finally {
       setDeletingSku(null);
     }

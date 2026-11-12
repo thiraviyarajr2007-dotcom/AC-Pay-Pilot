@@ -3,7 +3,7 @@ import { HealthCheckItem, SystemHealthReport } from '../../server/healthService'
 import { useRole } from '../../context/RoleContext';
 
 export const HealthScreen: React.FC = () => {
-  const { role, getActorHeaders } = useRole();
+  const { role, authFetch } = useRole();
   const [report, setReport] = useState<SystemHealthReport | null>(null);
   const [loading, setLoading] = useState<boolean>(true);
   const [error, setError] = useState<string | null>(null);
@@ -15,11 +15,16 @@ export const HealthScreen: React.FC = () => {
     setLoading(true);
     setError(null);
     try {
-      const res = await fetch('/api/health/system-check', {
-        headers: getActorHeaders(),
-      });
-      const data = (await res.json()) as SystemHealthReport;
-      setReport(data);
+      const res = await authFetch('/api/health/system-check');
+      const data = (await res.json().catch(() => null)) as
+        | (SystemHealthReport & { error?: string })
+        | null;
+      if (!res.ok || !data) {
+        setReport(null);
+        setError(data?.error || `Health check request failed (HTTP ${res.status}).`);
+      } else {
+        setReport(data);
+      }
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to query /api/health/system-check');
     } finally {
@@ -29,18 +34,14 @@ export const HealthScreen: React.FC = () => {
 
   useEffect(() => {
     void fetchHealthReport();
-  }, []);
+  }, [authFetch]);
 
   const handleTestWebhook = async () => {
     setTestingWebhook(true);
     setWebhookResult(null);
     try {
-      const res = await fetch('/api/paypal/webhook', {
+      const res = await authFetch('/api/paypal/webhook', {
         method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          ...getActorHeaders(),
-        },
         body: JSON.stringify({
           id: `WH-TEST-${Date.now()}`,
           event_type: 'PAYMENT.CAPTURE.COMPLETED',
@@ -52,11 +53,11 @@ export const HealthScreen: React.FC = () => {
           },
         }),
       });
-      const data = await res.json();
+      const data = await res.json().catch(() => ({}));
       if (res.ok) {
         setWebhookResult(`✓ Webhook accepted (HTTP 200) — Event '${data.receivedEventType}' processed`);
       } else {
-        setWebhookResult(`✗ Webhook rejected: ${data.error || 'Unknown error'}`);
+        setWebhookResult(`✗ Webhook rejected (HTTP ${res.status}): ${data.error || 'Unknown error'}`);
       }
     } catch (err) {
       setWebhookResult(`✗ Webhook dispatch failed: ${err instanceof Error ? err.message : String(err)}`);

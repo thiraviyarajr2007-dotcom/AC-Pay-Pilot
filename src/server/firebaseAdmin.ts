@@ -253,46 +253,71 @@ export async function authenticateRequest(req: Request): Promise<AuthenticatedUs
 
     const uid = decoded.uid;
     const email = decoded.email || '';
+    const ALLOWED_ROLES: readonly AppUserRole[] = ['customer', 'seller', 'finance', 'business_head'];
 
-    // Derive role and bizId strictly from Firestore users/{uid} document (or verified custom claims)
-    let role = (decoded.role as AppUserRole) || null;
-    let bizId = (decoded.bizId as string) || null;
+    // Validate custom claims if present so invalid role strings never bypass validation
+    const claimRole = decoded.role as AppUserRole | undefined;
+    if (claimRole && !ALLOWED_ROLES.includes(claimRole)) {
+      throw new AuthenticationError('Invalid role claim in Firebase ID token.', 'INVALID_ROLE_CLAIM', 403);
+    }
 
-    if (!role || !bizId) {
-      try {
-        const db = getAdminDb();
-        const userDoc = await db.collection('users').doc(uid).get();
-        if (userDoc.exists) {
-          const userData = userDoc.data() || {};
-          if (!role) role = (userData.role as AppUserRole) || 'customer';
-          if (!bizId) bizId = (userData.bizId as string) || (userData.activeBizId as string) || DEFAULT_BIZ_ID;
-        } else {
-          // Fallback default for newly provisioned user: strictly lowest privilege 'customer'
-          role = role || 'customer';
-          bizId = bizId || DEFAULT_BIZ_ID;
-          await db.collection('users').doc(uid).set(
-            {
-              uid,
-              email,
-              role,
-              bizId,
-              createdAt: new Date().toISOString(),
-              updatedAt: new Date().toISOString(),
-            },
-            { merge: true }
-          );
+    // Firestore users/{uid} document is authoritative for role and tenant membership (SEC-007 / SEC-008)
+    let role: AppUserRole = 'customer';
+    let bizId: string = DEFAULT_BIZ_ID;
+
+    try {
+      const db = getAdminDb();
+      const userRef = db.collection('users').doc(uid);
+      const userDoc = await userRef.get();
+
+      if (userDoc.exists) {
+        const userData = userDoc.data() || {};
+        const storedRole = userData.role as AppUserRole | undefined;
+        if (storedRole && !ALLOWED_ROLES.includes(storedRole)) {
+          throw new AuthenticationError('Stored user profile has an unrecognized role.', 'INVALID_ROLE_CLAIM', 403);
         }
-      } catch (dbErr: any) {
-        role = role || 'customer';
-        bizId = bizId || DEFAULT_BIZ_ID;
+        role = storedRole || 'customer';
+        bizId = (userData.activeBizId as string) || (userData.bizId as string) || DEFAULT_BIZ_ID;
+      } else {
+        // Brand-new Firebase user with no profile document yet: provision strictly lowest-privilege 'customer' atomically
+        const nowIso = new Date().toISOString();
+        const initialProfile = {
+          uid,
+          email,
+          role: 'customer' as AppUserRole,
+          bizId: DEFAULT_BIZ_ID,
+          createdAt: nowIso,
+          updatedAt: nowIso,
+        };
+        try {
+          await userRef.create(initialProfile);
+          role = initialProfile.role;
+          bizId = initialProfile.bizId;
+        } catch {
+          // Concurrent first-request initialization: re-read authoritative profile
+          const retrySnap = await userRef.get();
+          const retryData = retrySnap.data() || {};
+          role = (retryData.role as AppUserRole) || 'customer';
+          bizId = (retryData.activeBizId as string) || (retryData.bizId as string) || DEFAULT_BIZ_ID;
+        }
       }
+    } catch (dbErr: any) {
+      if (dbErr instanceof AuthenticationError) {
+        throw dbErr;
+      }
+      // FAIL CLOSED (SEC-008): Never grant access or fall back to default tenant if profile store is unreadable
+      throw new AuthenticationError(
+        `Authoritative profile verification unavailable: ${dbErr?.message || 'Firestore read error'}`,
+        'AUTH_PROFILE_UNAVAILABLE',
+        503
+      );
     }
 
     return {
       uid,
       email,
-      role: role || 'customer',
-      bizId: bizId || DEFAULT_BIZ_ID,
+      role,
+      bizId,
       isDemo: false,
     };
   } catch (err: any) {
@@ -877,6 +902,97 @@ export async function updateMerchantProfileForBiz(bizId: string, updateData: any
   }
 }
 
+function sanitizePublicBusinessProfile(bizId: string, raw: Record<string, any> | null | undefined) {
+  const name = raw?.name || 'AeroCool Dynamics';
+  const category = raw?.category || 'Smart Hardware & Audio';
+  const supportEmail = raw?.contact?.email || 'support@aerocool.in';
+  return {
+    id: bizId,
+    name,
+    slug: raw?.slug || 'aerocool',
+    category,
+    tagline: raw?.tagline || 'Autonomous Precision Engineering & Escrow Protected Commerce',
+    logoUrl: raw?.logoUrl || '',
+    bannerUrl: raw?.bannerUrl || '',
+    description: raw?.description || '',
+    contact: {
+      email: supportEmail,
+      phone: raw?.contact?.phone || '+91 80 4920 1888',
+      address: raw?.contact?.address || 'Embassy TechVillage, Bengaluru, Karnataka',
+      whatsappNumber: raw?.contact?.whatsappNumber || '+919876543210',
+    },
+    currency: raw?.currency === 'USD' ? 'USD' : 'INR',
+    paypalConnected: Boolean(raw?.paypalConnected ?? true),
+    shippingPolicy: raw?.shippingPolicy || '',
+    returnPolicy: raw?.returnPolicy || '',
+    customDomain: raw?.customDomain || '',
+    domainStatus: raw?.domainStatus || 'pending',
+    supportEmail,
+  };
+}
+
+/**
+ * Resolves a public storefront projection by slug/custom domain without exposing private tenant fields (SEC-010).
+ */
+export async function resolvePublicStorefrontBySlug(slug: string): Promise<{
+  bizId: string;
+  business: ReturnType<typeof sanitizePublicBusinessProfile>;
+  config: any;
+  products: any[];
+}> {
+  const cleanSlug = (slug || 'aerocool').toLowerCase().trim() || 'aerocool';
+  let bizId = DEFAULT_BIZ_ID;
+
+  try {
+    const db = getAdminDb();
+    const domainSnap = await db.collection('domains').doc(cleanSlug).get();
+    if (domainSnap.exists && domainSnap.data()?.bizId) {
+      bizId = String(domainSnap.data()!.bizId);
+    } else {
+      const bizQuery = await db.collection('businesses').where('slug', '==', cleanSlug).limit(1).get();
+      if (!bizQuery.empty) {
+        bizId = bizQuery.docs[0].id;
+      }
+    }
+
+    const [bizSnap, configSnap, prodsSnap] = await Promise.all([
+      db.collection('businesses').doc(bizId).get(),
+      db.collection('businesses').doc(bizId).collection('storefrontConfig').doc('current').get(),
+      db.collection('businesses').doc(bizId).collection('products').get(),
+    ]);
+
+    const rawBiz = bizSnap.exists ? bizSnap.data() : tenantBizStore.get(bizId);
+    const business = sanitizePublicBusinessProfile(bizId, rawBiz);
+    const config = configSnap.exists
+      ? configSnap.data()
+      : getDefaultStorefrontConfig(bizId, business.name, business.category);
+    const firestoreProducts = prodsSnap.docs.map((d) => ({ id: d.id, ...d.data() }));
+    const memoryProducts = await getProductsForBiz(bizId);
+
+    return {
+      bizId,
+      business,
+      config,
+      products:
+        firestoreProducts.length > 0
+          ? firestoreProducts
+          : memoryProducts.length > 0
+            ? memoryProducts
+            : SEED_STORE_PRODUCTS,
+    };
+  } catch {
+    const rawBiz = tenantBizStore.get(bizId);
+    const business = sanitizePublicBusinessProfile(bizId, rawBiz);
+    const products = await getProductsForBiz(bizId);
+    return {
+      bizId,
+      business,
+      config: getDefaultStorefrontConfig(bizId, business.name, business.category),
+      products: products.length > 0 ? products : SEED_STORE_PRODUCTS,
+    };
+  }
+}
+
 /**
  * Performs a REAL Firestore write + read + delete on collection '_health' and returns true latency in ms.
  * Communicates directly with the canonical Firestore REST endpoint using firebaseConfig.
@@ -889,6 +1005,38 @@ export async function performFirestoreHealthCheck(): Promise<{
 }> {
   const start = Date.now();
   const testId = `health_ping_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`;
+
+  // In firestore-admin mode, execute the round-trip write+read+delete strictly via Admin SDK
+  // so client security rules can keep /_health locked down (SEC-011 / BE-03).
+  if (getPersistenceMode() === 'firestore-admin') {
+    try {
+      const db = getAdminDb();
+      const docRef = db.collection('_health').doc(testId);
+      await docRef.set({
+        ping: 'pong',
+        service: 'AC_PayPilot_API',
+        timestamp: new Date().toISOString(),
+      });
+      const snap = await docRef.get();
+      if (!snap.exists || snap.data()?.ping !== 'pong') {
+        throw new Error('Firestore Admin read back did not match expected payload');
+      }
+      await docRef.delete();
+      return {
+        ok: true,
+        latencyMs: Date.now() - start,
+        docId: testId,
+      };
+    } catch (err: any) {
+      return {
+        ok: false,
+        latencyMs: Date.now() - start,
+        docId: testId,
+        error: err?.message || String(err),
+      };
+    }
+  }
+
   const url = `https://firestore.googleapis.com/v1/projects/${FIREBASE_PROJECT_ID}/databases/${FIRESTORE_DATABASE_ID}/documents/_health/${testId}?key=${firebaseConfig.apiKey}`;
 
   try {
@@ -1009,21 +1157,34 @@ export async function isWebhookEventProcessed(eventId: string): Promise<boolean>
   return tenantWebhookStore.has(eventId);
 }
 
-export async function recordWebhookEvent(eventId: string, eventData: any): Promise<void> {
+export async function recordWebhookEvent(
+  eventId: string,
+  eventData: any
+): Promise<{ recorded: boolean; alreadyExists?: boolean }> {
   const durableRequired = isDurablePersistenceRequired();
+
+  if (tenantWebhookStore.has(eventId)) {
+    return { recorded: false, alreadyExists: true };
+  }
 
   try {
     if (simulatedFirestoreError && durableRequired) {
       throw simulatedFirestoreError;
     }
     const db = getAdminDb();
-    await db.collection('processedWebhooks').doc(eventId).set({
+    await db.collection('processedWebhooks').doc(eventId).create({
       eventId,
       ...eventData,
       processedAt: new Date().toISOString(),
     });
     tenantWebhookStore.set(eventId, eventData);
+    return { recorded: true };
   } catch (err: any) {
+    const msg = String(err?.message || '').toLowerCase();
+    if (err?.code === 6 || msg.includes('already exists') || msg.includes('already_exists')) {
+      tenantWebhookStore.set(eventId, eventData);
+      return { recorded: false, alreadyExists: true };
+    }
     if (durableRequired) {
       throw new PersistenceError(
         `Failed to durably record webhook event ${eventId}: ${err.message || 'Write failed'}`,
@@ -1032,6 +1193,7 @@ export async function recordWebhookEvent(eventId: string, eventData: any): Promi
       );
     }
     tenantWebhookStore.set(eventId, eventData);
+    return { recorded: true };
   }
 }
 

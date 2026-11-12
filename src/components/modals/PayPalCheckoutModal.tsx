@@ -8,10 +8,24 @@ import {
 import { useRole } from '../../context/RoleContext';
 import { formatEscrowStateLabel, EscrowState } from '../../utils/escrow';
 
+export interface CheckoutIntentItem {
+  sku: string;
+  name?: string;
+  quantity: number;
+  unitPrice?: number;
+}
+
+export interface CheckoutIntent {
+  items: CheckoutIntentItem[];
+  currency?: 'INR' | 'USD';
+  mode?: 'cart' | 'buy_now';
+}
+
 interface PayPalCheckoutModalProps {
   isOpen: boolean;
   onClose: () => void;
   onSuccess: () => void;
+  checkoutIntent?: CheckoutIntent | null;
   onSimulateRedirectReturn?: () => void;
   onSimulateRedirectCancel?: () => void;
 }
@@ -53,13 +67,13 @@ export const PayPalCheckoutModal: React.FC<PayPalCheckoutModalProps> = ({
   isOpen,
   onClose,
   onSuccess,
+  checkoutIntent,
   onSimulateRedirectReturn,
   onSimulateRedirectCancel,
 }) => {
   const {
     dataSource,
     authFetch,
-    getActorHeaders,
     setServerConfirmed,
     setFeesVerified,
     setLastServerOrderId,
@@ -98,6 +112,26 @@ export const PayPalCheckoutModal: React.FC<PayPalCheckoutModalProps> = ({
     setServerError(null);
     setGuestCaptureToken(null);
 
+    const requestItems =
+      checkoutIntent?.items && checkoutIntent.items.length > 0
+        ? checkoutIntent.items.map((item) => ({
+            sku: item.sku,
+            quantity: Math.max(1, Number(item.quantity) || 1),
+          }))
+        : dataSource === 'demo'
+        ? [
+            { sku: '#FAN-BLDC-892', quantity: 1 },
+            { sku: '#SPO-YNX-99P', quantity: 1 },
+          ]
+        : [];
+
+    if (requestItems.length === 0) {
+      setServerOrder(null);
+      setServerError('Your cart is empty. Add at least one item before checking out.');
+      setLoadingServerOrder(false);
+      return;
+    }
+
     const initServerCheckout = async () => {
       setLoadingServerOrder(true);
       try {
@@ -111,12 +145,8 @@ export const PayPalCheckoutModal: React.FC<PayPalCheckoutModalProps> = ({
           method: 'POST',
           body: JSON.stringify({
             idempotencyKey: freshCreateKey,
-            currency: 'USD',
-            items: [
-              { sku: '#FAN-BLDC-892', quantity: 1, clientPriceIgnored: 1 },
-              { sku: '#SPO-YNX-99P', quantity: 1, clientPriceIgnored: 1 },
-            ],
-            clientUntrustedTotalMinor: 100,
+            currency: checkoutIntent?.currency || 'USD',
+            items: requestItems,
           }),
         });
 
@@ -133,6 +163,20 @@ export const PayPalCheckoutModal: React.FC<PayPalCheckoutModalProps> = ({
           setServerOrder(data.order);
           if (data.guestCaptureToken) {
             setGuestCaptureToken(data.guestCaptureToken);
+            try {
+              window.sessionStorage.setItem(
+                `ac_paypilot_guest_token:${data.order.id}`,
+                data.guestCaptureToken
+              );
+              if (data.order.orderNumber) {
+                window.sessionStorage.setItem(
+                  `ac_paypilot_guest_token:${data.order.orderNumber}`,
+                  data.guestCaptureToken
+                );
+              }
+            } catch {
+              // ignore storage errors
+            }
           }
           setLastServerOrderId(data.order.id);
         }
@@ -144,7 +188,7 @@ export const PayPalCheckoutModal: React.FC<PayPalCheckoutModalProps> = ({
     };
 
     void initServerCheckout();
-  }, [isOpen]);
+  }, [isOpen, checkoutIntent, authFetch, dataSource]);
 
   useEffect(() => {
     if (!isOpen || !paypalClientId) return;
@@ -235,12 +279,10 @@ export const PayPalCheckoutModal: React.FC<PayPalCheckoutModalProps> = ({
 
       let data: any = null;
       try {
-        if (res.ok) {
-          data = await res.json();
-        }
+        data = await res.json();
       } catch (_) {}
 
-      if (!data || !data.ok) {
+      if (!res.ok || !data || !data.ok) {
         const failureMessage =
           data?.error || `Capture failed (HTTP ${res.status}). No payment was confirmed.`;
         setServerError(failureMessage);

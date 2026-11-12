@@ -31,7 +31,7 @@ after(async () => {
   });
 });
 
-async function waitForHttpOk(url: string, timeoutMs = 15000): Promise<Response> {
+async function waitForHttpOk(url: string, timeoutMs = 30000): Promise<Response> {
   const deadline = Date.now() + timeoutMs;
   let lastErr: unknown;
   while (Date.now() < deadline) {

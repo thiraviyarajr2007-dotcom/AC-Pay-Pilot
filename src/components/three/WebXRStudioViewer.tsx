@@ -54,6 +54,8 @@ export const WebXRStudioViewer: React.FC<WebXRStudioViewerProps> = ({
   const [isControlsCollapsed, setIsControlsCollapsed] = useState(false);
   const [autoRotate, setAutoRotate] = useState(true);
   const [vrStatusMessage, setVrStatusMessage] = useState<string | null>(null);
+  const [webglUnavailable, setWebglUnavailable] = useState(false);
+  const [fallbackView, setFallbackView] = useState({ rx: -10, ry: 22, scale: 1 });
 
   // Mutable Three.js refs to avoid re-renders tearing down the WebGL canvas
   const threeRefs = useRef<{
@@ -133,6 +135,18 @@ export const WebXRStudioViewer: React.FC<WebXRStudioViewerProps> = ({
       const ce = e as CustomEvent<{ action: string; delta?: number; factor?: number }>;
       if (!ce.detail) return;
       const { action } = ce.detail;
+      if (action === 'rotate_left' || action === 'rotate_right') {
+        setFallbackView((prev) => ({
+          ...prev,
+          ry: prev.ry + (action === 'rotate_left' ? -22.5 : 22.5),
+        }));
+      } else if (action === 'zoom_in') {
+        setFallbackView((prev) => ({ ...prev, scale: Math.min(1.6, Number((prev.scale * 1.15).toFixed(2))) }));
+      } else if (action === 'zoom_out') {
+        setFallbackView((prev) => ({ ...prev, scale: Math.max(0.65, Number((prev.scale * 0.85).toFixed(2))) }));
+      } else if (action === 'reset_view') {
+        setFallbackView({ rx: -10, ry: 22, scale: 1 });
+      }
       const { camera, controls } = threeRefs.current;
       if (!camera || !controls) return;
 
@@ -194,12 +208,23 @@ export const WebXRStudioViewer: React.FC<WebXRStudioViewerProps> = ({
     const width = container.clientWidth || 800;
     const height = container.clientHeight || 600;
 
-    // 2. Renderer setup with WebXR enabled
-    const renderer = new THREE.WebGLRenderer({
-      antialias: !softGl,
-      powerPreference: 'high-performance',
-      alpha: true,
-    });
+    // 2. Renderer setup with WebXR enabled (graceful fallback if headless WebGL is unavailable)
+    let renderer: THREE.WebGLRenderer;
+    try {
+      renderer = new THREE.WebGLRenderer({
+        antialias: !softGl,
+        powerPreference: 'high-performance',
+        alpha: true,
+      });
+      if (!renderer.getContext()) {
+        renderer.dispose();
+        throw new Error('WebGL context unavailable');
+      }
+    } catch (err) {
+      console.warn('[WebXRStudioViewer] WebGL unavailable, switching to interactive fallback:', err);
+      setWebglUnavailable(true);
+      return;
+    }
     renderer.setSize(width, height);
     renderer.setPixelRatio(softGl ? 1 : Math.min(window.devicePixelRatio || 1, 2));
     renderer.outputColorSpace = THREE.SRGBColorSpace;
@@ -465,22 +490,27 @@ export const WebXRStudioViewer: React.FC<WebXRStudioViewerProps> = ({
 
     switch (preset) {
       case 'front':
+        setFallbackView((prev) => ({ ...prev, rx: 0, ry: 0 }));
         targetCamPos.set(0, 0.8, 3.4);
         targetLookAt.set(0, 0.8, 0);
         break;
       case 'perspective':
+        setFallbackView((prev) => ({ ...prev, rx: -10, ry: 22 }));
         targetCamPos.set(2.4, 1.8, 3.2);
         targetLookAt.set(0, 0.8, 0);
         break;
       case 'top':
+        setFallbackView((prev) => ({ ...prev, rx: -65, ry: 0 }));
         targetCamPos.set(0, 4.2, 0.01);
         targetLookAt.set(0, 0.8, 0);
         break;
       case 'detail':
+        setFallbackView((prev) => ({ ...prev, rx: -6, ry: 12, scale: 1.25 }));
         targetCamPos.set(0.9, 0.95, 1.2);
         targetLookAt.set(0, 0.85, 0);
         break;
       case 'iso':
+        setFallbackView((prev) => ({ ...prev, rx: -22, ry: -35 }));
         targetCamPos.set(-2.6, 2.2, 2.6);
         targetLookAt.set(0, 0.8, 0);
         break;
@@ -499,7 +529,11 @@ export const WebXRStudioViewer: React.FC<WebXRStudioViewerProps> = ({
   // WebXR Headset Session Launcher
   const handleLaunchWebXRSession = async () => {
     const renderer = threeRefs.current.renderer;
-    if (!renderer) return;
+    if (!renderer) {
+      setVrStatusMessage('WebGL 3D context unavailable; interactive spatial preview fallback is active.');
+      setTimeout(() => setVrStatusMessage(null), 4000);
+      return;
+    }
 
     if (threeRefs.current.xrSession) {
       // End session if currently presenting
@@ -549,6 +583,40 @@ export const WebXRStudioViewer: React.FC<WebXRStudioViewerProps> = ({
         data-testid="threejs-webxr-canvas-container"
         className="absolute inset-0 w-full h-full cursor-grab active:cursor-grabbing z-0"
       />
+
+      {webglUnavailable && (
+        <div
+          data-testid="webxr-webgl-fallback"
+          onClick={() => setFallbackView((prev) => ({ ...prev, ry: (prev.ry + 30) % 360 }))}
+          role="region"
+          aria-label="Interactive WebXR spatial fallback preview"
+          className="absolute inset-0 z-10 flex flex-col items-center justify-center p-6 text-center bg-gradient-to-b from-[#0c0e14] via-[#131a29] to-[#0c0e14] cursor-pointer select-none"
+        >
+          <div
+            className="w-48 h-48 rounded-3xl border border-sky-400/40 shadow-2xl flex flex-col items-center justify-center transition-transform duration-500"
+            style={{
+              background:
+                selectedFinish === 'rosegold'
+                  ? 'linear-gradient(135deg, rgba(157, 23, 77, 0.35), rgba(15, 23, 42, 0.9))'
+                  : selectedFinish === 'titanium'
+                    ? 'linear-gradient(135deg, rgba(113, 113, 122, 0.35), rgba(15, 23, 42, 0.9))'
+                    : selectedFinish === 'alpine'
+                      ? 'linear-gradient(135deg, rgba(248, 250, 252, 0.25), rgba(15, 23, 42, 0.9))'
+                      : 'linear-gradient(135deg, rgba(56, 189, 248, 0.22), rgba(15, 23, 42, 0.92))',
+              transform: `perspective(900px) rotateX(${fallbackView.rx}deg) rotateY(${fallbackView.ry}deg) scale(${fallbackView.scale}) translateZ(${Math.round(explodeProgress * 28)}px)`,
+            }}
+          >
+            <span className="material-symbols-outlined text-[48px] text-sky-300">deployed_code</span>
+            <span className="mt-2 text-[11px] font-mono uppercase tracking-widest text-sky-300">
+              {currentPreset} • {selectedFinish}
+            </span>
+            <span className="mt-1 text-xs font-bold text-white px-3 truncate max-w-full">{productName}</span>
+          </div>
+          <p className="mt-4 text-xs text-slate-300 max-w-md">
+            WebGL hardware/software context unavailable — interactive spatial preview active ({Math.round(explodeProgress * 100)}% explode • click stage to orbit).
+          </p>
+        </div>
+      )}
 
       {/* Center Reticle Divider Line when in Dual-Eye Stereo VR Mode */}
       {displayMode === 'stereo_vr' && (

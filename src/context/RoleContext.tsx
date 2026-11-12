@@ -206,6 +206,7 @@ interface RoleContextValue {
   role: UserRole;
   profile: RoleProfile;
   authStatus: AuthStatus;
+  sessionPresentation: 'authenticated' | 'demo' | 'unauthenticated';
   authError: string | null;
   authSource: 'demo-switcher' | 'auth-provider';
   isAuthenticated: boolean;
@@ -430,6 +431,12 @@ export const RoleProvider: React.FC<{ children: React.ReactNode }> = ({ children
   const activeRole: UserRole =
     dataSource === 'live' && firebaseUser ? firebaseRole : demoRole;
 
+  const sessionPresentation: 'authenticated' | 'demo' | 'unauthenticated' = firebaseUser
+    ? 'authenticated'
+    : isDemoModeSupported && dataSource === 'demo'
+      ? 'demo'
+      : 'unauthenticated';
+
   const activeProfile = useMemo<RoleProfile>(() => {
     const base = ROLE_PROFILES[activeRole] || ROLE_PROFILES.customer;
     if (firebaseUser) {
@@ -451,8 +458,19 @@ export const RoleProvider: React.FC<{ children: React.ReactNode }> = ({ children
         avatarInitials: initials || base.avatarInitials,
       };
     }
+    if (sessionPresentation === 'unauthenticated') {
+      return {
+        ...base,
+        userName: 'Guest Visitor',
+        userTitle: 'Sign in to access portal',
+        userEmail: '',
+        avatarInitials: 'AC',
+        workspaceName: 'AC PayPilot Public Catalog',
+        accentChipLabel: 'Public Visitor',
+      };
+    }
     return base;
-  }, [activeRole, firebaseUser, userProfile]);
+  }, [activeRole, firebaseUser, userProfile, sessionPresentation]);
 
   const setRole = (newRole: UserRole, navigateToHome = false) => {
     if (dataSource === 'demo' && isDemoModeSupported) {
@@ -542,12 +560,14 @@ export const RoleProvider: React.FC<{ children: React.ReactNode }> = ({ children
     if (!firebaseUser) {
       throw new Error('Must be authenticated to complete onboarding');
     }
+    const normalizedEmail = details.email?.trim() || firebaseUser.email || undefined;
     await updateFirestoreUserProfile(firebaseUser.uid, {
       displayName: details.name,
       gender: details.gender,
       phone: details.phone,
       countryCode: details.countryCode,
       age: details.age,
+      ...(normalizedEmail ? { email: normalizedEmail } : {}),
       onboardingCompleted: true,
     });
     setIsProfileOnboardingPending(false);
@@ -672,6 +692,7 @@ export const RoleProvider: React.FC<{ children: React.ReactNode }> = ({ children
       role: activeRole,
       profile: activeProfile,
       authStatus,
+      sessionPresentation,
       authError,
       authSource: firebaseUser ? 'auth-provider' : 'demo-switcher',
       isAuthenticated: Boolean(firebaseUser) || (isDemoModeSupported && dataSource === 'demo'),
@@ -717,6 +738,7 @@ export const RoleProvider: React.FC<{ children: React.ReactNode }> = ({ children
       activeRole,
       activeProfile,
       authStatus,
+      sessionPresentation,
       authError,
       firebaseUser,
       userProfile,

@@ -13,6 +13,7 @@ import { QRModal } from '../modals/QRModal';
 
 interface ProductDetailARScreenProps {
   selectedProduct?: any;
+  notFoundSku?: string;
   onAddToCart?: (product: any) => void;
   onBuyNow?: (product: any) => void;
   onOpenQRModal?: () => void;
@@ -94,6 +95,7 @@ const DEMO_3D_PRODUCTS: Record<string, any> = {
 
 export const ProductDetailARScreen: React.FC<ProductDetailARScreenProps> = ({
   selectedProduct,
+  notFoundSku,
   onAddToCart,
   onBuyNow,
   onOpenQRModal,
@@ -101,23 +103,24 @@ export const ProductDetailARScreen: React.FC<ProductDetailARScreenProps> = ({
   showToast,
 }) => {
   const navigate = useNavigate();
-  const { dataSource, feesVerified, setFeesVerified, getActorHeaders } = useRole();
+  const { dataSource, feesVerified, setFeesVerified, authFetch } = useRole();
 
-  const product = selectedProduct || DEMO_3D_PRODUCTS['FAN-BLDC-892'];
-  const cleanSku = String(product.sku || '#FAN-BLDC-892')
+  const product = selectedProduct || (notFoundSku ? null : DEMO_3D_PRODUCTS['FAN-BLDC-892']);
+  const cleanSku = String(product?.sku || notFoundSku || '#FAN-BLDC-892')
     .replace(/^#/, '')
     .toUpperCase();
 
-  const resolvedModelUrl: string | null =
-    product.modelUrl !== undefined
-      ? product.modelUrl
-      : cleanSku.includes('FAN')
-      ? '/api/models/ceiling-fan.glb'
-      : cleanSku.includes('SPO') || cleanSku.includes('RKT')
-      ? '/api/models/badminton-racket.glb'
-      : cleanSku.includes('WRK')
-      ? '/api/models/workstation.glb'
-      : null;
+  const resolvedModelUrl: string | null = !product
+    ? null
+    : product.modelUrl !== undefined
+    ? product.modelUrl
+    : cleanSku.includes('FAN')
+    ? '/api/models/ceiling-fan.glb'
+    : cleanSku.includes('SPO') || cleanSku.includes('RKT')
+    ? '/api/models/badminton-racket.glb'
+    : cleanSku.includes('WRK')
+    ? '/api/models/workstation.glb'
+    : null;
 
   const [arPanelState, setArPanelState] = useState<ARPanelState>(() =>
     resolvedModelUrl ? 'ready' : 'model_unavailable'
@@ -157,21 +160,21 @@ export const ProductDetailARScreen: React.FC<ProductDetailARScreenProps> = ({
     {
       id: 'primary',
       label: 'Primary Studio View',
-      caption: `${product.name} (${product.sku})`,
+      caption: `${product?.name || 'Product'} (${product?.sku || cleanSku})`,
       img:
-        product.img ||
+        product?.img ||
         'https://images.unsplash.com/photo-1591799264318-7e6ef8ddb7ea?w=800&auto=format&fit=crop&q=80',
     },
     {
       id: 'detail',
       label: 'Close-Up Finish & Detail',
-      caption: `Dimensions: ${product.dimensions || 'Not available'}`,
+      caption: `Dimensions: ${product?.dimensions || 'Not available'}`,
       img: 'https://images.unsplash.com/photo-1587202372775-e229f172b9d7?w=800&auto=format&fit=crop&q=80',
     },
     {
       id: 'scale',
       label: 'Room Scale Preview',
-      caption: `Warranty: ${product.warranty || 'Not available'}`,
+      caption: `Warranty: ${product?.warranty || 'Not available'}`,
       img: 'https://images.unsplash.com/photo-1526374965328-7f61d4dc18c5?w=800&auto=format&fit=crop&q=80',
     },
   ];
@@ -186,7 +189,7 @@ export const ProductDetailARScreen: React.FC<ProductDetailARScreenProps> = ({
     } else {
       setArPanelState('ready');
     }
-  }, [product.sku, resolvedModelUrl]);
+  }, [product?.sku, cleanSku, resolvedModelUrl]);
 
   useEffect(() => {
     const el = modelViewerRef.current;
@@ -201,7 +204,7 @@ export const ProductDetailARScreen: React.FC<ProductDetailARScreenProps> = ({
     return () => {
       el.removeEventListener('error', onError);
     };
-  }, [resolvedModelUrl, arPanelState, product.sku, showToast]);
+  }, [resolvedModelUrl, arPanelState, product?.sku, cleanSku, showToast]);
 
   const [currentAzimuth, setCurrentAzimuth] = useState<number>(0);
 
@@ -328,22 +331,23 @@ export const ProductDetailARScreen: React.FC<ProductDetailARScreenProps> = ({
 
     setQaLoading(true);
     try {
-      const res = await fetch('/api/product/qa', {
+      const res = await authFetch('/api/product/qa', {
         method: 'POST',
-        headers: getActorHeaders(),
         body: JSON.stringify({
-          sku: product.sku,
+          sku: product?.sku,
           question: q,
         }),
       });
-      const data = await res.json();
-      if (data.ok) {
+      const data = await res.json().catch(() => null);
+      if (res.ok && data?.ok) {
         setQaResult({
           source: data.source,
           answerStatus: data.answerStatus,
           answer: data.answer,
           citedField: data.citedField,
         });
+      } else {
+        showToast?.(data?.error || `Could not answer question (HTTP ${res.status}).`);
       }
     } catch {
       showToast?.('Unable to check product details right now.');
@@ -351,6 +355,44 @@ export const ProductDetailARScreen: React.FC<ProductDetailARScreenProps> = ({
       setQaLoading(false);
     }
   };
+
+  if (!product) {
+    return (
+      <div
+        data-testid="product-not-found"
+        className="max-w-2xl mx-auto my-12 bg-surface-container-lowest border border-surface-container-high rounded-2xl p-8 text-center space-y-4"
+      >
+        <span className="material-symbols-outlined text-4xl text-secondary">inventory_2</span>
+        <div className="space-y-1">
+          <span className="text-[11px] font-semibold uppercase tracking-widest text-primary block">
+            Product Not Found
+          </span>
+          <h1 className="text-xl font-bold font-headline text-on-surface">
+            SKU {notFoundSku ? `"${notFoundSku}"` : ''} is not in the catalog
+          </h1>
+          <p className="text-xs text-secondary max-w-md mx-auto">
+            This product may have been removed or the link contains an unrecognized SKU code.
+          </p>
+        </div>
+        <div className="flex flex-wrap items-center justify-center gap-3 pt-2">
+          <button
+            type="button"
+            onClick={() => navigate('/customer/discover')}
+            className="px-4 py-2.5 rounded-xl bg-primary hover:bg-primary-container text-on-primary text-xs font-semibold cursor-pointer"
+          >
+            Browse Product Catalog
+          </button>
+          <button
+            type="button"
+            onClick={() => navigate('/customer/product/FAN-BLDC-892')}
+            className="px-4 py-2.5 rounded-xl bg-surface-container hover:bg-surface-container-high text-on-surface text-xs font-semibold cursor-pointer"
+          >
+            View Sample 3D Product
+          </button>
+        </div>
+      </div>
+    );
+  }
 
   const baseTaxable = Math.round(product.price / (1 + (product.gstRate || 18) / 100));
   const gstAmount = product.price - baseTaxable;

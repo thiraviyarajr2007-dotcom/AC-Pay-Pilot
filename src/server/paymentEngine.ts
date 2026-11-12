@@ -256,6 +256,18 @@ export interface PayPalProviderAdapter {
     errorMessage?: string;
     mode: 'paypal_sandbox_api' | 'sandbox_deterministic_fallback';
   }>;
+
+  refundOrder?(params: {
+    paypalCaptureId: string;
+    amountMinor: number;
+    currency: SupportedCurrency;
+    idempotencyKey: string;
+    reason?: string;
+  }): Promise<{
+    refundId: string;
+    status: 'COMPLETED' | 'PENDING';
+    mode: 'paypal_sandbox_api' | 'sandbox_deterministic_fallback';
+  }>;
 }
 
 export class PayPalCaptureInvariantError extends Error {
@@ -367,6 +379,12 @@ export function validatePayPalCaptureEvidence(
  * PAYPAL_CLIENT_ID and PAYPAL_CLIENT_SECRET are configured on the server;
  * otherwise uses a deterministic Sandbox Orders v2 structure so tests and sandbox flows work reliably.
  */
+export function getPayPalApiBaseUrl(): string {
+  return process.env.PAYPAL_ENV === 'live'
+    ? 'https://api-m.paypal.com'
+    : 'https://api-m.sandbox.paypal.com';
+}
+
 export function createPayPalSandboxAdapter(): PayPalProviderAdapter {
   function getEnvConfig() {
     const clientId = process.env.PAYPAL_CLIENT_ID || '';
@@ -391,11 +409,12 @@ export function createPayPalSandboxAdapter(): PayPalProviderAdapter {
     if (cachedSandboxToken && Date.now() < cachedSandboxToken.expiresAt) {
       return cachedSandboxToken.token;
     }
+    const baseUrl = getPayPalApiBaseUrl();
     const auth = Buffer.from(`${clientId}:${clientSecret}`).toString('base64');
     let res: Response | null = null;
     for (let attempt = 0; attempt < 2; attempt++) {
       try {
-        res = await fetch('https://api-m.sandbox.paypal.com/v1/oauth2/token', {
+        res = await fetch(`${baseUrl}/v1/oauth2/token`, {
           method: 'POST',
           headers: {
             Authorization: `Basic ${auth}`,
@@ -432,7 +451,7 @@ export function createPayPalSandboxAdapter(): PayPalProviderAdapter {
           let res: Response | null = null;
           for (let attempt = 0; attempt < 2; attempt++) {
             try {
-              res = await fetch('https://api-m.sandbox.paypal.com/v2/checkout/orders', {
+              res = await fetch(`${getPayPalApiBaseUrl()}/v2/checkout/orders`, {
                 method: 'POST',
                 headers: {
                   Authorization: `Bearer ${token}`,
@@ -574,7 +593,7 @@ export function createPayPalSandboxAdapter(): PayPalProviderAdapter {
         try {
           const token = await getSandboxAccessToken();
           const res = await fetch(
-            `https://api-m.sandbox.paypal.com/v2/checkout/orders/${encodeURIComponent(
+            `${getPayPalApiBaseUrl()}/v2/checkout/orders/${encodeURIComponent(
               params.paypalOrderId
             )}/capture`,
             {
@@ -634,6 +653,67 @@ export function createPayPalSandboxAdapter(): PayPalProviderAdapter {
       }
 
       throw new Error('PAYPAL_CREDENTIALS_REQUIRED: PayPal credentials not configured for capture.');
+    },
+
+    async refundOrder(params) {
+      const { isExplicitDemo, isTestMode, hasRealCredentials } = getEnvConfig();
+      const captureId = String(params.paypalCaptureId || '').trim();
+      const isSyntheticCapture =
+        !captureId || captureId.startsWith('CAP-TEST-') || captureId.startsWith('CAP-COMPL-');
+
+      if (hasRealCredentials && !isSyntheticCapture) {
+        const token = await getSandboxAccessToken();
+        const majorAmount = fromMinorUnits(params.amountMinor).toFixed(2);
+        const res = await fetch(
+          `${getPayPalApiBaseUrl()}/v2/payments/captures/${encodeURIComponent(captureId)}/refund`,
+          {
+            method: 'POST',
+            headers: {
+              Authorization: `Bearer ${token}`,
+              'Content-Type': 'application/json',
+              'PayPal-Request-Id': params.idempotencyKey,
+            },
+            body: JSON.stringify({
+              amount: {
+                value: majorAmount,
+                currency_code: params.currency,
+              },
+              note_to_payer: (params.reason || 'Escrow refund processed by AC PayPilot').slice(0, 255),
+            }),
+          }
+        );
+
+        const data = (await res.json().catch(() => ({}))) as any;
+        if (!res.ok) {
+          const msg =
+            data?.details?.[0]?.description ||
+            data?.message ||
+            `PayPal refund failed with HTTP ${res.status}`;
+          throw new Error(`PAYPAL_REFUND_FAILED: ${msg}`);
+        }
+        if (data.status !== 'COMPLETED' && data.status !== 'PENDING') {
+          throw new Error(`PAYPAL_REFUND_INVALID_STATUS: Provider returned '${data.status}'.`);
+        }
+        return {
+          refundId: data.id,
+          status: data.status,
+          mode: 'paypal_sandbox_api',
+        };
+      }
+
+      if (process.env.NODE_ENV === 'production' && !isExplicitDemo) {
+        throw new Error('PAYPAL_CONFIG_ERROR: Production refunds require valid PayPal credentials.');
+      }
+
+      if (isExplicitDemo || isTestMode) {
+        return {
+          refundId: `REF-SBX-${params.idempotencyKey.replace(/[^a-zA-Z0-9]/g, '').slice(-10).toUpperCase() || Date.now()}`,
+          status: 'COMPLETED',
+          mode: 'sandbox_deterministic_fallback',
+        };
+      }
+
+      throw new Error('PAYPAL_CREDENTIALS_REQUIRED: PayPal credentials not configured for refund.');
     },
   };
 }
@@ -1217,6 +1297,22 @@ export class ServerPaymentLedger {
       order.updatedAt = new Date().toISOString();
     }
     return order;
+  }
+
+  /**
+   * Executes a provider-verified PayPal refund before transitioning local/Firestore state to `refunded` (SEC-006).
+   */
+  async executeProviderRefund(params: {
+    paypalCaptureId: string;
+    amountMinor: number;
+    currency: 'INR' | 'USD';
+    reason: string;
+    idempotencyKey: string;
+  }): Promise<{ refundId: string; status: 'COMPLETED' | 'PENDING'; mode: string }> {
+    if (!this.provider.refundOrder) {
+      throw new Error('PAYPAL_REFUND_UNSUPPORTED: Payment provider adapter does not implement refundOrder.');
+    }
+    return await this.provider.refundOrder(params);
   }
 
   /**

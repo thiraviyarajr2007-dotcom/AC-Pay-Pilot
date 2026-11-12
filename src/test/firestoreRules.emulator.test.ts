@@ -370,3 +370,43 @@ test('ACP-SEC-006: Denies all client writes to nested and top-level escrowEvents
   }
 });
 
+// ============================================================================
+// SEC-009 / SEC-010 / SEC-011: Hardened Rules (_health, businesses, products)
+// ============================================================================
+
+test('SEC-009 / SEC-010 / SEC-011: Locks _health, scopes businesses reads to members, and scopes root catalog collections by tenant', async () => {
+  await testEnv.withSecurityRulesDisabled(async (ctx) => {
+    const db = ctx.firestore();
+    await setDoc(doc(db, '_health', 'ping-1'), { ok: true });
+    await setDoc(doc(db, 'products', 'prod-alpha-1'), {
+      sellerId: 'seller-alpha',
+      bizId: 'biz-alpha',
+      name: 'Alpha Fan',
+      priceMinor: 1000,
+      currency: 'INR',
+    });
+  });
+
+  await seedTenantsAndActors();
+
+  const anonDb = testEnv.unauthenticatedContext().firestore();
+  const sellerAlphaDb = testEnv.authenticatedContext('seller-alpha').firestore();
+  const sellerBetaDb = testEnv.authenticatedContext('seller-beta').firestore();
+
+  // SEC-009: _health is server Admin SDK only (denies all client reads and writes)
+  await assertFails(getDoc(doc(anonDb, '_health', 'ping-1')));
+  await assertFails(setDoc(doc(anonDb, '_health', 'ping-anon'), { ok: true }));
+  await assertFails(setDoc(doc(sellerAlphaDb, '_health', 'ping-seller'), { ok: true }));
+
+  // SEC-010: businesses/{bizId} parent document is member-only while public storefrontConfig remains readable
+  await assertFails(getDoc(doc(anonDb, 'businesses', 'biz-alpha')));
+  await assertFails(getDoc(doc(sellerBetaDb, 'businesses', 'biz-alpha')));
+  await assertSucceeds(getDoc(doc(sellerAlphaDb, 'businesses', 'biz-alpha')));
+  await assertSucceeds(getDoc(doc(anonDb, 'businesses', 'biz-alpha', 'storefrontConfig', 'current')));
+
+  // SEC-011: root products reads are scoped to owning seller or business tenant members
+  await assertFails(getDoc(doc(anonDb, 'products', 'prod-alpha-1')));
+  await assertFails(getDoc(doc(sellerBetaDb, 'products', 'prod-alpha-1')));
+  await assertSucceeds(getDoc(doc(sellerAlphaDb, 'products', 'prod-alpha-1')));
+});
+

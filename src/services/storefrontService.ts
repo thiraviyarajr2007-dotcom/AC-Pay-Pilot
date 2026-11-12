@@ -481,12 +481,20 @@ export function emitOrderPlacedNotification(notification: LiveOrderNotification)
       }
     }
 
-    fetch('/api/orders/notify', {
+    // Server notification works when authenticated (or in explicit demo mode)
+    authenticatedFetch('/api/orders/notify', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(notification),
+      body: JSON.stringify({
+        id: notification.id,
+        orderNumber: notification.orderNumber,
+        productSummary: notification.productSummary,
+        totalInr: notification.totalInr,
+        escrowStatus: notification.escrowStatus,
+        createdAt: notification.createdAt,
+      }),
     }).catch(() => {
-      // Non-fatal if offline
+      // Non-fatal if unauthenticated or offline
     });
   }
 }
@@ -606,24 +614,47 @@ export function subscribeNewOrderNotifications(
     }
   }
 
-  // 4. Server-Sent Events (/api/orders/stream)
-  let es: EventSource | null = null;
-  if (typeof window !== 'undefined' && typeof EventSource !== 'undefined') {
-    try {
-      es = new EventSource('/api/orders/stream');
-      es.onmessage = (event) => {
-        try {
-          const parsed = JSON.parse(event.data);
-          if (parsed && parsed.type !== 'connected' && (parsed.id || parsed.orderNumber)) {
-            deliverOnce(parsed as LiveOrderNotification);
+  // 4. Server-Sent Events (/api/orders/stream) using authenticated fetch streaming when signed in
+  let sseController: AbortController | null = null;
+  if (typeof window !== 'undefined' && typeof AbortController !== 'undefined') {
+    sseController = new AbortController();
+    const connectAuthenticatedSse = async () => {
+      try {
+        const res = await authenticatedFetch('/api/orders/stream', {
+          method: 'GET',
+          headers: { Accept: 'text/event-stream' },
+          signal: sseController?.signal,
+        });
+        if (!res.ok || !res.body) return;
+        const reader = res.body.getReader();
+        const decoder = new TextDecoder();
+        let buffer = '';
+        while (true) {
+          const { value, done } = await reader.read();
+          if (done) break;
+          buffer += decoder.decode(value, { stream: true });
+          const frames = buffer.split('\n\n');
+          buffer = frames.pop() || '';
+          for (const frame of frames) {
+            const dataLine = frame
+              .split('\n')
+              .find((l) => l.startsWith('data:'));
+            if (!dataLine) continue;
+            try {
+              const parsed = JSON.parse(dataLine.slice(5).trim());
+              if (parsed && parsed.type !== 'connected' && (parsed.id || parsed.orderNumber)) {
+                deliverOnce(parsed as LiveOrderNotification);
+              }
+            } catch {
+              // Ignore malformed SSE event
+            }
           }
-        } catch {
-          // Ignore malformed event
         }
-      };
-    } catch {
-      es = null;
-    }
+      } catch {
+        // Ignore aborted or unauthenticated SSE streams cleanly
+      }
+    };
+    connectAuthenticatedSse();
   }
 
   return () => {
@@ -642,9 +673,9 @@ export function subscribeNewOrderNotifications(
         // Ignore
       }
     }
-    if (es) {
+    if (sseController) {
       try {
-        es.close();
+        sseController.abort();
       } catch {
         // Ignore
       }
@@ -721,32 +752,41 @@ export async function updateStorefrontOrderEscrow(
 export async function resolveStoreBySlug(
   slug: string
 ): Promise<{ business: BusinessProfile; config: StorefrontConfig; products: StoreProduct[] } | null> {
+  const cleanSlug = (slug || DEFAULT_SLUG).toLowerCase().trim() || DEFAULT_SLUG;
+
+  // Prefer the sanitized server projection (/api/storefront/:slug) so unauthenticated browsers
+  // never read private ownerUid / paypalEmail / taxGstNumber fields from Firestore businesses/{bizId}.
   try {
-    const cleanSlug = slug.toLowerCase().trim();
-    // 1. Check domains mapping
+    const res = await fetch(`/api/storefront/${encodeURIComponent(cleanSlug)}`);
+    if (res.ok) {
+      const payload = (await res.json().catch(() => null)) as any;
+      if (payload?.ok && payload.business && payload.config) {
+        return {
+          business: payload.business as BusinessProfile,
+          config: payload.config as StorefrontConfig,
+          products: Array.isArray(payload.products) && payload.products.length > 0
+            ? (payload.products as StoreProduct[])
+            : SEED_STORE_PRODUCTS,
+        };
+      }
+    }
+  } catch {
+    // Fall back to direct subcollection reads when running offline or in static mock tests
+  }
+
+  try {
     const domainSnap = await getDoc(doc(db, 'domains', cleanSlug));
     let bizId = DEFAULT_BIZ_ID;
     if (domainSnap.exists()) {
       bizId = domainSnap.data().bizId;
-    } else {
-      // Direct query on businesses collection
-      const q = query(collection(db, 'businesses'), where('slug', '==', cleanSlug));
-      const res = await getDocs(q);
-      if (!res.empty) {
-        bizId = res.docs[0].id;
-      }
     }
 
-    const [bizSnap, configSnap, prodsSnap] = await Promise.all([
-      getDoc(doc(db, 'businesses', bizId)),
+    const [configSnap, prodsSnap] = await Promise.all([
       getDoc(doc(db, 'businesses', bizId, 'storefrontConfig', 'current')),
       getDocs(collection(db, 'businesses', bizId, 'products')),
     ]);
 
-    const business = bizSnap.exists()
-      ? (bizSnap.data() as BusinessProfile)
-      : INITIAL_DEFAULT_BUSINESS;
-
+    const business = INITIAL_DEFAULT_BUSINESS;
     const config = configSnap.exists()
       ? (configSnap.data() as StorefrontConfig)
       : getDefaultStorefrontConfig(bizId, business.name, business.category);

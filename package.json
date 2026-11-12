@@ -14,8 +14,10 @@
     "preview": "node node_modules/vite/bin/vite.js preview",
     "clean": "node -e \"const fs=require('fs'); fs.rmSync('dist',{recursive:true,force:true});\"",
     "lint": "node node_modules/typescript/bin/tsc --noEmit",
-    "test": "node node_modules/tsx/dist/cli.mjs --test src/utils/finance.test.ts src/test/securityAndSingleSource.test.ts src/test/financialIntegrityAndConcurrency.test.ts src/test/productionReadiness.test.ts",
-    "test:rules": "firebase emulators:exec --only firestore \"node node_modules/tsx/dist/cli.mjs --test src/test/firestoreRules.emulator.test.ts\""
+    "test": "node node_modules/tsx/dist/cli.mjs --test src/utils/finance.test.ts src/test/securityAndSingleSource.test.ts src/test/financialIntegrityAndConcurrency.test.ts src/test/productionReadiness.test.ts src/test/auditHardening.test.ts",
+    "test:coverage": "node --experimental-test-coverage --test-concurrency=1 --test-coverage-lines=65 --test-coverage-branches=50 --test-coverage-functions=55 --test-coverage-exclude=\"src/test/**\" --test-coverage-exclude=\"**/*.test.*\" --import tsx --test src/utils/finance.test.ts src/test/securityAndSingleSource.test.ts src/test/financialIntegrityAndConcurrency.test.ts src/test/productionReadiness.test.ts src/test/auditHardening.test.ts",
+    "test:rules": "firebase emulators:exec --only firestore \"node node_modules/tsx/dist/cli.mjs --test src/test/firestoreRules.emulator.test.ts\"",
+    "check:bundle": "node scripts/check-bundle-budget.mjs"
   },
   "dependencies": {
     "@google/genai": "^2.4.0",

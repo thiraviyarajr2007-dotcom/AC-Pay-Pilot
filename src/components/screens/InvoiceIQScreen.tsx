@@ -132,8 +132,16 @@ export const InvoiceIQScreen: React.FC<InvoiceIQScreenProps> = ({
   onSelectInvoiceId,
   globalSearchQuery = '',
 }) => {
-  const { serverConfirmed, setServerConfirmed, feesVerified, setFeesVerified, getActorHeaders } =
-    useRole();
+  const {
+    role,
+    serverConfirmed,
+    setServerConfirmed,
+    feesVerified,
+    setFeesVerified,
+    authFetch,
+  } = useRole();
+  const canAnalyzeInvoice =
+    role === 'seller' || role === 'finance' || role === 'business_head';
 
   const [invoices, setInvoices] = useState<InvoiceRecord[]>(INITIAL_INVOICES);
   const [activeId, setActiveId] = useState<string>(selectedInvoiceId || INITIAL_INVOICES[0].id);
@@ -172,9 +180,8 @@ export const InvoiceIQScreen: React.FC<InvoiceIQScreenProps> = ({
     setAnalyzing(true);
     setDraftApproved(false);
     try {
-      const res = await fetch('/api/invoice/analyze', {
+      const res = await authFetch('/api/invoice/analyze', {
         method: 'POST',
-        headers: getActorHeaders(),
         body: JSON.stringify({
           invoiceId: inv.id,
           supplierGstin: '29AABCT1332L1Z5',
@@ -189,12 +196,16 @@ export const InvoiceIQScreen: React.FC<InvoiceIQScreenProps> = ({
           lineItemSummary: `${inv.lineItem} (HSN ${inv.hsnCode})`,
         }),
       });
-      const data = await res.json();
-      if (data.ok) {
+      const data = await res.json().catch(() => null);
+      if (res.ok && data?.ok) {
         setAnalysisResult(data);
         setEditableDraft(data.messageDraft);
+      } else {
+        setAnalysisResult(null);
+        showToast?.(data?.error || `Invoice analysis unavailable (HTTP ${res.status}).`);
       }
     } catch {
+      setAnalysisResult(null);
       showToast?.('Failed to run server invoice analysis.');
     } finally {
       setAnalyzing(false);
@@ -202,10 +213,12 @@ export const InvoiceIQScreen: React.FC<InvoiceIQScreenProps> = ({
   };
 
   useEffect(() => {
-    if (activeInvoice) {
+    if (canAnalyzeInvoice && activeInvoice) {
       void runServerInvoiceAnalysis(activeInvoice);
+    } else {
+      setAnalysisResult(null);
     }
-  }, [activeInvoice?.id]);
+  }, [canAnalyzeInvoice, activeInvoice?.id]);
 
   const handleCreateInvoice = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -366,43 +379,45 @@ export const InvoiceIQScreen: React.FC<InvoiceIQScreenProps> = ({
           </p>
         </div>
 
-        <div className="flex flex-wrap items-center gap-2">
-          <button
-            type="button"
-            onClick={() => setShowCreateModal(true)}
-            className="px-3.5 py-2 rounded-lg bg-slate-900 hover:bg-slate-800 text-white text-xs font-bold flex items-center gap-1.5 cursor-pointer shadow-sm"
-          >
-            <span className="material-symbols-outlined text-[16px]">post_add</span>
-            <span>Full Invoice Builder</span>
-          </button>
-          <form onSubmit={handleCreateInvoice} className="flex flex-wrap items-center gap-2">
-            <input
-              type="text"
-              value={newBuyerName}
-              onChange={(e) => setNewBuyerName(e.target.value)}
-              placeholder="Buyer company name..."
-              className="px-3 py-2 rounded-lg border border-slate-300 text-xs focus:outline-none focus:border-blue-600"
-            />
-            <input
-              type="number"
-              value={newGrossAmount}
-              onChange={(e) => setNewGrossAmount(e.target.value)}
-              placeholder="Amount INR"
-              className="w-28 px-3 py-2 rounded-lg border border-slate-300 text-xs font-mono focus:outline-none focus:border-blue-600"
-            />
+        {canAnalyzeInvoice && (
+          <div className="flex flex-wrap items-center gap-2">
             <button
-              type="submit"
-              className="px-4 py-2 rounded-lg bg-blue-700 hover:bg-blue-800 text-white text-xs font-bold flex items-center gap-1.5 cursor-pointer"
+              type="button"
+              onClick={() => setShowCreateModal(true)}
+              className="px-3.5 py-2 rounded-lg bg-slate-900 hover:bg-slate-800 text-white text-xs font-bold flex items-center gap-1.5 cursor-pointer shadow-sm"
             >
-              <i className="fa-solid fa-plus"></i>
-              Quick Create
+              <span className="material-symbols-outlined text-[16px]">post_add</span>
+              <span>Full Invoice Builder</span>
             </button>
-          </form>
-        </div>
+            <form onSubmit={handleCreateInvoice} className="flex flex-wrap items-center gap-2">
+              <input
+                type="text"
+                value={newBuyerName}
+                onChange={(e) => setNewBuyerName(e.target.value)}
+                placeholder="Buyer company name..."
+                className="px-3 py-2 rounded-lg border border-slate-300 text-xs focus:outline-none focus:border-blue-600"
+              />
+              <input
+                type="number"
+                value={newGrossAmount}
+                onChange={(e) => setNewGrossAmount(e.target.value)}
+                placeholder="Amount INR"
+                className="w-28 px-3 py-2 rounded-lg border border-slate-300 text-xs font-mono focus:outline-none focus:border-blue-600"
+              />
+              <button
+                type="submit"
+                className="px-4 py-2 rounded-lg bg-blue-700 hover:bg-blue-800 text-white text-xs font-bold flex items-center gap-1.5 cursor-pointer"
+              >
+                <i className="fa-solid fa-plus"></i>
+                Quick Create
+              </button>
+            </form>
+          </div>
+        )}
       </div>
 
       {/* Deterministic Code Checks + AI Risk & Message Draft Panel (POST /api/invoice/analyze) */}
-      {activeInvoice && analysisResult && (
+      {canAnalyzeInvoice && activeInvoice && analysisResult && (
         <div
           data-testid="invoice-analyze-panel"
           className="bg-white rounded-xl border border-slate-200/90 p-5 shadow-xs space-y-4"

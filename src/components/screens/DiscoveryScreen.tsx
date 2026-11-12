@@ -114,10 +114,21 @@ export const DiscoveryScreen: React.FC<DiscoveryScreenProps> = ({
   const [localQuery, setLocalQuery] = useState<string>(
     'Silent BLDC ceiling fan under ₹10,000 with 3D room view'
   );
+  const [appliedSearch, setAppliedSearch] = useState<string>('');
   const [gridState, setGridState] = useState<CollectionViewState>('ready');
   const [approvedSearchFilter, setApprovedSearchFilter] = useState<string | null>(null);
 
-  const effectiveQuery = globalSearchQuery.trim() || '';
+  const effectiveQuery = globalSearchQuery.trim() || appliedSearch.trim() || '';
+
+  const applyNaturalSearch = (queryText?: string) => {
+    const next = (queryText ?? localQuery).trim();
+    setAppliedSearch(next);
+    if (next) {
+      showToast?.(`Updated product matches for: "${next}"`);
+    } else {
+      showToast?.('Cleared search filter — showing all matching catalog items.');
+    }
+  };
 
   const filteredProducts = DISCOVERY_CATALOG.filter((p) => {
     if (categoryFilter !== 'ALL' && p.category !== categoryFilter) return false;
@@ -125,11 +136,53 @@ export const DiscoveryScreen: React.FC<DiscoveryScreenProps> = ({
     if (p.price > maxPriceFilter) return false;
     if (effectiveQuery) {
       const q = effectiveQuery.toLowerCase();
-      return (
-        p.name.toLowerCase().includes(q) ||
-        p.sku.toLowerCase().includes(q) ||
-        p.category.toLowerCase().includes(q)
-      );
+      const underMatch = q.match(/(?:under|below|max|<=?)\s*(?:₹|rs\.?|inr)?\s*([\d,]+)/i);
+      if (underMatch) {
+        const cap = Number(underMatch[1].replace(/,/g, ''));
+        if (Number.isFinite(cap) && cap > 0 && p.price > cap) return false;
+      }
+
+      const searchable = [
+        p.name,
+        p.sku,
+        p.category,
+        p.badge,
+        p.aiReason,
+        ...(Array.isArray(p.specs) ? p.specs : []),
+      ]
+        .join(' ')
+        .toLowerCase();
+
+      if (searchable.includes(q)) return true;
+
+      const stopWords = new Set([
+        'the',
+        'and',
+        'for',
+        'with',
+        'under',
+        'below',
+        'above',
+        'over',
+        'max',
+        'min',
+        'view',
+        'room',
+        'find',
+        'show',
+        'that',
+        'this',
+        'from',
+        'into',
+        'inr',
+      ]);
+      const tokens = q
+        .replace(/[₹,()]/g, ' ')
+        .split(/\s+/)
+        .filter((t) => t.length >= 2 && !stopWords.has(t) && !/^\d+$/.test(t));
+
+      if (tokens.length === 0) return true;
+      return tokens.some((tok) => searchable.includes(tok));
     }
     return true;
   });
@@ -150,12 +203,22 @@ export const DiscoveryScreen: React.FC<DiscoveryScreenProps> = ({
         </div>
 
         {/* Search Input Capsule */}
-        <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-2.5 bg-surface-container-low p-2 rounded-xl border border-surface-container-high">
+        <form
+          onSubmit={(e) => {
+            e.preventDefault();
+            applyNaturalSearch();
+          }}
+          className="flex flex-col sm:flex-row items-stretch sm:items-center gap-2.5 bg-surface-container-low p-2 rounded-xl border border-surface-container-high"
+        >
           <div className="flex items-center gap-2.5 flex-1 px-2">
             <span className="material-symbols-outlined text-primary text-[20px]">
               auto_awesome
             </span>
+            <label htmlFor="discovery-nl-search" className="sr-only">
+              Search products by name, room need, or budget
+            </label>
             <input
+              id="discovery-nl-search"
               type="text"
               value={localQuery}
               onChange={(e) => setLocalQuery(e.target.value)}
@@ -163,16 +226,27 @@ export const DiscoveryScreen: React.FC<DiscoveryScreenProps> = ({
               className="w-full bg-transparent text-xs sm:text-sm text-on-surface focus:outline-none"
             />
           </div>
-          <button
-            type="button"
-            onClick={() =>
-              showToast?.(`Updated product matches for: "${localQuery}"`)
-            }
-            className="px-5 py-2.5 rounded-xl bg-primary hover:bg-primary-container text-on-primary text-xs font-semibold shrink-0 cursor-pointer"
-          >
-            Find Matches
-          </button>
-        </div>
+          <div className="flex items-center gap-2 shrink-0">
+            {appliedSearch && (
+              <button
+                type="button"
+                onClick={() => {
+                  setLocalQuery('');
+                  applyNaturalSearch('');
+                }}
+                className="px-3 py-2.5 rounded-xl bg-surface-container hover:bg-surface-container-high text-on-surface text-xs font-semibold cursor-pointer"
+              >
+                Clear
+              </button>
+            )}
+            <button
+              type="submit"
+              className="px-5 py-2.5 rounded-xl bg-primary hover:bg-primary-container text-on-primary text-xs font-semibold shrink-0 cursor-pointer"
+            >
+              Find Matches
+            </button>
+          </div>
+        </form>
 
         {/* Parsed Intent Chips */}
         <div className="flex flex-wrap items-center gap-2 text-xs">
@@ -251,12 +325,18 @@ export const DiscoveryScreen: React.FC<DiscoveryScreenProps> = ({
 
             <div className="space-y-2 pt-3 border-t border-surface-container-high">
               <div className="flex items-center justify-between text-xs">
-                <span className="font-semibold text-on-surface">Max Price</span>
+                <label
+                  htmlFor="discovery-max-price"
+                  className="font-semibold text-on-surface"
+                >
+                  Max Price
+                </label>
                 <span className="font-bold font-tabular-nums text-primary">
                   {formatINR(maxPriceFilter)}
                 </span>
               </div>
               <input
+                id="discovery-max-price"
                 type="range"
                 min={10000}
                 max={350000}
@@ -306,9 +386,11 @@ export const DiscoveryScreen: React.FC<DiscoveryScreenProps> = ({
                 >
                   {/* Hero Product Image + Single Badge (Style Rule #4) */}
                   <div>
-                    <div
+                    <button
+                      type="button"
                       onClick={() => onSelectProduct(product)}
-                      className="relative h-56 bg-surface-container-low overflow-hidden cursor-pointer group"
+                      aria-label={`Inspect ${product.name}`}
+                      className="relative w-full h-56 bg-surface-container-low overflow-hidden cursor-pointer group block text-left"
                     >
                       <img
                         src={product.img}
@@ -333,7 +415,7 @@ export const DiscoveryScreen: React.FC<DiscoveryScreenProps> = ({
                       >
                         {product.badge}
                       </span>
-                    </div>
+                    </button>
 
 
                     {/* Product Name & Price */}
@@ -341,12 +423,15 @@ export const DiscoveryScreen: React.FC<DiscoveryScreenProps> = ({
                       <div className="text-[11px] font-semibold uppercase tracking-wider text-secondary">
                         {product.category}
                       </div>
-                      <h3
+                      <button
+                        type="button"
                         onClick={() => onSelectProduct(product)}
-                        className="text-base font-bold font-headline text-on-surface hover:text-primary cursor-pointer leading-snug"
+                        className="text-left block w-full cursor-pointer"
                       >
-                        {product.name}
-                      </h3>
+                        <h3 className="text-base font-bold font-headline text-on-surface hover:text-primary leading-snug">
+                          {product.name}
+                        </h3>
+                      </button>
                       <div className="flex items-baseline gap-2.5 pt-1">
                         <span className="text-2xl font-bold font-headline text-on-surface font-tabular-nums">
                           {formatINR(product.price)}

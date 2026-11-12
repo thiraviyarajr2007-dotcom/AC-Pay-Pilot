@@ -96,7 +96,9 @@ service cloud.firestore {
     // Multi-Tenant: Businesses, Storefront, Sub-collections & Domains
     // ===============================================================
     match /businesses/{bizId} {
-      allow read: if true; // Public for storefront metadata & branding
+      // Tenant profile contains ownerUid, paypalEmail, roleMembers & tax IDs; restrict reads to members.
+      // Public storefronts load sanitized metadata via /api/storefront/:slug.
+      allow read: if isBusinessMember(bizId);
       allow create: if isAuthenticated() && request.resource.data.ownerUid == request.auth.uid;
       allow update: if isBusinessOwner(bizId) &&
         request.resource.data.ownerUid == resource.data.ownerUid;
@@ -143,7 +145,8 @@ service cloud.firestore {
     }
 
     match /_health/{docId} {
-      allow read, write: if true; // Ephemeral health check round-trip ping collection
+      // Ephemeral health checks run exclusively via server Admin SDK (SEC-009).
+      allow read, write: if false;
     }
 
     match /domains/{domain} {
@@ -181,10 +184,12 @@ service cloud.firestore {
     }
 
     // ===============================================================
-    // 2. products (sellers edit only their own products)
+    // 2. products (sellers edit only their own products; tenant members read only their business catalog)
     // ===============================================================
     match /products/{productId} {
-      allow read: if isAuthenticated();
+      allow read: if isAuthenticated() &&
+        ((resource.data.sellerId == request.auth.uid) ||
+         ('bizId' in resource.data && isBusinessMember(resource.data.bizId)));
       allow create: if isSeller() &&
         request.resource.data.sellerId == request.auth.uid &&
         request.resource.data.priceMinor is int &&
@@ -199,10 +204,12 @@ service cloud.firestore {
     }
 
     // ===============================================================
-    // 3. productAssets (sellers edit only their own product assets)
+    // 3. productAssets (sellers edit only their own product assets; tenant-scoped reads)
     // ===============================================================
     match /productAssets/{assetId} {
-      allow read: if isAuthenticated();
+      allow read: if isAuthenticated() &&
+        ((resource.data.sellerId == request.auth.uid) ||
+         ('bizId' in resource.data && isBusinessMember(resource.data.bizId)));
       allow create: if isSeller() &&
         request.resource.data.sellerId == request.auth.uid &&
         request.resource.data.productId is string;
@@ -213,10 +220,12 @@ service cloud.firestore {
     }
 
     // ===============================================================
-    // 4. inventory (sellers edit only their own inventory)
+    // 4. inventory (sellers edit only their own inventory; tenant-scoped reads)
     // ===============================================================
     match /inventory/{inventoryId} {
-      allow read: if isAuthenticated();
+      allow read: if isAuthenticated() &&
+        ((resource.data.sellerId == request.auth.uid) ||
+         ('bizId' in resource.data && isBusinessMember(resource.data.bizId)));
       allow create: if isSeller() &&
         request.resource.data.sellerId == request.auth.uid &&
         request.resource.data.availableQty is int &&

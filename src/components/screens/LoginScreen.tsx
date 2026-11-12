@@ -81,12 +81,18 @@ export const LoginScreen: React.FC = () => {
     );
   }
 
+  const redirectParam = searchParams.get('redirect');
+  const safeRedirectTarget =
+    redirectParam && redirectParam.startsWith('/') && !redirectParam.startsWith('//')
+      ? redirectParam
+      : '/customer/discover';
+
   const handleGoogleSignIn = async () => {
     setIsLoading(true);
     setErrorMsg(null);
     try {
       await signInWithGoogle();
-      navigate('/customer/discover');
+      navigate(safeRedirectTarget);
     } catch (err: any) {
       setErrorMsg(err?.message || 'Google sign in failed. Please try again.');
     } finally {
@@ -99,7 +105,7 @@ export const LoginScreen: React.FC = () => {
     setErrorMsg(null);
     try {
       await signInWithFacebook();
-      navigate('/customer/discover');
+      navigate(safeRedirectTarget);
     } catch (err: any) {
       setErrorMsg(err?.message || 'Facebook sign in failed. Please try again.');
     } finally {
@@ -148,7 +154,7 @@ export const LoginScreen: React.FC = () => {
         setSuccessMsg('Signed in successfully! Redirecting...');
       }
       setTimeout(() => {
-        navigate('/customer/discover');
+        navigate(safeRedirectTarget);
       }, 500);
     } catch (err: any) {
       setErrorMsg(err?.message || 'Authentication error. Please check your credentials.');
@@ -360,11 +366,13 @@ export const LoginScreen: React.FC = () => {
             {authMode === 'signup' && (
               <>
                 <div>
-                  <label className="block font-bold mb-1 text-on-surface">
+                  <label htmlFor="login-full-name" className="block font-bold mb-1 text-on-surface">
                     Full Legal / Business Name <span className="text-rose-500">*</span>
                   </label>
                   <input
+                    id="login-full-name"
                     type="text"
+                    autoComplete="name"
                     value={fullName}
                     onChange={(e) => setFullName(e.target.value)}
                     placeholder="e.g. Priya Patel"
@@ -375,10 +383,11 @@ export const LoginScreen: React.FC = () => {
 
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                   <div>
-                    <label className="block font-bold mb-1 text-on-surface">
+                    <label htmlFor="login-gender" className="block font-bold mb-1 text-on-surface">
                       Gender <span className="text-rose-500">*</span>
                     </label>
                     <select
+                      id="login-gender"
                       value={gender}
                       onChange={(e) => setGender(e.target.value as any)}
                       className="w-full px-3 py-2 rounded-xl bg-surface-container-low border border-surface-container-high text-on-surface focus:outline-none focus:ring-2 focus:ring-primary/20 cursor-pointer"
@@ -391,10 +400,11 @@ export const LoginScreen: React.FC = () => {
                   </div>
 
                   <div>
-                    <label className="block font-bold mb-1 text-on-surface">
+                    <label htmlFor="login-age" className="block font-bold mb-1 text-on-surface">
                       Age <span className="text-rose-500">*</span>
                     </label>
                     <input
+                      id="login-age"
                       type="number"
                       min="16"
                       max="110"
@@ -407,11 +417,14 @@ export const LoginScreen: React.FC = () => {
                 </div>
 
                 <div>
-                  <label className="block font-bold mb-1 text-on-surface">
+                  <label htmlFor="login-phone" className="block font-bold mb-1 text-on-surface">
                     Mobile Number (With Country Code) <span className="text-rose-500">*</span>
                   </label>
                   <div className="flex gap-2">
                     <select
+                      id="login-country-code"
+                      aria-label="Country code"
+                      autoComplete="tel-country-code"
                       value={countryCode}
                       onChange={(e) => setCountryCode(e.target.value)}
                       className="w-36 px-2.5 py-2 rounded-xl bg-surface-container-low border border-surface-container-high font-mono text-xs focus:outline-none focus:ring-2 focus:ring-primary/20 cursor-pointer text-on-surface"
@@ -423,7 +436,9 @@ export const LoginScreen: React.FC = () => {
                       ))}
                     </select>
                     <input
+                      id="login-phone"
                       type="tel"
+                      autoComplete="tel-national"
                       value={phone}
                       onChange={(e) => setPhone(e.target.value)}
                       placeholder="98765 43210"
@@ -436,7 +451,7 @@ export const LoginScreen: React.FC = () => {
             )}
 
             <div>
-              <label className="block font-bold mb-1 text-on-surface">
+              <label htmlFor="login-email" className="block font-bold mb-1 text-on-surface">
                 Email Address{' '}
                 {selectedRole === 'seller' ? (
                   <span className="text-rose-500 font-bold">* (Mandatory for Seller)</span>
@@ -445,7 +460,9 @@ export const LoginScreen: React.FC = () => {
                 )}
               </label>
               <input
+                id="login-email"
                 type="email"
+                autoComplete="email"
                 value={email}
                 onChange={(e) => setEmail(e.target.value)}
                 placeholder="user@domain.com"
@@ -455,9 +472,11 @@ export const LoginScreen: React.FC = () => {
             </div>
 
             <div>
-              <label className="block font-bold mb-1 text-on-surface">Password</label>
+              <label htmlFor="login-password" className="block font-bold mb-1 text-on-surface">Password</label>
               <input
+                id="login-password"
                 type="password"
+                autoComplete={authMode === 'signup' ? 'new-password' : 'current-password'}
                 value={password}
                 onChange={(e) => setPassword(e.target.value)}
                 placeholder="••••••••"
